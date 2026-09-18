@@ -30,14 +30,22 @@ function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 function Logo() { return <Link className="logo" to="/"><span>N</span><strong>NŪR <b>MEET</b></strong></Link>; }
+const STAFF_ROLES = ["ADMIN","ORGANIZER","MODERATOR","RECEPTION"];
 function Header() {
   const { user, logout } = useAuth();
-  return <header className="site-header"><Logo/><nav><NavLink to="/">Accueil</NavLink><NavLink to="/events">Événements</NavLink>{user && <NavLink to="/dashboard">Mon espace</NavLink>}{user && ["ADMIN","ORGANIZER","MODERATOR","RECEPTION"].includes(user.role) && <NavLink to="/admin">Administration</NavLink>}</nav><div className="header-actions">{user ? <><span className="member-name">{user.displayName}</span><button className="link-button" onClick={logout}>Déconnexion</button></> : <Link className="button small" to="/login">Se connecter</Link>}</div></header>;
+  const isStaff = !!user && STAFF_ROLES.includes(user.role);
+  return <header className="site-header"><Logo/><nav>{isStaff?<><NavLink to="/admin">Administration</NavLink><NavLink to="/">Voir le site public</NavLink></>:<><NavLink to="/">Accueil</NavLink><NavLink to="/events">Événements</NavLink>{user && <NavLink to="/dashboard">Mon espace</NavLink>}</>}</nav><div className="header-actions">{user ? <><span className="member-name">{user.displayName}</span><button className="link-button" onClick={logout}>Déconnexion</button></> : <Link className="button small" to="/login">Se connecter</Link>}</div></header>;
 }
 function Layout({ children }: {children: ReactNode}) { return <><Header/><main>{children}</main><footer><Logo/><p>Paris et Île-de-France · Expérience privée · Données protégées</p></footer></>; }
 function Loading() { return <div className="state-page"><div className="spinner"/><h2>Chargement…</h2></div>; }
 function Notice({ kind="info", children }: {kind?: "info"|"error"|"success", children: ReactNode}) { return <div className={`notice ${kind}`}>{children}</div>; }
-function Protected({ children, roles }: {children: ReactNode; roles?: string[]}) { const {user,loading}=useAuth(); if(loading)return <Loading/>; if(!user)return <Navigate to="/login" replace/>; if(roles&&!roles.includes(user.role))return <Navigate to="/dashboard" replace/>; return <>{children}</>; }
+function Protected({ children, roles }: {children: ReactNode; roles?: string[]}) {
+  const {user,loading}=useAuth();
+  if(loading)return <Loading/>;
+  if(!user)return <Navigate to="/login" replace/>;
+  if(roles&&!roles.includes(user.role))return <Navigate to={STAFF_ROLES.includes(user.role)?"/admin":"/dashboard"} replace/>;
+  return <>{children}</>;
+}
 
 function EventCard({ event }: {event: PublicEvent}) {
   const full=event.confirmedCount>=event.capacity;
@@ -45,7 +53,7 @@ function EventCard({ event }: {event: PublicEvent}) {
 }
 function Home() {
   const [events,setEvents]=useState<PublicEvent[]>([]); useEffect(()=>{api<PublicEvent[]>("/events").then(setEvents).catch(()=>{})},[]);
-  return <Layout><section className="hero"><div><span className="eyebrow">PARIS · ÎLE-DE-FRANCE</span><h1>Des rencontres<br/><em>qui comptent.</em></h1><p>Des événements élégants et confidentiels, pensés pour créer de vraies connexions dans un cadre respectueux.</p><div className="hero-actions"><Link className="button" to="/events">Voir les événements</Link><a className="button secondary" href="#concept">Découvrir le concept</a></div><div className="trust"><span>✓ Profils sélectionnés</span><span>✓ Lieux premium</span><span>✓ Cadre confidentiel</span></div></div><div className="hero-art"><div className="arch"><span>ن</span></div><div className="next-card">{events[0]?<img className="next-thumb" src={imgUrl(events[0].imageUrl)} alt=""/>:<div className="avatar">N</div>}<div><small>PROCHAINE SOIRÉE</small><strong>{events[0]?.title??"Dîner & Connexions"}</strong><span>{events[0]?dateTime(events[0].startsAt):"Samedi · Paris"}</span></div></div></div></section><section className="metrics"><div><strong>420+</strong><span>Membres validés</span></div><div><strong>36</strong><span>Événements organisés</span></div><div><strong>4,8/5</strong><span>Satisfaction</span></div></section><section id="concept" className="section"><div className="section-title"><span className="eyebrow">LE CONCEPT</span><h2>Du réel au numérique, avec votre consentement.</h2></div><div className="feature-grid"><div><b>01</b><h3>Candidature</h3><p>Chaque nouveau membre complète son profil et réserve un court appel.</p></div><div><b>02</b><h3>Rencontre</h3><p>Les événements réunissent 20 à 40 personnes dans un cadre privé.</p></div><div><b>03</b><h3>Contact choisi</h3><p>Un code personnel permet d’envoyer une demande. Le chat s’ouvre après acceptation.</p></div></div></section>{events.length>0&&<section className="section"><div className="section-title row"><div><span className="eyebrow">À VENIR</span><h2>Les prochaines rencontres</h2></div><Link to="/events">Tout afficher →</Link></div><div className="event-grid">{events.slice(0,3).map(e=><EventCard key={e.id} event={e}/>)}</div></section>}</Layout>;
+  return <Layout><section className="hero"><div><span className="eyebrow">PARIS · ÎLE-DE-FRANCE</span><h1>Des rencontres<br/><em>qui comptent.</em></h1><p>Des événements élégants et confidentiels, pensés pour créer de vraies connexions dans un cadre respectueux.</p><div className="hero-actions"><Link className="button" to="/events">Voir les événements</Link><a className="button secondary" href="#concept">Découvrir le concept</a></div><div className="trust"><span>✓ Profils sélectionnés</span><span>✓ Lieux premium</span><span>✓ Cadre confidentiel</span></div></div><div className="hero-art"><div className="arch"><span>ن</span></div><div className="next-card">{events[0]?<img className="next-thumb" src={imgUrl(events[0].imageUrl)} alt=""/>:<div className="avatar">N</div>}<div><small>PROCHAINE SOIRÉE</small><strong>{events[0]?.title??"Dîner & Connexions"}</strong><span>{events[0]?dateTime(events[0].startsAt):"Samedi · Paris"}</span></div></div></div></section><section id="concept" className="section"><div className="section-title"><span className="eyebrow">LE CONCEPT</span><h2>Du réel au numérique, avec votre consentement.</h2></div><div className="feature-grid"><div><b>01</b><h3>Candidature</h3><p>Chaque nouveau membre complète son profil et réserve un court appel.</p></div><div><b>02</b><h3>Rencontre</h3><p>Les événements réunissent 20 à 40 personnes dans un cadre privé.</p></div><div><b>03</b><h3>Contact choisi</h3><p>Un code personnel permet d’envoyer une demande. Le chat s’ouvre après acceptation.</p></div></div></section>{events.length>0&&<section className="section"><div className="section-title row"><div><span className="eyebrow">À VENIR</span><h2>Les prochaines rencontres</h2></div><Link to="/events">Tout afficher →</Link></div><div className="event-grid">{events.slice(0,3).map(e=><EventCard key={e.id} event={e}/>)}</div></section>}</Layout>;
 }
 
 function Events() {
@@ -248,7 +256,7 @@ function EventDetail() {
 
 function Login() {
   const [phone,setPhone]=useState(""),[code,setCode]=useState(""),[step,setStep]=useState<1|2>(1),[error,setError]=useState(""),[devCode,setDevCode]=useState<string|null>(null); const {refresh}=useAuth(); const navigate=useNavigate();
-  const submit=async(e:FormEvent)=>{e.preventDefault();setError("");try{if(step===1){const result=await api<{delivery:"mock"|"sms";devCode?:string}>("/auth/request-otp",{method:"POST",body:JSON.stringify({phone})});setDevCode(result.devCode??null);setStep(2)}else{const result=await api<{token:string}>("/auth/verify-otp",{method:"POST",body:JSON.stringify({phone,code})});setToken(result.token);await refresh();navigate("/dashboard")}}catch(err){setError((err as Error).message)}};
+  const submit=async(e:FormEvent)=>{e.preventDefault();setError("");try{if(step===1){const result=await api<{delivery:"mock"|"sms";devCode?:string}>("/auth/request-otp",{method:"POST",body:JSON.stringify({phone})});setDevCode(result.devCode??null);setStep(2)}else{const result=await api<{token:string;user:{role:string}}>("/auth/verify-otp",{method:"POST",body:JSON.stringify({phone,code})});setToken(result.token);await refresh();navigate(STAFF_ROLES.includes(result.user.role)?"/admin":"/dashboard")}}catch(err){setError((err as Error).message)}};
   return <Layout><section className="auth-page"><div className="auth-visual"><blockquote>« Une belle rencontre commence par un cadre de confiance. »</blockquote></div><form className="auth-form" onSubmit={submit}><span className="eyebrow">CONNEXION SÉCURISÉE</span><h1>{step===1?"Votre numéro ouvre la porte.":"Entrez le code reçu."}</h1><p>{step===1?"Aucun mot de passe à mémoriser.":`Code envoyé au ${phone}`}</p>{error&&<Notice kind="error">{error}</Notice>}{step===1?<label>Numéro de téléphone<input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+33612345678" autoComplete="tel" inputMode="tel" required/></label>:<label>Code à six chiffres<input className="otp-input" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="••••••" autoComplete="one-time-code" inputMode="numeric" required/></label>}<button className="button full">{step===1?"Recevoir mon code":"Vérifier le code"}</button>{devCode&&<div className="demo-box"><b>Mode local — aucun SMS facturé</b><span>Code de développement : {devCode}</span></div>}</form></section></Layout>;
 }
 
@@ -261,11 +269,11 @@ function ProfileEditor({onSaved}:{onSaved:()=>void}) {
 function RestaurantApplication() {
   const [restaurant,setRestaurant]=useState<any>(null);
   const [loading,setLoading]=useState(true);
-  const [form,setForm]=useState({name:"",description:"",district:"",address:"",phone:""});
+  const [form,setForm]=useState({name:"",managerName:"",siret:"",description:"",district:"",address:"",phone:""});
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [submitting,setSubmitting]=useState(false);
 
-  const load=()=>api<any>("/restaurants/me").then(r=>{setRestaurant(r);setForm({name:r.name??"",description:r.description??"",district:r.district??"",address:r.address??"",phone:r.phone??""})}).catch(()=>setRestaurant(null)).finally(()=>setLoading(false));
+  const load=()=>api<any>("/restaurants/me").then(r=>{setRestaurant(r);setForm({name:r.name??"",managerName:r.managerName??"",siret:r.siret??"",description:r.description??"",district:r.district??"",address:r.address??"",phone:r.phone??""})}).catch(()=>setRestaurant(null)).finally(()=>setLoading(false));
   useEffect(()=>{load()},[]);
 
   const submit=async(e:FormEvent)=>{
@@ -284,10 +292,13 @@ function RestaurantApplication() {
     {restaurant?.status==="REJECTED"&&<Notice kind="error">Votre précédente demande n’a pas été retenue{restaurant.rejectionReason?` : ${restaurant.rejectionReason}`:"."} Vous pouvez soumettre une nouvelle demande.</Notice>}
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <label>Nom de l’établissement<input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label>
+    <label>Nom du responsable<input required value={form.managerName} onChange={e=>setForm({...form,managerName:e.target.value})}/></label>
+    <label>SIRET (14 chiffres)<input required pattern="\d{14}" title="14 chiffres" value={form.siret} onChange={e=>setForm({...form,siret:e.target.value.replace(/\D/g,"").slice(0,14)})}/></label>
     <label>Téléphone professionnel<input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></label>
     <label>Quartier / ville<input value={form.district} onChange={e=>setForm({...form,district:e.target.value})}/></label>
     <label>Adresse<input value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></label>
     <label className="wide">Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
+    <p className="fine wide">Le SIRET est déclaratif : Nour ne réalise pas de vérification officielle auprès d’un registre.</p>
     <button className="button" disabled={submitting}>{submitting?"Envoi…":"Envoyer ma demande"}</button>
   </form>;
 }
@@ -326,13 +337,26 @@ function Messages() {
 
 function Admin() {
   const {user}=useAuth();
-  const [stats,setStats]=useState<any>(null); useEffect(()=>{api("/admin/dashboard").then(setStats)},[]);
+  const showStats = user?.role==="ADMIN"||user?.role==="ORGANIZER";
+  const [stats,setStats]=useState<any>(null); useEffect(()=>{if(showStats)api("/admin/dashboard").then(setStats)},[showStats]);
+  if(!showStats) return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">{user?.role==="MODERATOR"?"MODÉRATION":"ACCUEIL"}</span><h1>Bienvenue, {user?.displayName}</h1><p className="fine">{user?.role==="MODERATOR"?"Utilisez le menu pour traiter les signalements.":"Utilisez le menu pour scanner les billets de l’établissement."}</p></div></section></Layout>;
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><div className="admin-heading"><div><span className="eyebrow">{user?.role==="ADMIN"?"SUPER-ADMINISTRATION":"ESPACE RESTAURATEUR"}</span><h1>Tableau de bord {user?.role==="ADMIN"?"général":"de mon établissement"}</h1></div></div>{!stats?<Loading/>:<><div className="stat-grid"><Stat label="Événements actifs" value={stats.events}/><Stat label="Candidatures" value={stats.applications}/><Stat label="Revenus" value={money(stats.revenueCents)}/>{stats.openReports!=null&&<Stat label="Signalements ouverts" value={stats.openReports}/>}</div><div className="admin-grid"><div className="panel chart"><div className="panel-title"><h2>Activité sur 30 jours</h2><span>Données de démonstration</span></div><div className="bars">{[32,50,42,68,60,82,75,94,70,85,97,88].map((n,i)=><i key={i} style={{height:`${n}%`}}/>)}</div></div><div className="panel quick"><h2>Actions rapides</h2><Link to="/admin/applications">Traiter les candidatures <span>→</span></Link><Link to="/admin/scanner">Scanner un billet <span>→</span></Link>{user?.role==="ADMIN"&&<Link to="/admin/restaurants">Demandes restaurateurs <span>→</span></Link>}<Link to="/events">Voir les événements <span>→</span></Link></div></div></>}</div></section></Layout>;
 }
 function Stat({label,value}:{label:string;value:string|number}){return <div className="stat"><small>{label.toUpperCase()}</small><strong>{value}</strong><span>Mis à jour maintenant</span></div>}
 function AdminNav(){
-  const {user}=useAuth();
-  return <aside className="admin-nav"><Logo/><NavLink end to="/admin">Vue générale</NavLink><NavLink to="/admin/applications">Candidatures</NavLink><NavLink to="/admin/availability">Disponibilités</NavLink><NavLink to="/admin/events">Mes événements</NavLink><NavLink to="/admin/scanner">Scanner les billets</NavLink>{user?.role==="ADMIN"&&<NavLink to="/admin/restaurants">Demandes restaurateurs</NavLink>}<Link to="/events">Événements publics</Link></aside>;
+  const {user}=useAuth(); const role=user?.role;
+  const manages = role==="ADMIN"||role==="ORGANIZER";
+  return <aside className="admin-nav"><Logo/>
+    {manages&&<NavLink end to="/admin">Vue générale</NavLink>}
+    {manages&&<NavLink to="/admin/applications">Candidatures</NavLink>}
+    {manages&&<NavLink to="/admin/availability">Disponibilités</NavLink>}
+    {manages&&<NavLink to="/admin/events">Mes événements</NavLink>}
+    {manages&&<NavLink to="/admin/staff">Personnel d’accueil</NavLink>}
+    <NavLink to="/admin/scanner">Scanner les billets</NavLink>
+    {role==="ADMIN"&&<NavLink to="/admin/restaurants">Demandes restaurateurs</NavLink>}
+    {(role==="ADMIN"||role==="MODERATOR")&&<NavLink to="/admin/moderation">Modération</NavLink>}
+    <Link to="/">Voir le site public</Link>
+  </aside>;
 }
 
 function AdminApplications() {
@@ -436,7 +460,7 @@ function AdminRestaurants() {
 
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Demandes restaurateurs</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="filters"><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="PENDING">En attente</option><option value="APPROVED">Approuvés</option><option value="REJECTED">Refusés</option><option value="SUSPENDED">Suspendus</option></select></div>
-    {items.length===0?<div className="empty"><span>◇</span><h2>Aucune demande</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request"><div><h3>{r.name}</h3><p>{r.owner.displayName} · {r.owner.phone}</p>{r.district&&<p className="fine left">{r.address}, {r.district}</p>}{r.description&&<p className="fine left">{r.description}</p>}<small>{RESTAURANT_STATUS_LABEL[r.status]}</small></div>{r.status==="PENDING"&&<div className="decision-buttons">
+    {items.length===0?<div className="empty"><span>◇</span><h2>Aucune demande</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request"><div><h3>{r.name}</h3><p>{r.owner.displayName} · {r.owner.phone}</p><p className="fine left">Responsable : {r.managerName??"—"} · SIRET {r.siret??"—"}</p>{r.district&&<p className="fine left">{r.address}, {r.district}</p>}{r.description&&<p className="fine left">{r.description}</p>}<small>{RESTAURANT_STATUS_LABEL[r.status]}</small></div>{r.status==="PENDING"&&<div className="decision-buttons">
       <button className="button" disabled={actingOn===r.id} onClick={()=>decide(r.id,true)}>Accepter</button>
       {reasonFor===r.id?<div className="reject-note"><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motif (optionnel)"/><button className="button danger" disabled={actingOn===r.id} onClick={()=>decide(r.id,false,reason)}>Confirmer le refus</button></div>:<button className="button danger" onClick={()=>setReasonFor(r.id)}>Refuser</button>}
     </div>}</article>)}</div>}
@@ -499,9 +523,76 @@ function AdminAvailability() {
   </div></section></Layout>;
 }
 
+function AdminStaff() {
+  const [items,setItems]=useState<any[]>([]);
+  const [form,setForm]=useState({phone:"",displayName:""});
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const [busy,setBusy]=useState(false);
+  const load=()=>api<any[]>("/admin/staff").then(setItems).catch(()=>setItems([]));
+  useEffect(()=>{load()},[]);
+  const add=async(e:FormEvent)=>{
+    e.preventDefault();setBusy(true);setNotice(null);
+    try{await api("/admin/staff",{method:"POST",body:JSON.stringify(form)});setForm({phone:"",displayName:""});setNotice({kind:"success",text:"Accès accueil activé."});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(false)}
+  };
+  const revoke=async(id:string)=>{
+    setBusy(true);setNotice(null);
+    try{await api(`/admin/staff/${id}`,{method:"DELETE"});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(false)}
+  };
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ADMINISTRATION</span><h1>Personnel d’accueil</h1><p className="fine">Ces comptes peuvent uniquement scanner les billets de votre établissement. Ils n’ont accès à aucune candidature, aucun client ni aucune donnée financière.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    <form className="panel form-grid" onSubmit={add}>
+      <label>Téléphone<input required value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="+33612345678"/></label>
+      <label>Nom<input value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})} placeholder="Prénom Nom"/></label>
+      <button className="button" disabled={busy}>{busy?"…":"Donner l’accès accueil"}</button>
+    </form>
+    {items.length===0?<div className="empty small"><span>◇</span><p>Aucun personnel d’accueil pour le moment.</p></div>:<div className="stack">{items.map(s=><article key={s.id} className="panel restaurant-request"><div><h3>{s.displayName}</h3><p>{s.phone}</p></div><button className="button danger" disabled={busy} onClick={()=>revoke(s.id)}>Retirer l’accès</button></article>)}</div>}
+  </div></section></Layout>;
+}
+
+function AdminModeration() {
+  const {user}=useAuth();
+  const [items,setItems]=useState<any[]>([]);
+  const [mods,setMods]=useState<any[]>([]);
+  const [modForm,setModForm]=useState({phone:"",displayName:""});
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const [busyId,setBusyId]=useState<string|null>(null);
+  const load=()=>api<any[]>("/admin/reports").then(setItems);
+  const loadMods=()=>api<any[]>("/admin/moderators").then(setMods);
+  useEffect(()=>{load();if(user?.role==="ADMIN")loadMods()},[user?.role]);
+  const decide=async(id:string,status:string)=>{
+    setBusyId(id);setNotice(null);
+    try{await api(`/admin/reports/${id}/decision`,{method:"POST",body:JSON.stringify({status})});setNotice({kind:"success",text:"Signalement mis à jour."});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusyId(null)}
+  };
+  const addMod=async(e:FormEvent)=>{
+    e.preventDefault();setBusyId("mod");setNotice(null);
+    try{await api("/admin/moderators",{method:"POST",body:JSON.stringify(modForm)});setModForm({phone:"",displayName:""});await loadMods()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusyId(null)}
+  };
+  const revokeMod=async(id:string)=>{
+    setBusyId(id);setNotice(null);
+    try{await api(`/admin/moderators/${id}`,{method:"DELETE"});await loadMods()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusyId(null)}
+  };
+  const STATUS_LABEL:Record<string,string>={OPEN:"Ouvert",REVIEWING:"En cours d’examen",RESOLVED:"Résolu",DISMISSED:"Classé sans suite"};
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">MODÉRATION</span><h1>Signalements</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    {user?.role==="ADMIN"&&<div className="panel form-grid"><div className="panel-title"><h2>Modérateurs</h2><span>Personnes autorisées à traiter les signalements</span></div>
+      {mods.length>0&&<div className="stack">{mods.map(m=><div key={m.id} className="table-row"><span><b>{m.displayName}</b> · {m.phone}</span><button type="button" className="button danger small" disabled={busyId===m.id} onClick={()=>revokeMod(m.id)}>Retirer</button></div>)}</div>}
+      <form className="time-row wide" onSubmit={addMod}><input required placeholder="+33612345678" value={modForm.phone} onChange={e=>setModForm({...modForm,phone:e.target.value})}/><input placeholder="Nom" value={modForm.displayName} onChange={e=>setModForm({...modForm,displayName:e.target.value})}/><button className="button" disabled={busyId==="mod"}>Nommer modérateur</button></form>
+    </div>}
+    {items.length===0?<div className="empty"><span>◇</span><h2>Aucun signalement</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request"><div><h3>{r.reporter.displayName} → {r.reported.displayName}</h3><p>{r.reason}</p>{r.details&&<p className="fine left">{r.details}</p>}<small>{STATUS_LABEL[r.status]??r.status} · {dateTime(r.createdAt)}</small></div>{!["RESOLVED","DISMISSED"].includes(r.status)&&<div className="decision-buttons"><button className="button" disabled={busyId===r.id} onClick={()=>decide(r.id,"REVIEWING")}>Mettre en examen</button><button className="button" disabled={busyId===r.id} onClick={()=>decide(r.id,"RESOLVED")}>Résoudre</button><button className="button danger" disabled={busyId===r.id} onClick={()=>decide(r.id,"DISMISSED")}>Classer</button></div>}</article>)}</div>}
+  </div></section></Layout>;
+}
+
 function Scanner() {
   const [code,setCode]=useState("NOUR-TICKET-DEMO-482"),[result,setResult]=useState<any>(null),[error,setError]=useState(""); const scan=async(e:FormEvent)=>{e.preventDefault();setResult(null);setError("");try{setResult(await api("/admin/tickets/scan",{method:"POST",body:JSON.stringify({code})}))}catch(err){setError((err as Error).message)}};
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ACCUEIL</span><h1>Scanner un billet</h1><div className="scanner-layout"><form className="scanner panel" onSubmit={scan}><div className="scan-frame"><i/><span>QR</span></div><label>Code du billet<input value={code} onChange={e=>setCode(e.target.value)}/></label><button className="button full">Vérifier et valider l’entrée</button></form><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b>✓</b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b>×</b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Scannez ou saisissez le code.</p></>}</aside></div></div></section></Layout>;
 }
 
-export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected><Dashboard/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminApplications/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAvailability/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}
+export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminApplications/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAvailability/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}

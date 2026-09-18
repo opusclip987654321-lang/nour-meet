@@ -16,7 +16,7 @@ async function main() {
   const restaurant = await prisma.restaurant.upsert({
     where: { ownerId: organizerUser.id },
     update: {},
-    create: { ownerId: organizerUser.id, name: "Maison Amana", description: "Des expériences raffinées autour de la culture et de la rencontre.", district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", phone: "+33145000000", commissionRate: 15, status: "APPROVED", verifiedAt: new Date() }
+    create: { ownerId: organizerUser.id, name: "Maison Amana", managerName: "Amana Traoré", siret: "12345678900019", description: "Des expériences raffinées autour de la culture et de la rencontre.", district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", phone: "+33145000000", commissionRate: 15, status: "APPROVED", verifiedAt: new Date() }
   });
   const sofia = await prisma.user.upsert({
     where: { phone: "+33612345678" },

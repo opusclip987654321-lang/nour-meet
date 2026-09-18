@@ -133,12 +133,14 @@ model Restaurant {
   owner            User             @relation("Owner", fields: [ownerId], references: [id], onDelete: Cascade)
   staff            User[]           @relation("StaffOf")
   name             String
+  siret            String?
+  managerName      String?
   description      String?
   district         String?
   address          String?
   phone            String?
   commissionRate   Int              @default(15)
-  status           RestaurantStatus @default(APPROVED)
+  status           RestaurantStatus @default(PENDING)
   submittedAt      DateTime         @default(now())
   verifiedAt       DateTime?
   reviewedBy       String?

@@ -32,4 +32,3 @@ apps/api/public/uploads/*
 # Fichiers sensibles
 *recovery_code*
 *recovery_codes*
-docker-compose.yml

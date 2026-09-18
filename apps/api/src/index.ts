@@ -27,7 +27,11 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const prisma = new PrismaClient();
 const app = Fastify({ logger: true });
 const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
-await app.register(cors, { origin: env.WEB_ORIGIN === "*" ? true : env.WEB_ORIGIN.split(","), credentials: true });
+// méthodes explicitement listées : par défaut, ce plugin n'autorise que GET/HEAD/POST en CORS, ce qui
+// bloquait silencieusement depuis un vrai navigateur tous les appels PATCH/PUT/DELETE (annulation de
+// candidature côté navigateur, sortie de liste d'attente, mise à jour de profil, etc.) — invisible en
+// curl, qui ne fait pas respecter le CORS.
+await app.register(cors, { origin: env.WEB_ORIGIN === "*" ? true : env.WEB_ORIGIN.split(","), credentials: true, methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] });
 await app.register(jwt, { secret: env.JWT_SECRET });
 await app.register(rateLimit, { global: false });
 await app.register(multipart, { limits: { fileSize: MAX_IMAGE_BYTES, files: 1 } });
@@ -42,9 +46,22 @@ const smsVerification = createSmsVerificationProvider({
 
 type TokenUser = { sub: string; role: UserRole; phone: string };
 const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode });
-const auth = async (request: FastifyRequest) => { await request.jwtVerify(); };
-const roles = (...allowed: UserRole[]) => async (request: FastifyRequest) => {
+// Un champ optionnel envoyé comme chaîne vide par un formulaire (nom non renseigné) doit être traité
+// comme absent, pas comme une valeur invalide.
+const optionalName = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().min(2).max(80).optional());
+// Le rôle et l'état du compte sont vérifiés en base à chaque requête (pas seulement via les
+// informations figées dans le jeton, valide 30 jours) : une promotion, une rétrogradation ou une
+// suspension prend effet immédiatement, sans attendre l'expiration du jeton.
+const loadCurrentUser = async (request: FastifyRequest) => {
   await request.jwtVerify();
+  const token = request.user as TokenUser;
+  const current = await prisma.user.findUniqueOrThrow({ where: { id: token.sub } });
+  if (current.suspendedAt) throw httpError(403, "Compte suspendu");
+  token.role = current.role;
+};
+const auth = async (request: FastifyRequest) => { await loadCurrentUser(request); };
+const roles = (...allowed: UserRole[]) => async (request: FastifyRequest) => {
+  await loadCurrentUser(request);
   if (!allowed.includes((request.user as TokenUser).role)) throw httpError(403, "Accès non autorisé");
 };
 const currentId = (request: FastifyRequest) => (request.user as TokenUser).sub;
@@ -115,14 +132,17 @@ const offerNextWaitlistEntry = async (eventId: string, category: QuotaCategory |
   await notify(entry.userId, "Une place s’est libérée !", `Une place pour « ${event.title} » vous est proposée. Vous avez jusqu’au ${result.reservation.expiresAt.toLocaleString("fr-FR")} pour régler votre billet, sans quoi elle sera proposée au participant suivant.`);
 };
 
-// Propose un événement alternatif (même catégorie + même zone géographique) lorsqu'un participant ne
-// peut pas obtenir de place. Ne crée jamais deux propositions actives pour le même événement d'origine.
-const createAlternativeOfferIfPossible = async (userId: string, originalEvent: { id: string; category: string; zone: string | null }) => {
+// Propose un événement alternatif (même catégorie + même zone géographique + même organisateur)
+// lorsqu'un participant ne peut pas obtenir de place. Un restaurateur ne propose jamais l'événement
+// d'un concurrent, et Nour ne propose que ses propres événements : l'alternative doit avoir le même
+// controllerRestaurantId (y compris null, qui désigne les événements organisés directement par Nour).
+// Ne crée jamais deux propositions actives pour le même événement d'origine.
+const createAlternativeOfferIfPossible = async (userId: string, originalEvent: { id: string; category: string; zone: string | null; controllerRestaurantId: string | null }) => {
   if (!originalEvent.zone) return null;
   const existingPending = await prisma.alternativeOffer.findFirst({ where: { userId, originalEventId: originalEvent.id, status: AlternativeOfferStatus.PENDING } });
   if (existingPending) return null;
   const alternative = await prisma.event.findFirst({
-    where: { id: { not: originalEvent.id }, category: originalEvent.category, zone: originalEvent.zone, status: EventStatus.PUBLISHED, startsAt: { gt: new Date() }, applications: { none: { userId } } },
+    where: { id: { not: originalEvent.id }, category: originalEvent.category, zone: originalEvent.zone, controllerRestaurantId: originalEvent.controllerRestaurantId, status: EventStatus.PUBLISHED, startsAt: { gt: new Date() }, applications: { none: { userId } } },
     orderBy: { startsAt: "asc" }
   });
   if (!alternative) return null;
@@ -491,7 +511,9 @@ app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
   return restaurant;
 });
 app.post("/restaurants/apply", { preHandler: auth }, async (request, reply) => {
-  const input = z.object({ name: z.string().min(2).max(120), description: z.string().max(1000).optional(), district: z.string().max(120).optional(), address: z.string().max(200).optional(), phone: z.string().max(30).optional() }).parse(request.body);
+  // Le SIRET est saisi par le demandeur mais n'est pas vérifié auprès d'un registre officiel : ce
+  // n'est qu'une déclaration, à ne jamais présenter comme une vérification légale effectuée par Nour.
+  const input = z.object({ name: z.string().min(2).max(120), managerName: z.string().min(2).max(120), siret: z.string().regex(/^\d{14}$/, "Le SIRET doit comporter 14 chiffres"), description: z.string().max(1000).optional(), district: z.string().max(120).optional(), address: z.string().max(200).optional(), phone: z.string().max(30).optional() }).parse(request.body);
   const userId = currentId(request);
   const existing = await prisma.restaurant.findUnique({ where: { ownerId: userId } });
   if (existing?.status === "APPROVED") return reply.code(409).send({ error: "Vous êtes déjà restaurateur" });
@@ -528,6 +550,75 @@ app.post("/admin/restaurants/:id/decision", { preHandler: roles(UserRole.ADMIN) 
   const updated = await prisma.restaurant.update({ where: { id }, data: { status: "REJECTED", reviewedBy: adminId, rejectionReason: reason ?? null } });
   await notify(restaurant.ownerId, "Demande restaurateur refusée", reason ?? "Votre demande n’a pas été retenue.");
   await audit(adminId, "REJECT_RESTAURANT", "Restaurant", id, { reason });
+  return updated;
+});
+
+// Personnel d'accueil (rôle RECEPTION) : un restaurateur ne peut créer ce personnel que pour son
+// propre établissement, et ce personnel n'obtient AUCUN droit hors scan des billets de cet
+// établissement (voir la vérification par controllerRestaurantId dans /admin/tickets/scan).
+app.get("/admin/staff", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const token = request.user as TokenUser;
+  const restaurant = await ownRestaurant(token);
+  const query = z.object({ restaurantId: z.string().optional() }).parse(request.query);
+  const restaurantId = restaurant?.id ?? query.restaurantId;
+  if (!restaurantId) return [];
+  return prisma.user.findMany({ where: { restaurantId, role: UserRole.RECEPTION }, orderBy: { createdAt: "desc" } });
+});
+app.post("/admin/staff", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const input = z.object({ phone: z.string().min(8).max(30), displayName: optionalName, restaurantId: z.string().optional() }).parse(request.body);
+  const token = request.user as TokenUser;
+  const restaurant = await ownRestaurant(token);
+  const restaurantId = restaurant?.id ?? input.restaurantId;
+  if (!restaurantId) return reply.code(400).send({ error: "Restaurant introuvable" });
+  if (token.role === UserRole.ADMIN) await prisma.restaurant.findUniqueOrThrow({ where: { id: restaurantId } });
+  const phone = normalizePhoneNumber(input.phone);
+  let staffUser = await prisma.user.findUnique({ where: { phone } });
+  if (staffUser && staffUser.role !== UserRole.PARTICIPANT) return reply.code(409).send({ error: "Ce compte a déjà un rôle incompatible avec le statut de personnel d’accueil" });
+  if (!staffUser) staffUser = await prisma.user.create({ data: { phone, displayName: input.displayName ?? "Personnel d’accueil", profile: { create: { interests: [] } } } });
+  const updated = await prisma.user.update({ where: { id: staffUser.id }, data: { role: UserRole.RECEPTION, restaurantId } });
+  await notify(staffUser.id, "Accès accueil activé", "Vous pouvez désormais scanner les billets de votre établissement.");
+  await audit(currentId(request), "GRANT_STAFF_ACCESS", "User", staffUser.id, { restaurantId });
+  return reply.code(201).send(updated);
+});
+app.delete("/admin/staff/:id", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const token = request.user as TokenUser;
+  const restaurant = await ownRestaurant(token);
+  const staffUser = await prisma.user.findFirstOrThrow({ where: { id, role: UserRole.RECEPTION, ...(restaurant ? { restaurantId: restaurant.id } : {}) } });
+  await prisma.user.update({ where: { id: staffUser.id }, data: { role: UserRole.PARTICIPANT, restaurantId: null } });
+  await audit(currentId(request), "REVOKE_STAFF_ACCESS", "User", staffUser.id);
+  return reply.code(204).send();
+});
+
+// Modérateurs (rôle MODERATOR) : uniquement nommés par le super-admin, pour traiter les
+// signalements entre utilisateurs. Aucun droit sur les événements, candidatures ou finances.
+app.get("/admin/moderators", { preHandler: roles(UserRole.ADMIN) }, async () => prisma.user.findMany({ where: { role: UserRole.MODERATOR }, orderBy: { createdAt: "desc" } }));
+app.post("/admin/moderators", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const input = z.object({ phone: z.string().min(8).max(30), displayName: optionalName }).parse(request.body);
+  const phone = normalizePhoneNumber(input.phone);
+  let moderator = await prisma.user.findUnique({ where: { phone } });
+  if (moderator && moderator.role !== UserRole.PARTICIPANT) return reply.code(409).send({ error: "Ce compte a déjà un rôle incompatible avec le statut de modérateur" });
+  if (!moderator) moderator = await prisma.user.create({ data: { phone, displayName: input.displayName ?? "Modérateur", profile: { create: { interests: [] } } } });
+  const updated = await prisma.user.update({ where: { id: moderator.id }, data: { role: UserRole.MODERATOR } });
+  await audit(currentId(request), "GRANT_MODERATOR", "User", moderator.id);
+  return reply.code(201).send(updated);
+});
+app.delete("/admin/moderators/:id", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const moderator = await prisma.user.findFirstOrThrow({ where: { id, role: UserRole.MODERATOR } });
+  await prisma.user.update({ where: { id: moderator.id }, data: { role: UserRole.PARTICIPANT } });
+  await audit(currentId(request), "REVOKE_MODERATOR", "User", moderator.id);
+  return reply.code(204).send();
+});
+
+// File de modération des signalements (Report), jusqu'ici sans aucune interface : accessible au
+// super-admin et aux modérateurs nommés, jamais aux restaurateurs.
+app.get("/admin/reports", { preHandler: roles(UserRole.ADMIN, UserRole.MODERATOR) }, async () => prisma.report.findMany({ include: { reporter: true, reported: true }, orderBy: { createdAt: "desc" } }));
+app.post("/admin/reports/:id/decision", { preHandler: roles(UserRole.ADMIN, UserRole.MODERATOR) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { status } = z.object({ status: z.enum(["REVIEWING", "RESOLVED", "DISMISSED"]) }).parse(request.body);
+  const updated = await prisma.report.update({ where: { id }, data: { status } });
+  await audit(currentId(request), "MODERATE_REPORT", "Report", id, { status });
   return updated;
 });
 
