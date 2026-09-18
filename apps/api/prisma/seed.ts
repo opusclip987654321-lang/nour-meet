@@ -20,8 +20,8 @@ async function main() {
   });
   const sofia = await prisma.user.upsert({
     where: { phone: "+33612345678" },
-    update: {},
-    create: { phone: "+33612345678", email: "sofia@nour-meet.local", displayName: "Sofia", role: UserRole.PARTICIPANT, profile: { create: { birthDate: new Date("1992-06-14"), city: "Boulogne-Billancourt", profession: "Cheffe de projet", interests: ["Voyages", "Art", "Gastronomie", "Lecture"], bio: "Curieuse, passionnée d’art et de voyages. J’aime les échanges sincères et les bonnes tables.", shareCode: "NOUR-SOFIA-8421", profileCompleted: true, validatedAt: new Date() } } }
+    update: { profile: { update: { quotaCategory: "FEMME" } } },
+    create: { phone: "+33612345678", email: "sofia@nour-meet.local", displayName: "Sofia", role: UserRole.PARTICIPANT, profile: { create: { birthDate: new Date("1992-06-14"), city: "Boulogne-Billancourt", profession: "Cheffe de projet", interests: ["Voyages", "Art", "Gastronomie", "Lecture"], bio: "Curieuse, passionnée d’art et de voyages. J’aime les échanges sincères et les bonnes tables.", shareCode: "NOUR-SOFIA-8421", profileCompleted: true, validatedAt: new Date(), quotaCategory: "FEMME" } } }
   });
   const karim = await prisma.user.upsert({
     where: { phone: "+33687654321" },
@@ -31,20 +31,28 @@ async function main() {
 
   const event = await prisma.event.upsert({
     where: { slug: "diner-connexions-septembre" },
-    update: {},
-    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "diner-connexions-septembre", title: "Dîner & Connexions", category: "Speed dating", description: "Un dîner en petit comité, des échanges guidés et des temps libres dans un lieu privatisé.", startsAt: new Date("2026-09-26T19:30:00+02:00"), endsAt: new Date("2026-09-26T23:30:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", capacity: 28, priceCents: 3500, status: EventStatus.PUBLISHED }
+    update: { zone: "Paris intra-muros" },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "diner-connexions-septembre", title: "Dîner & Connexions", category: "Speed dating", description: "Un dîner en petit comité, des échanges guidés et des temps libres dans un lieu privatisé.", startsAt: new Date("2026-09-26T19:30:00+02:00"), endsAt: new Date("2026-09-26T23:30:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 28, priceCents: 3500, status: EventStatus.PUBLISHED }
+  });
+  await prisma.eventQuota.upsert({ where: { eventId_category: { eventId: event.id, category: "HOMME" } }, update: {}, create: { eventId: event.id, category: "HOMME", capacity: 14 } });
+  await prisma.eventQuota.upsert({ where: { eventId_category: { eventId: event.id, category: "FEMME" } }, update: {}, create: { eventId: event.id, category: "FEMME", capacity: 14, heldCount: 1 } });
+  const afterwork = await prisma.event.upsert({
+    where: { slug: "afterwork-entrepreneurs-octobre" }, update: { zone: "La Défense" },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "afterwork-entrepreneurs-octobre", title: "Afterwork des entrepreneurs", category: "Networking", description: "Rencontrez des entrepreneurs et indépendants autour d’échanges structurés.", startsAt: new Date("2026-10-01T19:00:00+02:00"), endsAt: new Date("2026-10-01T22:30:00+02:00"), district: "La Défense", address: "2 place de la Défense, 92800 Puteaux", zone: "La Défense", capacity: 40, priceCents: 4500, status: EventStatus.PUBLISHED }
   });
   await prisma.event.upsert({
-    where: { slug: "afterwork-entrepreneurs-octobre" }, update: {},
-    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "afterwork-entrepreneurs-octobre", title: "Afterwork des entrepreneurs", category: "Networking", description: "Rencontrez des entrepreneurs et indépendants autour d’échanges structurés.", startsAt: new Date("2026-10-01T19:00:00+02:00"), endsAt: new Date("2026-10-01T22:30:00+02:00"), district: "La Défense", address: "2 place de la Défense, 92800 Puteaux", capacity: 40, priceCents: 4500, status: EventStatus.PUBLISHED }
+    where: { slug: "art-the-conversations" }, update: { zone: "Paris intra-muros" },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "art-the-conversations", title: "Art, thé & conversations", category: "Networking", description: "Une rencontre culturelle dans un salon privatisé du Marais.", startsAt: new Date("2026-10-04T16:00:00+02:00"), endsAt: new Date("2026-10-04T19:00:00+02:00"), district: "Paris 4e", address: "18 rue des Archives, 75004 Paris", zone: "Paris intra-muros", capacity: 20, priceCents: 2900, status: EventStatus.PUBLISHED }
   });
   await prisma.event.upsert({
-    where: { slug: "art-the-conversations" }, update: {},
-    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "art-the-conversations", title: "Art, thé & conversations", category: "Networking", description: "Une rencontre culturelle dans un salon privatisé du Marais.", startsAt: new Date("2026-10-04T16:00:00+02:00"), endsAt: new Date("2026-10-04T19:00:00+02:00"), district: "Paris 4e", address: "18 rue des Archives, 75004 Paris", capacity: 20, priceCents: 2900, status: EventStatus.PUBLISHED }
+    where: { slug: "soiree-nour-x-amana" }, update: { zone: "Paris intra-muros" },
+    create: { controllerRestaurantId: null, venueRestaurantId: restaurant.id, slug: "soiree-nour-x-amana", title: "Soirée Nūr × Maison Amana", category: "Networking", description: "Un événement organisé directement par Nūr Meet, accueilli par notre partenaire Maison Amana.", startsAt: new Date("2026-10-10T19:00:00+02:00"), endsAt: new Date("2026-10-10T22:00:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 30, priceCents: 4000, status: EventStatus.PUBLISHED }
   });
+  // Deuxième événement Networking à La Défense, pour démontrer les propositions d'événements alternatifs
+  // (même catégorie + même zone) lorsque l'Afterwork est complet.
   await prisma.event.upsert({
-    where: { slug: "soiree-nour-x-amana" }, update: {},
-    create: { controllerRestaurantId: null, venueRestaurantId: restaurant.id, slug: "soiree-nour-x-amana", title: "Soirée Nūr × Maison Amana", category: "Networking", description: "Un événement organisé directement par Nūr Meet, accueilli par notre partenaire Maison Amana.", startsAt: new Date("2026-10-10T19:00:00+02:00"), endsAt: new Date("2026-10-10T22:00:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", capacity: 30, priceCents: 4000, status: EventStatus.PUBLISHED }
+    where: { slug: "networking-la-defense-bis" }, update: { zone: "La Défense" },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "networking-la-defense-bis", title: "Networking des indépendants", category: "Networking", description: "Une seconde soirée networking à La Défense pour les indépendants et entrepreneurs.", startsAt: new Date("2026-10-08T19:00:00+02:00"), endsAt: new Date("2026-10-08T22:00:00+02:00"), district: "La Défense", address: "5 place de la Défense, 92800 Puteaux", zone: "La Défense", capacity: 30, priceCents: 4000, status: EventStatus.PUBLISHED }
   });
 
   const slots = ["2026-09-22T18:00:00+02:00", "2026-09-22T18:20:00+02:00", "2026-09-24T18:40:00+02:00", "2026-09-24T19:20:00+02:00"];
@@ -56,12 +64,12 @@ async function main() {
 
   const application = await prisma.application.upsert({
     where: { eventId_userId: { eventId: event.id, userId: sofia.id } },
-    update: { status: ApplicationStatus.CONFIRMED },
-    create: { eventId: event.id, userId: sofia.id, motivation: "Je souhaite faire de nouvelles rencontres dans un cadre respectueux.", status: ApplicationStatus.CONFIRMED, decidedAt: new Date() }
+    update: { status: ApplicationStatus.CONFIRMED, quotaCategory: "FEMME" },
+    create: { eventId: event.id, userId: sofia.id, motivation: "Je souhaite faire de nouvelles rencontres dans un cadre respectueux.", status: ApplicationStatus.CONFIRMED, quotaCategory: "FEMME", decidedAt: new Date() }
   });
   const reservation = await prisma.reservation.upsert({
-    where: { applicationId: application.id }, update: { confirmedAt: new Date() },
-    create: { eventId: event.id, userId: sofia.id, applicationId: application.id, expiresAt: new Date("2026-09-25T20:00:00+02:00"), confirmedAt: new Date() }
+    where: { applicationId: application.id }, update: { confirmedAt: new Date(), quotaCategory: "FEMME" },
+    create: { eventId: event.id, userId: sofia.id, applicationId: application.id, expiresAt: new Date("2026-09-25T20:00:00+02:00"), confirmedAt: new Date(), quotaCategory: "FEMME" }
   });
   await prisma.payment.upsert({ where: { reservationId: reservation.id }, update: {}, create: { reservationId: reservation.id, amountCents: 3500, status: PaymentStatus.SUCCEEDED, provider: "fake", providerRef: "demo-payment", paidAt: new Date() } });
   await prisma.ticket.upsert({ where: { reservationId: reservation.id }, update: {}, create: { reservationId: reservation.id, code: "NOUR-TICKET-DEMO-482", status: TicketStatus.VALID } });

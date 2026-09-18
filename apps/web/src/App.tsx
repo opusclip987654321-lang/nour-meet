@@ -136,6 +136,7 @@ function PaymentModal({ reservationId, eventId, amountCents, onClose, onConfirme
 function ApplicationStatusPanel({ application, event, onPaid }: { application: any; event: PublicEvent; onPaid: () => void }) {
   const [showPayment, setShowPayment] = useState(false);
   if (application.status === "REFUSED") return <Notice kind="error">Votre candidature n’a pas été retenue pour cet événement.</Notice>;
+  if (application.status === "CANCELLED") return <Notice kind="error">Cette candidature a été annulée.</Notice>;
   if (application.status === "CONFIRMED") return <Notice kind="success">Votre place est confirmée. Retrouvez votre billet dans votre espace personnel.</Notice>;
   if (application.status === "PAYMENT_PENDING" && application.reservation) return <div className="payment-block">
     <Notice kind="success">Candidature acceptée ! Finalisez votre place avant le {dateTime(application.reservation.expiresAt)}.</Notice>
@@ -155,7 +156,10 @@ function EventDetail() {
   const [slots,setSlots]=useState<any[]>([]);
   const [loadingSlots,setLoadingSlots]=useState(false);
   const [schedulingId,setSchedulingId]=useState<string|null>(null);
-  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const [notice,setNotice]=useState<{kind:"error"|"success"|"info";text:string}|null>(null);
+  const [waitlistEntry,setWaitlistEntry]=useState<any>(null);
+  const [altOffer,setAltOffer]=useState<any>(null);
+  const [busy,setBusy]=useState(false);
 
   useEffect(()=>{api<PublicEvent>(`/events/${id}`).then(setEvent)},[id]);
 
@@ -163,6 +167,8 @@ function EventDetail() {
     if(!user||!event){setLoadingApplication(false);return}
     let ignore=false; setLoadingApplication(true);
     api<any>(`/events/${event.id}/my-application`).then(a=>!ignore&&setApplication(a)).catch(()=>!ignore&&setApplication(null)).finally(()=>!ignore&&setLoadingApplication(false));
+    api<any>(`/events/${event.id}/waitlist/me`).then(w=>!ignore&&setWaitlistEntry(w)).catch(()=>!ignore&&setWaitlistEntry(null));
+    api<any[]>("/me/alternative-offers").then(list=>{if(ignore)return;setAltOffer(list.find(o=>o.originalEventId===event.id&&o.status==="PENDING")??null)}).catch(()=>{});
     return ()=>{ignore=true};
   },[user,event?.id]);
 
@@ -174,7 +180,13 @@ function EventDetail() {
   },[event?.id,application?.id,application?.status]);
 
   if(!event)return <Layout><Loading/></Layout>;
-  const full=event.confirmedCount>=event.capacity;
+
+  const myQuota = event.quotas.length>0 ? event.quotas.find(q=>q.category===user?.profile?.quotaCategory) ?? null : null;
+  const categoryUnknown = event.quotas.length>0 && !user?.profile?.quotaCategory;
+  const bucketFull = event.quotas.length>0 ? (myQuota ? myQuota.heldCount>=myQuota.capacity : false) : event.confirmedCount>=event.capacity;
+  const canCancel = application && !["REFUSED","CANCELLED"].includes(application.status);
+
+  const refreshApplication=()=>api<any>(`/events/${event.id}/my-application`).then(setApplication).catch(()=>{});
 
   const apply=async(e:FormEvent)=>{
     e.preventDefault();setNotice(null);
@@ -192,14 +204,45 @@ function EventDetail() {
       api<any[]>(`/events/${event.id}/call-slots`).then(setSlots).catch(()=>{});
     }finally{setSchedulingId(null)}
   };
-  const refreshApplication=()=>{api<any>(`/events/${event.id}/my-application`).then(setApplication).catch(()=>{})};
+  const joinWaitlist=async()=>{
+    setBusy(true);setNotice(null);
+    try{setWaitlistEntry(await api<any>(`/events/${event.id}/waitlist`,{method:"POST"}));setNotice({kind:"success",text:"Vous êtes inscrit(e) sur la liste d’attente."})}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(false)}
+  };
+  const leaveWaitlist=async()=>{
+    setBusy(true);setNotice(null);
+    try{await api(`/events/${event.id}/waitlist`,{method:"DELETE"});setWaitlistEntry(null);setNotice({kind:"success",text:"Vous avez quitté la liste d’attente."})}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(false)}
+  };
+  const cancelApplication=async()=>{
+    if(!application)return;
+    setBusy(true);setNotice(null);
+    try{await api(`/me/applications/${application.id}/cancel`,{method:"POST"});setNotice({kind:"success",text:"Votre candidature a été annulée."});await refreshApplication();setWaitlistEntry(null)}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(false)}
+  };
+  const respondAltOffer=async(accept:boolean)=>{
+    if(!altOffer)return;
+    setBusy(true);setNotice(null);
+    try{await api(`/alternative-offers/${altOffer.id}/respond`,{method:"POST",body:JSON.stringify({accept})});setAltOffer(null);setNotice({kind:"success",text:accept?"Place réservée sur l’événement alternatif : consultez votre espace personnel pour payer.":"Proposition refusée."})}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(false)}
+  };
 
-  return <Layout><section className="event-hero" style={{backgroundImage:`linear-gradient(180deg,#0b0b0cb0,#0b0b0ce6),url(${imgUrl(event.imageUrl)})`}}><span className="eyebrow">{event.category.toUpperCase()}</span><h1>{event.title}</h1><p>{event.description}</p></section><section className="event-layout"><article><div className="facts"><div><small>DATE</small><b>{dateTime(event.startsAt)}</b></div><div><small>LIEU</small><b>{event.district}</b></div><div><small>CAPACITÉ</small><b>{event.capacity} participants</b></div></div><h2>Une expérience pensée pour de vraies rencontres</h2><p>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité. Une boisson est incluse avec le billet.</p><ul><li>Profils sélectionnés</li><li>QR code d’entrée unique</li><li>Code de contact privé</li><li>Équipe présente sur place</li></ul></article><aside className="booking"><small>À PARTIR DE</small><strong>{money(event.priceCents)}</strong><div><span>Disponibilité</span><b>{full?"Complet":`${event.capacity-event.confirmedCount} places`}</b></div>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
+  return <Layout><section className="event-hero" style={{backgroundImage:`linear-gradient(180deg,#0b0b0cb0,#0b0b0ce6),url(${imgUrl(event.imageUrl)})`}}><span className="eyebrow">{event.category.toUpperCase()}</span><h1>{event.title}</h1><p>{event.description}</p></section><section className="event-layout"><article><div className="facts"><div><small>DATE</small><b>{dateTime(event.startsAt)}</b></div><div><small>LIEU</small><b>{event.district}</b></div><div><small>CAPACITÉ</small><b>{event.capacity} participants</b></div></div>{event.quotas.length>0&&<div className="quota-breakdown"><small>PLACES PAR CATÉGORIE</small><div className="quota-rows">{event.quotas.map(q=><div key={q.category} className="quota-row"><span>{q.category==="HOMME"?"Hommes":"Femmes"}</span><b>{q.heldCount>=q.capacity?"Complet":`${q.capacity-q.heldCount} places`}</b></div>)}</div></div>}<h2>Une expérience pensée pour de vraies rencontres</h2><p>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité. Une boisson est incluse avec le billet.</p><ul><li>Profils sélectionnés</li><li>QR code d’entrée unique</li><li>Code de contact privé</li><li>Équipe présente sur place</li></ul></article><aside className="booking"><small>À PARTIR DE</small><strong>{money(event.priceCents)}</strong><div><span>Disponibilité</span><b>{event.quotas.length>0?(myQuota?(bucketFull?"Complet pour votre catégorie":`${myQuota.capacity-myQuota.heldCount} places pour vous`):"Places selon catégorie"):(bucketFull?"Complet":`${event.capacity-event.confirmedCount} places`)}</b></div>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
+    {altOffer&&<div className="alt-offer"><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{altOffer.alternativeEvent.title}</h3><p>{dateTime(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</p><p><b>{money(altOffer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busy} onClick={()=>respondAltOffer(true)}>Accepter</button><button className="button secondary" disabled={busy} onClick={()=>respondAltOffer(false)}>Refuser</button></div></div>}
     {!user?<Link className="button full" to="/login">Se connecter pour candidater</Link>
     :loadingApplication?<div className="calendar-state"><div className="spinner small"/><span>Chargement…</span></div>
-    :application?(application.status==="PENDING_CALL"&&!application.call?<CallCalendar slots={slots} loading={loadingSlots} onSelect={schedule} schedulingId={schedulingId}/>:<ApplicationStatusPanel application={application} event={event} onPaid={refreshApplication}/>)
-    :full?<button className="button full" onClick={()=>api(`/events/${event.id}/waitlist`,{method:"POST"}).then(()=>setNotice({kind:"success",text:"Vous êtes inscrit sur la liste d’attente."}))}>Rejoindre la liste d’attente</button>
-    :<form onSubmit={apply}><label>Votre motivation<textarea required minLength={30} value={motivation} onChange={e=>setMotivation(e.target.value)} placeholder="Expliquez en quelques lignes ce que vous recherchez…"/></label><button className="button full">Envoyer ma candidature</button></form>}
+    :application?<>
+      {application.status==="PENDING_CALL"&&!application.call?<CallCalendar slots={slots} loading={loadingSlots} onSelect={schedule} schedulingId={schedulingId}/>:<ApplicationStatusPanel application={application} event={event} onPaid={refreshApplication}/>}
+      {waitlistEntry?<div className="waitlist-status"><span className="eyebrow">LISTE D’ATTENTE</span><p>Position {waitlistEntry.rank??waitlistEntry.position}{waitlistEntry.offeredAt?" — une place vous a été proposée, consultez votre espace personnel":""}</p><button className="button secondary small" disabled={busy} onClick={leaveWaitlist}>Quitter la liste d’attente</button></div>
+      :(categoryUnknown?<Notice kind="error">Complétez votre catégorie dans votre profil pour rejoindre la liste d’attente.</Notice>:(bucketFull&&canCancel&&<button className="button secondary full" disabled={busy} onClick={joinWaitlist}>Rejoindre la liste d’attente</button>))}
+      {canCancel&&<button className="button danger full" disabled={busy} onClick={cancelApplication}>Annuler ma candidature</button>}
+    </>
+    :categoryUnknown?<Notice kind="error">Complétez votre catégorie (homme/femme) dans votre profil avant de candidater à cet événement.</Notice>
+    :<form onSubmit={apply}>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même candidater : une liste d’attente et une éventuelle proposition alternative vous seront proposées.</Notice>}<label>Votre motivation<textarea required minLength={30} value={motivation} onChange={e=>setMotivation(e.target.value)} placeholder="Expliquez en quelques lignes ce que vous recherchez…"/></label><button className="button full">Envoyer ma candidature</button></form>}
     <p className="fine">Le paiement est proposé uniquement après acceptation.</p></aside></section></Layout>;
 }
 
@@ -210,9 +253,9 @@ function Login() {
 }
 
 function ProfileEditor({onSaved}:{onSaved:()=>void}) {
-  const {user}=useAuth(); const [form,setForm]=useState({displayName:user?.displayName??"",email:user?.email??"",birthDate:"1992-06-14",city:user?.profile?.city??"",profession:user?.profile?.profession??"",interests:(user?.profile?.interests??[]).join(", "),bio:user?.profile?.bio??""});const [message,setMessage]=useState("");
-  const save=async(e:FormEvent)=>{e.preventDefault();await api("/me/profile",{method:"PATCH",body:JSON.stringify({...form,email:form.email||null,interests:form.interests.split(",").map((x:string)=>x.trim()).filter(Boolean)})});setMessage("Profil enregistré.");onSaved()};
-  return <form className="panel form-grid" onSubmit={save}><div className="panel-title"><h2>Mon profil</h2><span>Informations privées</span></div>{message&&<Notice kind="success">{message}</Notice>}<label>Prénom ou pseudonyme<input value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})}/></label><label>E-mail<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Date de naissance<input type="date" value={form.birthDate} onChange={e=>setForm({...form,birthDate:e.target.value})}/></label><label>Ville<input value={form.city} onChange={e=>setForm({...form,city:e.target.value})}/></label><label>Profession<input value={form.profession} onChange={e=>setForm({...form,profession:e.target.value})}/></label><label>Centres d’intérêt<input value={form.interests} onChange={e=>setForm({...form,interests:e.target.value})}/></label><label className="wide">Biographie<textarea value={form.bio} onChange={e=>setForm({...form,bio:e.target.value})}/></label><button className="button">Enregistrer</button></form>;
+  const {user}=useAuth(); const [form,setForm]=useState({displayName:user?.displayName??"",email:user?.email??"",birthDate:"1992-06-14",city:user?.profile?.city??"",profession:user?.profile?.profession??"",interests:(user?.profile?.interests??[]).join(", "),bio:user?.profile?.bio??"",quotaCategory:user?.profile?.quotaCategory??""});const [message,setMessage]=useState("");
+  const save=async(e:FormEvent)=>{e.preventDefault();await api("/me/profile",{method:"PATCH",body:JSON.stringify({...form,email:form.email||null,quotaCategory:form.quotaCategory||null,interests:form.interests.split(",").map((x:string)=>x.trim()).filter(Boolean)})});setMessage("Profil enregistré.");onSaved()};
+  return <form className="panel form-grid" onSubmit={save}><div className="panel-title"><h2>Mon profil</h2><span>Informations privées</span></div>{message&&<Notice kind="success">{message}</Notice>}<label>Prénom ou pseudonyme<input value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})}/></label><label>E-mail<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Date de naissance<input type="date" value={form.birthDate} onChange={e=>setForm({...form,birthDate:e.target.value})}/></label><label>Ville<input value={form.city} onChange={e=>setForm({...form,city:e.target.value})}/></label><label>Profession<input value={form.profession} onChange={e=>setForm({...form,profession:e.target.value})}/></label><label>Centres d’intérêt<input value={form.interests} onChange={e=>setForm({...form,interests:e.target.value})}/></label><label>Catégorie (pour les événements avec quotas, ex. speed dating)<select value={form.quotaCategory} onChange={e=>setForm({...form,quotaCategory:e.target.value})}><option value="">Non renseignée</option><option value="HOMME">Homme</option><option value="FEMME">Femme</option></select></label><label className="wide">Biographie<textarea value={form.bio} onChange={e=>setForm({...form,bio:e.target.value})}/></label><button className="button">Enregistrer</button></form>;
 }
 
 function RestaurantApplication() {
@@ -250,11 +293,24 @@ function RestaurantApplication() {
 }
 
 function Dashboard() {
-  const {user,refresh}=useAuth(); const [apps,setApps]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]),[tab,setTab]=useState("reservations"),[payingFor,setPayingFor]=useState<{reservationId:string;eventId:string;amountCents:number}|null>(null);
-  const load=()=>Promise.all([api<any[]>("/me/applications"),api<any[]>("/me/tickets"),api<any[]>("/notifications")]).then(([a,t,n])=>{setApps(a);setTickets(t);setNotifications(n)}); useEffect(()=>{load()},[]);
-  const tabs=[["reservations","Réservations"],["tickets","Billets"],["profile","Profil"],["notifications","Notifications"],["contacts","Contacts et messages"],...(user?.role==="PARTICIPANT"?[["restaurant","Devenir restaurateur"]]:[])];
-  const titles:Record<string,string>={reservations:"Mes événements",tickets:"Mes billets",profile:"Mon profil",notifications:"Notifications",contacts:"Contacts et messages",restaurant:"Devenir restaurateur"};
-  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><div className="avatar large">{user?.displayName?.slice(0,2).toUpperCase()}</div><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{tab==="reservations"&&<div className="stack">{apps.map(a=><article className="reservation" key={a.id}><div className="date-box"><strong>{new Date(a.event.startsAt).getDate()}</strong><span>{new Date(a.event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</span></div><div><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}</div>{a.status==="PAYMENT_PENDING"&&a.reservation&&<button className="button" onClick={()=>setPayingFor({reservationId:a.reservation.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>}</article>)}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><span className="eyebrow">{new Date(t.reservation.event.startsAt).toLocaleDateString("fr-FR")}</span><h2>{t.reservation.event.title}</h2><p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<ProfileEditor onSaved={refresh}/>} {tab==="notifications"&&<div className="stack">{notifications.map(n=><article className="notification" key={n.id}><i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div></article>)}</div>}{tab==="contacts"&&<Messages/>}{tab==="restaurant"&&<RestaurantApplication/>}</div></section>
+  const {user,refresh}=useAuth(); const [apps,setApps]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]),[offers,setOffers]=useState<any[]>([]),[tab,setTab]=useState("reservations"),[payingFor,setPayingFor]=useState<{reservationId:string;eventId:string;amountCents:number}|null>(null),[busyId,setBusyId]=useState<string|null>(null),[message,setMessage]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const load=()=>Promise.all([api<any[]>("/me/applications"),api<any[]>("/me/tickets"),api<any[]>("/notifications"),api<any[]>("/me/alternative-offers")]).then(([a,t,n,o])=>{setApps(a);setTickets(t);setNotifications(n);setOffers(o)}); useEffect(()=>{load()},[]);
+  const pendingOffers=offers.filter(o=>o.status==="PENDING");
+  const cancelApplication=async(appId:string)=>{
+    setBusyId(appId);setMessage(null);
+    try{await api(`/me/applications/${appId}/cancel`,{method:"POST"});setMessage({kind:"success",text:"Candidature annulée."});await load()}
+    catch(err){setMessage({kind:"error",text:(err as Error).message})}
+    finally{setBusyId(null)}
+  };
+  const respondOffer=async(offerId:string, accept:boolean)=>{
+    setBusyId(offerId);setMessage(null);
+    try{await api(`/alternative-offers/${offerId}/respond`,{method:"POST",body:JSON.stringify({accept})});setMessage({kind:"success",text:accept?"Place réservée : réglez votre billet avant expiration.":"Proposition refusée."});await load()}
+    catch(err){setMessage({kind:"error",text:(err as Error).message})}
+    finally{setBusyId(null)}
+  };
+  const tabs=[["reservations","Réservations"],["tickets","Billets"],["alternatives",`Propositions${pendingOffers.length?` (${pendingOffers.length})`:""}`],["profile","Profil"],["notifications","Notifications"],["contacts","Contacts et messages"],...(user?.role==="PARTICIPANT"?[["restaurant","Devenir restaurateur"]]:[])];
+  const titles:Record<string,string>={reservations:"Mes événements",tickets:"Mes billets",alternatives:"Propositions alternatives",profile:"Mon profil",notifications:"Notifications",contacts:"Contacts et messages",restaurant:"Devenir restaurateur"};
+  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><div className="avatar large">{user?.displayName?.slice(0,2).toUpperCase()}</div><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="reservations"&&<div className="stack">{apps.map(a=><article className="reservation" key={a.id}><div className="date-box"><strong>{new Date(a.event.startsAt).getDate()}</strong><span>{new Date(a.event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</span></div><div><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&a.reservation&&<button className="button" onClick={()=>setPayingFor({reservationId:a.reservation.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler</button>}</div></article>)}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><span className="eyebrow">{new Date(t.reservation.event.startsAt).toLocaleDateString("fr-FR")}</span><h2>{t.reservation.event.title}</h2><p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="alternatives"&&<div className="stack">{offers.length===0?<div className="empty small"><span>◇</span><p>Aucune proposition pour le moment.</p></div>:offers.map(o=><article key={o.id} className="alt-offer"><span className="eyebrow">{o.status==="PENDING"?"EN ATTENTE DE VOTRE RÉPONSE":o.status==="ACCEPTED"?"ACCEPTÉE":o.status==="DECLINED"?"REFUSÉE":"EXPIRÉE"}</span><h3>{o.alternativeEvent.title}</h3><p>À la place de « {o.originalEvent.title} »</p><p>{dateTime(o.alternativeEvent.startsAt)} · {o.alternativeEvent.district}</p><p><b>{money(o.alternativeEvent.priceCents)}</b></p>{o.status==="PENDING"&&<div className="decision-buttons"><button className="button" disabled={busyId===o.id} onClick={()=>respondOffer(o.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===o.id} onClick={()=>respondOffer(o.id,false)}>Refuser</button></div>}</article>)}</div>}{tab==="profile"&&<ProfileEditor onSaved={refresh}/>} {tab==="notifications"&&<div className="stack">{notifications.map(n=><article className="notification" key={n.id}><i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div></article>)}</div>}{tab==="contacts"&&<Messages/>}{tab==="restaurant"&&<RestaurantApplication/>}</div></section>
   {payingFor&&<PaymentModal reservationId={payingFor.reservationId} eventId={payingFor.eventId} amountCents={payingFor.amountCents} onClose={()=>setPayingFor(null)} onConfirmed={()=>{setPayingFor(null);load()}}/>}
   </Layout>;
 }
@@ -292,9 +348,30 @@ function AdminEventPhotos() {
   const [actingOn,setActingOn]=useState<string|null>(null);
   const [rejectNoteFor,setRejectNoteFor]=useState<string|null>(null);
   const [rejectNote,setRejectNote]=useState("");
+  const [quotaEditFor,setQuotaEditFor]=useState<string|null>(null);
+  const [quotaForm,setQuotaForm]=useState({homme:0,femme:0});
+  const [cancelConfirmFor,setCancelConfirmFor]=useState<string|null>(null);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const load=()=>api<any[]>("/admin/events").then(setEvents);
   useEffect(()=>{load()},[]);
+
+  const openQuotaEditor=(ev:any)=>{
+    const homme=ev.quotas?.find((q:any)=>q.category==="HOMME")?.capacity??0;
+    const femme=ev.quotas?.find((q:any)=>q.category==="FEMME")?.capacity??0;
+    setQuotaForm({homme,femme});setQuotaEditFor(ev.id);
+  };
+  const saveQuotas=async(eventId:string)=>{
+    setActingOn(eventId);setNotice(null);
+    try{await api(`/admin/events/${eventId}/quotas`,{method:"POST",body:JSON.stringify(quotaForm)});setNotice({kind:"success",text:"Quotas mis à jour."});setQuotaEditFor(null);await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setActingOn(null)}
+  };
+  const cancelEvent=async(eventId:string)=>{
+    setActingOn(eventId);setNotice(null);
+    try{const res=await api<any>(`/admin/events/${eventId}/cancel`,{method:"POST"});setNotice({kind:"success",text:`Événement annulé.${res.paidReservationsToRefund?` ${res.paidReservationsToRefund} paiement(s) à rembourser manuellement.`:""}`});setCancelConfirmFor(null);await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setActingOn(null)}
+  };
 
   const upload=async(eventId:string, file:File)=>{
     if(!["image/jpeg","image/png","image/webp"].includes(file.type)){setNotice({kind:"error",text:"Format non pris en charge (jpeg, png ou webp uniquement)."});return}
@@ -330,6 +407,12 @@ function AdminEventPhotos() {
         <button className="button small" disabled={actingOn===ev.id} onClick={()=>reviewDecision(ev.id,true)}>Publier</button>
         {rejectNoteFor===ev.id?<div className="reject-note"><input value={rejectNote} onChange={e=>setRejectNote(e.target.value)} placeholder="Motif (optionnel)"/><button className="button small danger" disabled={actingOn===ev.id} onClick={()=>reviewDecision(ev.id,false,rejectNote)}>Confirmer le refus</button></div>:<button className="button small danger" onClick={()=>setRejectNoteFor(ev.id)}>Renvoyer en brouillon</button>}
       </div>}
+      {ev.category==="Speed dating"&&<div className="quota-editor">
+        {quotaEditFor===ev.id?<><div className="time-row"><label>Hommes<input type="number" min={0} value={quotaForm.homme} onChange={e=>setQuotaForm({...quotaForm,homme:Number(e.target.value)})}/></label><label>Femmes<input type="number" min={0} value={quotaForm.femme} onChange={e=>setQuotaForm({...quotaForm,femme:Number(e.target.value)})}/></label></div><button className="button small" disabled={actingOn===ev.id} onClick={()=>saveQuotas(ev.id)}>Enregistrer les quotas</button></>
+        :<button className="button small secondary" onClick={()=>openQuotaEditor(ev)}>{ev.quotas?.length?"Modifier les quotas":"Définir des quotas"}</button>}
+        {ev.quotas?.length>0&&<p className="fine left">{ev.quotas.map((q:any)=>`${q.category==="HOMME"?"Hommes":"Femmes"} : ${q.heldCount}/${q.capacity}`).join(" · ")}</p>}
+      </div>}
+      {ev.status!=="CANCELLED"&&(cancelConfirmFor===ev.id?<div className="reject-note"><span className="fine left">Confirmer l’annulation de cet événement ?</span><button className="button small danger" disabled={actingOn===ev.id} onClick={()=>cancelEvent(ev.id)}>Confirmer l’annulation</button></div>:<button className="button small danger" onClick={()=>setCancelConfirmFor(ev.id)}>Annuler l’événement</button>)}
     </div></div>)}</div>
   </div></section></Layout>;
 }

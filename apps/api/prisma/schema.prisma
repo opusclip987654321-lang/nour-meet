@@ -70,6 +70,18 @@ enum ReportStatus {
   DISMISSED
 }
 
+enum QuotaCategory {
+  HOMME
+  FEMME
+}
+
+enum AlternativeOfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
 model User {
   id               String           @id @default(cuid())
   phone            String           @unique
@@ -94,6 +106,7 @@ model User {
   reportsReceived  Report[]         @relation("reported")
   notifications    Notification[]
   loyaltyEntries   LoyaltyEntry[]
+  alternativeOffers AlternativeOffer[]
 }
 
 model Profile {
@@ -108,6 +121,7 @@ model Profile {
   photoUrl        String?
   shareCode       String   @unique @default(cuid())
   profileCompleted Boolean @default(false)
+  quotaCategory   QuotaCategory?
   validatedAt     DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -149,6 +163,7 @@ model Event {
   endsAt                  DateTime
   district                String
   address                 String
+  zone                    String?
   capacity                Int
   priceCents              Int
   status                  EventStatus @default(DRAFT)
@@ -159,8 +174,21 @@ model Event {
   callSlots               ScreeningCall[]
   reservations            Reservation[]
   waitlist                WaitlistEntry[]
+  quotas                  EventQuota[]
+  originalOffers          AlternativeOffer[] @relation("OriginalEvent")
+  alternativeOffers       AlternativeOffer[] @relation("AlternativeEvent")
   createdAt               DateTime    @default(now())
   updatedAt               DateTime    @updatedAt
+}
+
+model EventQuota {
+  id        String        @id @default(cuid())
+  eventId   String
+  event     Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  category  QuotaCategory
+  capacity  Int
+  heldCount Int           @default(0)
+  @@unique([eventId, category])
 }
 
 model Application {
@@ -172,9 +200,11 @@ model Application {
   motivation  String
   notes       String?
   status      ApplicationStatus @default(PENDING_CALL)
+  quotaCategory QuotaCategory?
   decidedAt   DateTime?
   call        ScreeningCall?
   reservation Reservation?
+  waitlistEntry WaitlistEntry?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
   @@unique([eventId, userId])
@@ -200,11 +230,13 @@ model Reservation {
   event         Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   application   Application  @relation(fields: [applicationId], references: [id])
+  quotaCategory QuotaCategory?
   expiresAt     DateTime
   confirmedAt   DateTime?
   cancelledAt   DateTime?
   payment       Payment?
   ticket        Ticket?
+  alternativeOffer AlternativeOffer?
   createdAt     DateTime     @default(now())
   @@unique([eventId, userId])
 }
@@ -233,16 +265,35 @@ model Ticket {
 }
 
 model WaitlistEntry {
-  id        String   @id @default(cuid())
-  eventId   String
-  userId    String
-  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  position  Int
-  offeredAt DateTime?
-  expiresAt DateTime?
-  createdAt DateTime @default(now())
+  id            String   @id @default(cuid())
+  eventId       String
+  userId        String
+  applicationId String   @unique
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application   Application @relation(fields: [applicationId], references: [id])
+  quotaCategory QuotaCategory?
+  position      Int
+  offeredAt     DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime @default(now())
   @@unique([eventId, userId])
+}
+
+model AlternativeOffer {
+  id                 String                 @id @default(cuid())
+  userId             String
+  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originalEventId    String
+  originalEvent      Event                  @relation("OriginalEvent", fields: [originalEventId], references: [id], onDelete: Cascade)
+  alternativeEventId String
+  alternativeEvent   Event                  @relation("AlternativeEvent", fields: [alternativeEventId], references: [id], onDelete: Cascade)
+  status             AlternativeOfferStatus @default(PENDING)
+  respondsBy         DateTime
+  reservationId      String?                @unique
+  reservation        Reservation?           @relation(fields: [reservationId], references: [id])
+  createdAt          DateTime               @default(now())
+  respondedAt        DateTime?
 }
 
 model ContactRequest {

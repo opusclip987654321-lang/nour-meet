@@ -24,4 +24,17 @@
 .payment-amount b{color:var(--gold)}
 .payment-form{display:grid;gap:18px}
 .payment-actions{display:grid;grid-template-columns:1fr 1.4fr;gap:10px}
+.quota-breakdown{border-top:1px solid var(--line);padding-top:20px;margin-top:20px}
+.quota-breakdown>small{color:var(--gold)}
+.quota-rows{display:grid;gap:8px;margin-top:10px}
+.quota-row{display:flex;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 14px;font-size:13px}
+.waitlist-status{background:#cba96910;border:1px solid #6b5533;border-radius:8px;padding:16px;display:grid;gap:10px;margin:10px 0}
+.waitlist-status p{margin:0;color:#ddd;font-size:13px}
+.alt-offer{background:var(--panel);border:1px solid #5a482f;border-radius:8px;padding:16px;display:grid;gap:6px;margin:12px 0}
+.alt-offer h3{font:19px 'Playfair Display';margin:4px 0}
+.alt-offer p{margin:0;color:var(--muted);font-size:13px}
+.alt-offer .decision-buttons{margin-top:10px}
+.reservation-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.quota-editor{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:10px;margin-top:6px}
+.quota-editor input{width:100%}
 @media(max-width:900px){.availability-layout{grid-template-columns:1fr}.event-photo-grid{grid-template-columns:1fr}.calendar-slots{grid-template-columns:repeat(auto-fill,minmax(78px,1fr))}.modal{padding:20px}.payment-actions{grid-template-columns:1fr}.site-header{gap:15px;padding:0 16px}.site-header nav{display:none}.member-name{display:none}.hero{grid-template-columns:1fr;padding:60px 22px}.hero-art{height:440px}.arch{width:300px;height:400px;right:0}.trust{flex-direction:column;gap:7px}.feature-grid,.event-grid,.stat-grid{grid-template-columns:1fr}.metrics{gap:10px;padding:20px 5px}.metrics strong{font-size:24px}.event-layout{grid-template-columns:1fr;padding:30px 20px}.booking{margin-top:0}.facts{grid-template-columns:1fr}.auth-page{grid-template-columns:1fr}.auth-visual{display:none}.auth-form{padding:55px 22px}.dashboard-shell{grid-template-columns:1fr;padding:25px 16px}.dashboard-shell>aside{border:0;padding:0;overflow:auto;display:flex}.profile-card{display:none}.dashboard-shell>aside>button{min-width:max-content}.ticket-grid,.ticket{grid-template-columns:1fr}.messages{grid-template-columns:1fr}.messages>aside{display:flex;overflow:auto}.messages>aside button{min-width:200px}.admin-page{grid-template-columns:1fr}.admin-nav{position:static;flex-direction:row;overflow:auto}.admin-nav .logo{display:none}.admin-nav>a:not(.logo){min-width:max-content}.admin-main{padding:25px 16px}.admin-grid,.applications-layout,.scanner-layout{grid-template-columns:1fr}.filters{flex-direction:column}.section-title.row{align-items:start}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.reservation{grid-template-columns:60px 1fr}.reservation>.button{grid-column:1/-1}.event-hero h1{font-size:44px}.site-header .logo strong{display:none}}
