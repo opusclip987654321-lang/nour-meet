@@ -39,6 +39,12 @@ const notify = async (userId: string, title: string, body: string) => {
   await prisma.outboxMessage.create({ data: { channel: "SMS", recipient: user.phone, body: `${title} — ${body}` } });
   if (user.email) await prisma.outboxMessage.create({ data: { channel: "EMAIL", recipient: user.email, subject: title, body } });
 };
+const assertEventAccess = async (request: FastifyRequest, eventId: string) => {
+  const token = request.user as TokenUser;
+  if (token.role === UserRole.ADMIN) return prisma.event.findUniqueOrThrow({ where: { id: eventId } });
+  const organizer = await prisma.organizer.findUniqueOrThrow({ where: { ownerId: token.sub } });
+  return prisma.event.findFirstOrThrow({ where: { id: eventId, organizerId: organizer.id } });
+};
 const profileAge = (birthDate?: Date | null) => birthDate ? Math.floor((Date.now() - birthDate.getTime()) / 31_557_600_000) : null;
 const publicEvent = (event: any, revealAddress = false) => ({
   id: event.id, slug: event.slug, title: event.title, category: event.category, description: event.description,
@@ -112,6 +118,13 @@ app.get("/events/:id/call-slots", { preHandler: auth }, async (request) => {
   return prisma.screeningCall.findMany({ where: { eventId: id, applicationId: null, startsAt: { gt: new Date() } }, orderBy: { startsAt: "asc" } });
 });
 
+app.get("/events/:id/my-application", { preHandler: auth }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId: currentId(request) } }, include: { call: true, reservation: { include: { payment: true } } } });
+  if (!application) return reply.code(404).send({ error: "Aucune candidature pour cet événement" });
+  return application;
+});
+
 app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const { motivation } = z.object({ motivation: z.string().min(30).max(1200) }).parse(request.body);
@@ -131,12 +144,16 @@ app.post("/applications/:id/schedule", { preHandler: auth }, async (request, rep
   const { slotId } = z.object({ slotId: z.string() }).parse(request.body);
   const userId = currentId(request);
   const application = await prisma.application.findFirstOrThrow({ where: { id, userId } });
-  const slot = await prisma.screeningCall.findFirst({ where: { id: slotId, eventId: application.eventId, applicationId: null } });
-  if (!slot) return reply.code(409).send({ error: "Ce créneau n’est plus disponible" });
-  await prisma.$transaction([
-    prisma.screeningCall.update({ where: { id: slot.id }, data: { applicationId: application.id } }),
-    prisma.application.update({ where: { id }, data: { status: ApplicationStatus.CALL_SCHEDULED } })
-  ]);
+  if (application.status !== ApplicationStatus.PENDING_CALL) return reply.code(409).send({ error: "Un entretien est déjà programmé pour cette candidature" });
+  // L'UPDATE conditionné par applicationId: null est atomique côté PostgreSQL : si deux participants
+  // réservent le même créneau au même instant, un seul verra count === 1, l'autre reçoit un 409.
+  const slot = await prisma.$transaction(async (tx) => {
+    const updated = await tx.screeningCall.updateMany({ where: { id: slotId, eventId: application.eventId, applicationId: null }, data: { applicationId: application.id } });
+    if (updated.count !== 1) return null;
+    await tx.application.update({ where: { id }, data: { status: ApplicationStatus.CALL_SCHEDULED } });
+    return tx.screeningCall.findUniqueOrThrow({ where: { id: slotId } });
+  });
+  if (!slot) return reply.code(409).send({ error: "Ce créneau vient d’être réservé par un autre participant. Choisissez-en un autre." });
   await notify(userId, "Entretien planifié", `Votre appel est prévu le ${slot.startsAt.toLocaleString("fr-FR")}.`);
   return { scheduled: true, slot };
 });
@@ -264,6 +281,48 @@ app.post("/admin/applications/:id/decision", { preHandler: roles(UserRole.ADMIN,
   await notify(application.userId, "Candidature acceptée", `Vous avez 24 heures pour payer votre billet de ${(application.event.priceCents / 100).toFixed(2)} €.`);
   await audit(currentId(request), "ACCEPT_APPLICATION", "Application", id);
   return { accepted: true, reservation };
+});
+app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const token = request.user as TokenUser;
+  const organizer = token.role === UserRole.ORGANIZER ? await prisma.organizer.findUniqueOrThrow({ where: { ownerId: token.sub } }) : null;
+  return prisma.event.findMany({ where: organizer ? { organizerId: organizer.id } : undefined, orderBy: { startsAt: "asc" } });
+});
+app.get("/admin/events/:id/call-slots", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  await assertEventAccess(request, id);
+  return prisma.screeningCall.findMany({ where: { eventId: id }, include: { application: { include: { user: true } } }, orderBy: { startsAt: "asc" } });
+});
+app.post("/admin/events/:id/call-slots/generate", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  await assertEventAccess(request, id);
+  const input = z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    startTime: z.string().regex(/^\d{2}:\d{2}$/),
+    endTime: z.string().regex(/^\d{2}:\d{2}$/),
+    durationMinutes: z.number().int().min(5).max(180)
+  }).parse(request.body);
+  const dayStart = new Date(`${input.date}T${input.startTime}:00`);
+  const dayEnd = new Date(`${input.date}T${input.endTime}:00`);
+  if (dayEnd <= dayStart) return reply.code(400).send({ error: "L’heure de fin doit être après l’heure de début" });
+  if (dayStart < new Date()) return reply.code(400).send({ error: "Impossible de proposer des créneaux dans le passé" });
+  const candidates: { startsAt: Date; endsAt: Date }[] = [];
+  for (let cursor = dayStart.getTime(); cursor + input.durationMinutes * 60_000 <= dayEnd.getTime(); cursor += input.durationMinutes * 60_000) {
+    candidates.push({ startsAt: new Date(cursor), endsAt: new Date(cursor + input.durationMinutes * 60_000) });
+  }
+  if (candidates.length === 0) return reply.code(400).send({ error: "Aucun créneau ne peut être généré avec ces horaires" });
+  const existing = await prisma.screeningCall.findMany({ where: { eventId: id, startsAt: { gte: dayStart, lt: dayEnd } }, select: { startsAt: true } });
+  const existingTimes = new Set(existing.map(s => s.startsAt.getTime()));
+  const toCreate = candidates.filter(c => !existingTimes.has(c.startsAt.getTime()));
+  if (toCreate.length > 0) await prisma.screeningCall.createMany({ data: toCreate.map(c => ({ eventId: id, startsAt: c.startsAt, endsAt: c.endsAt })) });
+  await audit(currentId(request), "GENERATE_CALL_SLOTS", "Event", id, { date: input.date, created: toCreate.length });
+  return reply.code(201).send({ created: toCreate.length, skipped: candidates.length - toCreate.length });
+});
+app.delete("/admin/events/:id/call-slots/:slotId", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id, slotId } = z.object({ id: z.string(), slotId: z.string() }).parse(request.params);
+  await assertEventAccess(request, id);
+  const deleted = await prisma.screeningCall.deleteMany({ where: { id: slotId, eventId: id, applicationId: null } });
+  if (deleted.count === 0) return reply.code(409).send({ error: "Ce créneau est réservé ou introuvable : il ne peut pas être supprimé" });
+  return reply.code(204).send();
 });
 app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const input = z.object({ organizerId: z.string(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.string(), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false) }).parse(request.body);
