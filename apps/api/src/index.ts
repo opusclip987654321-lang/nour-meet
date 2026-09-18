@@ -14,7 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES, QUOTA_ELIGIBLE_CATEGORY, EVENT_ZONES } from "@nour/shared";
 import { env } from "./env.js";
-import { paymentDeadline } from "./domain.js";
+import { paymentDeadline, interviewRetryDate } from "./domain.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { createSmsVerificationProvider } from "./sms-verification.js";
 
@@ -232,49 +232,84 @@ app.get("/events/:id", async (request) => {
   return publicEvent(event);
 });
 
-app.get("/events/:id/call-slots", { preHandler: auth }, async (request) => {
-  const { id } = z.object({ id: z.string() }).parse(request.params);
-  return prisma.screeningCall.findMany({ where: { eventId: id, applicationId: null, startsAt: { gt: new Date() } }, orderBy: { startsAt: "asc" } });
-});
-
 app.get("/events/:id/my-application", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId: currentId(request) } }, include: { call: true, reservation: { include: { payment: true } } } });
-  if (!application) return reply.code(404).send({ error: "Aucune candidature pour cet événement" });
+  if (!application) return reply.code(404).send({ error: "Aucune inscription pour cet événement" });
   return application;
 });
 
+// Inscription directe : un profil déjà validé (entretien global réussi) s'inscrit à un événement
+// précis sans nouvel entretien ni décision manuelle — la place est immédiatement tentée (quota ou
+// capacité globale) ; si complet, la personne rejoint automatiquement la liste d'attente.
 app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const { motivation } = z.object({ motivation: z.string().min(30).max(1200) }).parse(request.body);
   const userId = currentId(request);
   const profile = await prisma.profile.findUnique({ where: { userId } });
-  if (!profile?.profileCompleted) return reply.code(409).send({ error: "Complétez votre profil avant de candidater" });
+  if (!profile?.profileCompleted) return reply.code(409).send({ error: "Complétez votre profil avant de vous inscrire" });
+  if (!profile.validatedAt) return reply.code(409).send({ error: "Votre profil doit d’abord être validé lors d’un entretien avant de vous inscrire à un événement" });
   const existing = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
-  if (existing) return reply.code(409).send({ error: "Une candidature existe déjà pour cet événement", application: existing });
+  if (existing) return reply.code(409).send({ error: "Vous êtes déjà inscrit(e) à cet événement", application: existing });
   const event = await prisma.event.findUniqueOrThrow({ where: { id } });
   const quotas = await prisma.eventQuota.findMany({ where: { eventId: id } });
   let quotaCategory: QuotaCategory | null = null;
   if (quotas.length > 0) {
-    if (!profile.quotaCategory) return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de candidater à cet événement" });
+    if (!profile.quotaCategory) return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement" });
     quotaCategory = profile.quotaCategory;
   }
-  const application = await prisma.application.create({ data: { eventId: id, userId, motivation, quotaCategory } });
-  await notify(userId, "Candidature reçue", "Choisissez maintenant un créneau pour votre entretien.");
+  const application = await prisma.application.create({ data: { eventId: id, userId, quotaCategory } });
   await audit(userId, "CREATE_APPLICATION", "Application", application.id);
-  const isFull = quotas.length > 0
-    ? (quotas.find(q => q.category === quotaCategory)?.heldCount ?? 0) >= (quotas.find(q => q.category === quotaCategory)?.capacity ?? 0)
-    : (await prisma.reservation.count({ where: { eventId: id, cancelledAt: null } })) >= event.capacity;
-  if (isFull) await createAlternativeOfferIfPossible(userId, event);
+  const result = await claimReservation(id, application);
+  if (result.ok) {
+    await notify(userId, "Inscription confirmée", `Vous avez jusqu’au ${result.reservation.expiresAt.toLocaleString("fr-FR")} pour régler votre billet de ${(event.priceCents / 100).toFixed(2)} €.`);
+    return reply.code(201).send({ application: { ...application, status: ApplicationStatus.PAYMENT_PENDING }, reservation: result.reservation });
+  }
+  if (result.reason === "NO_CATEGORY") return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement" });
+  const waitlistEntry = await prisma.waitlistEntry.create({ data: { eventId: id, userId, applicationId: application.id, quotaCategory, position: (await prisma.waitlistEntry.count({ where: { eventId: id } })) + 1 } });
+  await notify(userId, "Liste d’attente", `« ${event.title} » est complet pour votre catégorie ; vous avez été placé(e) sur liste d’attente.`);
+  await createAlternativeOfferIfPossible(userId, event);
+  await audit(userId, "APPLICATION_WAITLISTED_FULL", "Application", application.id);
+  return reply.code(201).send({ application, waitlisted: true, waitlistEntry });
+});
+
+// Entretien global de validation du profil : une seule démarche par personne (pas par événement).
+app.get("/me/global-interview", { preHandler: auth }, async (request) => {
+  const userId = currentId(request);
+  const latest = await prisma.application.findFirst({ where: { userId, eventId: null }, orderBy: { createdAt: "desc" }, include: { call: true } });
+  if (!latest) return { status: null };
+  const retryAvailableAt = latest.status === ApplicationStatus.REFUSED && latest.decidedAt ? interviewRetryDate(latest.decidedAt) : null;
+  return { ...latest, retryAvailableAt };
+});
+app.post("/me/global-interview", { preHandler: auth }, async (request, reply) => {
+  const { motivation } = z.object({ motivation: z.string().min(30).max(1200) }).parse(request.body);
+  const userId = currentId(request);
+  const profile = await prisma.profile.findUnique({ where: { userId } });
+  if (!profile?.profileCompleted) return reply.code(409).send({ error: "Complétez votre profil avant de demander un entretien" });
+  if (profile.validatedAt) return reply.code(409).send({ error: "Votre profil est déjà validé" });
+  const latest = await prisma.application.findFirst({ where: { userId, eventId: null }, orderBy: { createdAt: "desc" } });
+  if (latest && latest.status !== ApplicationStatus.REFUSED && latest.status !== ApplicationStatus.CANCELLED) {
+    return reply.code(409).send({ error: "Une demande d’entretien est déjà en cours", application: latest });
+  }
+  if (latest?.status === ApplicationStatus.REFUSED && latest.decidedAt) {
+    const retryAt = interviewRetryDate(latest.decidedAt);
+    if (retryAt > new Date()) return reply.code(409).send({ error: `Vous pourrez redemander un entretien à partir du ${retryAt.toLocaleDateString("fr-FR")}`, retryAvailableAt: retryAt });
+  }
+  const application = await prisma.application.create({ data: { userId, motivation } });
+  await notify(userId, "Demande d’entretien reçue", "Choisissez maintenant un créneau pour votre entretien.");
+  await audit(userId, "REQUEST_GLOBAL_INTERVIEW", "Application", application.id);
   return reply.code(201).send(application);
 });
+
+app.get("/interview-slots", { preHandler: auth }, async () =>
+  prisma.screeningCall.findMany({ where: { eventId: null, applicationId: null, startsAt: { gt: new Date() } }, orderBy: { startsAt: "asc" } })
+);
 
 app.post("/applications/:id/schedule", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const { slotId } = z.object({ slotId: z.string() }).parse(request.body);
   const userId = currentId(request);
   const application = await prisma.application.findFirstOrThrow({ where: { id, userId } });
-  if (application.status !== ApplicationStatus.PENDING_CALL) return reply.code(409).send({ error: "Un entretien est déjà programmé pour cette candidature" });
+  if (application.status !== ApplicationStatus.PENDING_CALL) return reply.code(409).send({ error: "Un entretien est déjà programmé pour cette démarche" });
   // L'UPDATE conditionné par applicationId: null est atomique côté PostgreSQL : si deux participants
   // réservent le même créneau au même instant, un seul verra count === 1, l'autre reçoit un 409.
   const slot = await prisma.$transaction(async (tx) => {
@@ -305,7 +340,7 @@ app.post("/me/applications/:id/cancel", { preHandler: auth }, async (request, re
     await tx.application.update({ where: { id }, data: { status: ApplicationStatus.CANCELLED } });
     await tx.waitlistEntry.deleteMany({ where: { applicationId: id } });
   });
-  if (activeReservation) await offerNextWaitlistEntry(application.eventId, activeReservation.quotaCategory);
+  if (activeReservation) await offerNextWaitlistEntry(activeReservation.eventId, activeReservation.quotaCategory);
   await audit(userId, "CANCEL_APPLICATION", "Application", id);
   await notify(userId, "Candidature annulée", hadSucceededPayment ? "Votre annulation a été prise en compte. Le remboursement de votre billet sera examiné manuellement par notre équipe." : "Votre candidature a été annulée.");
   return reply.code(204).send();
@@ -628,43 +663,39 @@ app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZ
   const eventScope = restaurant ? { controllerRestaurantId: restaurant.id } : undefined;
   const [events, applications, payments] = await Promise.all([
     prisma.event.count({ where: eventScope }),
-    prisma.application.count({ where: restaurant ? { event: { controllerRestaurantId: restaurant.id } } : undefined }),
+    prisma.application.count({ where: restaurant ? { event: { controllerRestaurantId: restaurant.id } } : { eventId: { not: null } } }),
     prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED, ...(restaurant ? { reservation: { event: { controllerRestaurantId: restaurant.id } } } : {}) }, _sum: { amountCents: true } })
   ]);
-  // Les signalements de modération concernent des comptes utilisateurs, pas un restaurant précis : réservés au super-admin.
+  // Les signalements et les entretiens globaux concernent des comptes utilisateurs, pas un
+  // restaurant précis : réservés au super-admin, qui est aujourd'hui le seul à les conduire.
   const openReports = restaurant ? null : await prisma.report.count({ where: { status: "OPEN" } });
-  return { events, applications, revenueCents: payments._sum.amountCents ?? 0, openReports };
+  const pendingInterviews = restaurant ? null : await prisma.application.count({ where: { eventId: null, status: { notIn: [ApplicationStatus.ACCEPTED, ApplicationStatus.REFUSED, ApplicationStatus.CANCELLED] } } });
+  return { events, applications, revenueCents: payments._sum.amountCents ?? 0, openReports, pendingInterviews };
 });
-app.get("/admin/applications", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
-  const token = request.user as TokenUser;
-  const restaurant = await ownRestaurant(token);
-  return prisma.application.findMany({ where: restaurant ? { event: { controllerRestaurantId: restaurant.id } } : undefined, include: { user: { include: { profile: true } }, event: true, call: true, reservation: { include: { payment: true } } }, orderBy: { createdAt: "desc" } });
-});
-app.post("/admin/applications/:id/decision", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
-  const { id } = z.object({ id: z.string() }).parse(request.params); const { accept, notes } = z.object({ accept: z.boolean(), notes: z.string().max(1000).optional() }).parse(request.body);
-  const application = await prisma.application.findUniqueOrThrow({ where: { id }, include: { event: { include: { controllerRestaurant: true } } } });
-  const token = request.user as TokenUser;
-  if (token.role === UserRole.ORGANIZER && application.event.controllerRestaurant?.ownerId !== token.sub) throw httpError(403, "Cette candidature appartient à un autre restaurateur");
-  if (!accept) { const refused = await prisma.application.update({ where: { id }, data: { status: ApplicationStatus.REFUSED, notes, decidedAt: new Date() } }); await notify(application.userId, "Candidature examinée", "Votre candidature n’a pas été retenue pour cet événement."); return refused; }
-  const result = await claimReservation(application.eventId, application);
-  if (!result.ok) {
-    if (result.reason === "NO_CATEGORY") throw httpError(409, "Ce participant doit d’abord déclarer sa catégorie de quota dans son profil.");
-    // Plus de place disponible : la candidature rejoint automatiquement la liste d'attente, et une proposition
-    // d'événement alternatif est envoyée si un événement similaire (même catégorie, même zone) a de la place.
-    const waitlistEntry = await prisma.waitlistEntry.upsert({
-      where: { eventId_userId: { eventId: application.eventId, userId: application.userId } },
-      update: {},
-      create: { eventId: application.eventId, userId: application.userId, applicationId: id, quotaCategory: application.quotaCategory, position: (await prisma.waitlistEntry.count({ where: { eventId: application.eventId } })) + 1 }
-    });
-    await notify(application.userId, "Liste d’attente", `« ${application.event.title} » est complet pour votre catégorie ; vous avez été placé(e) sur liste d’attente.`);
-    await createAlternativeOfferIfPossible(application.userId, application.event);
-    await audit(currentId(request), "APPLICATION_WAITLISTED_FULL", "Application", id);
-    return reply.code(409).send({ error: "Plus de place disponible : le participant a été placé sur liste d’attente.", waitlisted: true, waitlistEntry });
+// Entretiens globaux : uniquement le super-admin, jamais un restaurateur (voir cahier des charges §6).
+app.get("/admin/global-interviews", { preHandler: roles(UserRole.ADMIN) }, async () =>
+  prisma.application.findMany({ where: { eventId: null }, include: { user: { include: { profile: true } }, call: true }, orderBy: { createdAt: "desc" } })
+);
+app.post("/admin/global-interviews/:id/decision", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { accept, notes } = z.object({ accept: z.boolean(), notes: z.string().max(1000).optional() }).parse(request.body);
+  const application = await prisma.application.findUniqueOrThrow({ where: { id } });
+  if (application.eventId) throw httpError(409, "Cette démarche concerne un événement précis, pas l’entretien global");
+  if (application.status === ApplicationStatus.ACCEPTED || application.status === ApplicationStatus.REFUSED) return reply.code(409).send({ error: "Cet entretien a déjà été décidé" });
+  const adminId = currentId(request);
+  if (!accept) {
+    const refused = await prisma.application.update({ where: { id }, data: { status: ApplicationStatus.REFUSED, notes, decidedAt: new Date() } });
+    await notify(application.userId, "Profil non validé", `Votre profil n’a pas été validé pour le moment.${notes ? ` ${notes}` : ""} Vous pourrez redemander un entretien à partir du ${interviewRetryDate(refused.decidedAt!).toLocaleDateString("fr-FR")}.`);
+    await audit(adminId, "REFUSE_GLOBAL_INTERVIEW", "Application", id, { notes });
+    return refused;
   }
-  await prisma.application.update({ where: { id }, data: { notes, decidedAt: new Date() } });
-  await notify(application.userId, "Candidature acceptée", `Vous avez 24 heures pour payer votre billet de ${(application.event.priceCents / 100).toFixed(2)} €.`);
-  await audit(currentId(request), "ACCEPT_APPLICATION", "Application", id);
-  return { accepted: true, reservation: result.reservation };
+  const [, updatedApplication] = await prisma.$transaction([
+    prisma.profile.update({ where: { userId: application.userId }, data: { validatedAt: new Date() } }),
+    prisma.application.update({ where: { id }, data: { status: ApplicationStatus.ACCEPTED, notes, decidedAt: new Date() } })
+  ]);
+  await notify(application.userId, "Profil validé", "Votre profil est validé : vous pouvez désormais vous inscrire directement aux événements, sans nouvel entretien.");
+  await audit(adminId, "VALIDATE_PROFILE", "Application", id);
+  return updatedApplication;
 });
 app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
@@ -732,14 +763,12 @@ app.post("/admin/waitlist/:id/promote", { preHandler: roles(UserRole.ADMIN) }, a
   await audit(currentId(request), "ADMIN_PROMOTE_WAITLIST", "WaitlistEntry", id);
   return result.reservation;
 });
-app.get("/admin/events/:id/call-slots", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
-  const { id } = z.object({ id: z.string() }).parse(request.params);
-  await assertEventAccess(request, id);
-  return prisma.screeningCall.findMany({ where: { eventId: id }, include: { application: { include: { user: true } } }, orderBy: { startsAt: "asc" } });
-});
-app.post("/admin/events/:id/call-slots/generate", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
-  const { id } = z.object({ id: z.string() }).parse(request.params);
-  await assertEventAccess(request, id);
+// Agenda central des entretiens : un seul agenda pour toute la plateforme, non lié à un événement.
+// Aujourd'hui réservé au super-admin (seul interlocuteur), sans agenda autonome pour les restaurateurs.
+app.get("/admin/interview-slots", { preHandler: roles(UserRole.ADMIN) }, async () =>
+  prisma.screeningCall.findMany({ where: { eventId: null }, include: { application: { include: { user: true } } }, orderBy: { startsAt: "asc" } })
+);
+app.post("/admin/interview-slots/generate", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const input = z.object({
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     startTime: z.string().regex(/^\d{2}:\d{2}$/),
@@ -755,17 +784,16 @@ app.post("/admin/events/:id/call-slots/generate", { preHandler: roles(UserRole.A
     candidates.push({ startsAt: new Date(cursor), endsAt: new Date(cursor + input.durationMinutes * 60_000) });
   }
   if (candidates.length === 0) return reply.code(400).send({ error: "Aucun créneau ne peut être généré avec ces horaires" });
-  const existing = await prisma.screeningCall.findMany({ where: { eventId: id, startsAt: { gte: dayStart, lt: dayEnd } }, select: { startsAt: true } });
+  const existing = await prisma.screeningCall.findMany({ where: { eventId: null, startsAt: { gte: dayStart, lt: dayEnd } }, select: { startsAt: true } });
   const existingTimes = new Set(existing.map(s => s.startsAt.getTime()));
   const toCreate = candidates.filter(c => !existingTimes.has(c.startsAt.getTime()));
-  if (toCreate.length > 0) await prisma.screeningCall.createMany({ data: toCreate.map(c => ({ eventId: id, startsAt: c.startsAt, endsAt: c.endsAt })) });
-  await audit(currentId(request), "GENERATE_CALL_SLOTS", "Event", id, { date: input.date, created: toCreate.length });
+  if (toCreate.length > 0) await prisma.screeningCall.createMany({ data: toCreate.map(c => ({ startsAt: c.startsAt, endsAt: c.endsAt })) });
+  await audit(currentId(request), "GENERATE_INTERVIEW_SLOTS", "ScreeningCall", undefined, { date: input.date, created: toCreate.length });
   return reply.code(201).send({ created: toCreate.length, skipped: candidates.length - toCreate.length });
 });
-app.delete("/admin/events/:id/call-slots/:slotId", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
-  const { id, slotId } = z.object({ id: z.string(), slotId: z.string() }).parse(request.params);
-  await assertEventAccess(request, id);
-  const deleted = await prisma.screeningCall.deleteMany({ where: { id: slotId, eventId: id, applicationId: null } });
+app.delete("/admin/interview-slots/:id", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const deleted = await prisma.screeningCall.deleteMany({ where: { id, eventId: null, applicationId: null } });
   if (deleted.count === 0) return reply.code(409).send({ error: "Ce créneau est réservé ou introuvable : il ne peut pas être supprimé" });
   return reply.code(204).send();
 });

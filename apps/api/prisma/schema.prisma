@@ -193,13 +193,17 @@ model EventQuota {
   @@unique([eventId, category])
 }
 
+// Une ligne sans eventId représente l'entretien global de validation du profil (un seul entretien
+// à la fois par personne ; plusieurs lignes possibles dans le temps si un refus a été suivi d'une
+// nouvelle demande après le délai de carence). Une ligne avec eventId représente l'inscription
+// directe (sans entretien ni décision manuelle) d'un profil déjà validé à un événement précis.
 model Application {
   id          String            @id @default(cuid())
-  eventId     String
+  eventId     String?
   userId      String
-  event       Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  event       Event?            @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  motivation  String
+  motivation  String?
   notes       String?
   status      ApplicationStatus @default(PENDING_CALL)
   quotaCategory QuotaCategory?
@@ -212,11 +216,14 @@ model Application {
   @@unique([eventId, userId])
 }
 
+// Agenda central : un créneau sans eventId appartient à l'agenda global des entretiens de
+// validation de profil (un seul entretien possible à la fois sur toute la plateforme). Les
+// créneaux historiques déjà rattachés à un événement restent inchangés.
 model ScreeningCall {
   id            String       @id @default(cuid())
-  eventId       String
+  eventId       String?
   applicationId String?      @unique
-  event         Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  event         Event?       @relation(fields: [eventId], references: [id], onDelete: Cascade)
   application   Application? @relation(fields: [applicationId], references: [id])
   startsAt      DateTime
   endsAt        DateTime
