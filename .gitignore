@@ -1,0 +1,32 @@
+node_modules
+dist
+.expo
+.env
+.env.local
+coverage
+*.log
+.DS_Store
+.sites-runtime
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal
+
+# Secrets et configurations locales
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.p12
+*.p8
+*.key
+*service-account*.json
+
+# Bases de données locales
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# Fichiers sensibles
+*recovery_code*
+*recovery_codes*
+docker-compose.yml

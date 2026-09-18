@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Nūr Meet",
+    "slug": "nour-meet",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "nourmeet",
+    "ios": {"supportsTablet": true, "bundleIdentifier": "fr.nourmeet.app"},
+    "android": {"package": "fr.nourmeet.app", "permissions": ["CAMERA"]},
+    "plugins": [["expo-camera", {"cameraPermission": "Autoriser Nūr Meet à scanner les QR codes personnels."}]]
+  }
+}

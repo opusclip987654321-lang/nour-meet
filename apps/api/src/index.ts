@@ -1,0 +1,288 @@
+import Fastify, { FastifyRequest } from "fastify";
+import cors from "@fastify/cors";
+import jwt from "@fastify/jwt";
+import rateLimit from "@fastify/rate-limit";
+import QRCode from "qrcode";
+import { PrismaClient, UserRole, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, EventStatus } from "@prisma/client";
+import { z, ZodError } from "zod";
+import { randomUUID } from "node:crypto";
+import { env } from "./env.js";
+import { paymentDeadline, testCardOutcome } from "./domain.js";
+import { normalizePhoneNumber } from "./phone.js";
+import { createSmsVerificationProvider } from "./sms-verification.js";
+
+const prisma = new PrismaClient();
+const app = Fastify({ logger: true });
+await app.register(cors, { origin: env.WEB_ORIGIN === "*" ? true : env.WEB_ORIGIN.split(","), credentials: true });
+await app.register(jwt, { secret: env.JWT_SECRET });
+await app.register(rateLimit, { global: false });
+const smsVerification = createSmsVerificationProvider({
+  mode: env.SMS_MODE,
+  devCode: env.DEV_OTP_CODE,
+  accountSid: env.TWILIO_ACCOUNT_SID,
+  authToken: env.TWILIO_AUTH_TOKEN,
+  serviceSid: env.TWILIO_VERIFY_SERVICE_SID
+});
+
+type TokenUser = { sub: string; role: UserRole; phone: string };
+const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode });
+const auth = async (request: FastifyRequest) => { await request.jwtVerify(); };
+const roles = (...allowed: UserRole[]) => async (request: FastifyRequest) => {
+  await request.jwtVerify();
+  if (!allowed.includes((request.user as TokenUser).role)) throw httpError(403, "Accès non autorisé");
+};
+const currentId = (request: FastifyRequest) => (request.user as TokenUser).sub;
+const audit = (actorId: string | undefined, action: string, entity: string, entityId?: string, metadata?: unknown) => prisma.auditLog.create({ data: { actorId, action, entity, entityId, metadata: metadata as object | undefined } });
+const notify = async (userId: string, title: string, body: string) => {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  await prisma.notification.create({ data: { userId, title, body } });
+  await prisma.outboxMessage.create({ data: { channel: "SMS", recipient: user.phone, body: `${title} — ${body}` } });
+  if (user.email) await prisma.outboxMessage.create({ data: { channel: "EMAIL", recipient: user.email, subject: title, body } });
+};
+const profileAge = (birthDate?: Date | null) => birthDate ? Math.floor((Date.now() - birthDate.getTime()) / 31_557_600_000) : null;
+const publicEvent = (event: any, revealAddress = false) => ({
+  id: event.id, slug: event.slug, title: event.title, category: event.category, description: event.description,
+  startsAt: event.startsAt, endsAt: event.endsAt, district: event.district, address: revealAddress ? event.address : null,
+  capacity: event.capacity, confirmedCount: event._count?.reservations ?? 0, priceCents: event.priceCents, status: event.status,
+  organizer: { id: event.organizer.id, name: event.organizer.name }
+});
+
+app.setErrorHandler((error, _request, reply) => {
+  if (error instanceof ZodError) return reply.code(400).send({ error: "Données invalides", details: error.flatten() });
+  const status = (error as any).statusCode ?? 500;
+  if (status >= 500) app.log.error(error);
+  return reply.code(status).send({ error: status >= 500 ? "Erreur interne" : (error as Error).message });
+});
+
+app.get("/health", async () => ({ status: "ok", service: "nour-api", smsMode: smsVerification.mode, now: new Date().toISOString() }));
+
+app.post("/auth/request-otp", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 3, timeWindow: "10 minutes" } } }, async (request) => {
+  const input = z.object({ phone: z.string().min(8).max(30) }).parse(request.body);
+  const phone = normalizePhoneNumber(input.phone);
+  await smsVerification.sendCode(phone);
+  if (smsVerification.mode === "mock") {
+    await prisma.outboxMessage.create({ data: { channel: "SMS", recipient: phone, body: `Votre code Nūr Meet est ${env.DEV_OTP_CODE}` } });
+  }
+  return {
+    sent: true,
+    delivery: smsVerification.mode === "mock" ? "mock" : "sms",
+    ...(smsVerification.mode === "mock" ? { devCode: env.DEV_OTP_CODE } : {}),
+    expiresInSeconds: 600
+  };
+});
+
+app.post("/auth/verify-otp", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const input = z.object({ phone: z.string().min(8).max(30), code: z.string().regex(/^\d{6}$/), displayName: z.string().min(2).optional() }).parse(request.body);
+  const phone = normalizePhoneNumber(input.phone);
+  if (!await smsVerification.checkCode(phone, input.code)) return reply.code(401).send({ error: "Code incorrect ou expiré" });
+  let user = await prisma.user.findUnique({ where: { phone }, include: { profile: true } });
+  if (!user) user = await prisma.user.create({ data: { phone, displayName: input.displayName ?? "Nouveau membre", profile: { create: { interests: [] } } }, include: { profile: true } });
+  if (user.suspendedAt) return reply.code(403).send({ error: "Compte suspendu" });
+  const token = app.jwt.sign({ sub: user.id, role: user.role, phone: user.phone }, { expiresIn: "30d" });
+  return { token, user: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profileCompleted: user.profile?.profileCompleted ?? false } };
+});
+
+app.get("/me", { preHandler: auth }, async (request) => {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: currentId(request) }, include: { profile: true } });
+  return { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profile: user.profile, age: profileAge(user.profile?.birthDate) };
+});
+
+app.patch("/me/profile", { preHandler: auth }, async (request) => {
+  const input = z.object({ displayName: z.string().min(2), email: z.string().email().nullable().optional(), birthDate: z.string().optional(), city: z.string().min(2), profession: z.string().optional(), interests: z.array(z.string()).max(12), bio: z.string().max(600).optional() }).parse(request.body);
+  const userId = currentId(request);
+  const user = await prisma.user.update({ where: { id: userId }, data: { displayName: input.displayName, email: input.email, profile: { upsert: { create: { birthDate: input.birthDate ? new Date(input.birthDate) : null, city: input.city, profession: input.profession, interests: input.interests, bio: input.bio, profileCompleted: true }, update: { birthDate: input.birthDate ? new Date(input.birthDate) : null, city: input.city, profession: input.profession, interests: input.interests, bio: input.bio, profileCompleted: true } } } }, include: { profile: true } });
+  await audit(userId, "UPDATE_PROFILE", "User", userId);
+  return user;
+});
+
+app.get("/events", async (request) => {
+  const query = z.object({ category: z.string().optional(), q: z.string().optional() }).parse(request.query);
+  const events = await prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" } }, { description: { contains: query.q, mode: "insensitive" } }] : undefined }, include: { organizer: true, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" } });
+  return events.map(e => publicEvent(e));
+});
+
+app.get("/events/:id", async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const event = await prisma.event.findFirstOrThrow({ where: { OR: [{ id }, { slug: id }] }, include: { organizer: true, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } } });
+  return publicEvent(event);
+});
+
+app.get("/events/:id/call-slots", { preHandler: auth }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  return prisma.screeningCall.findMany({ where: { eventId: id, applicationId: null, startsAt: { gt: new Date() } }, orderBy: { startsAt: "asc" } });
+});
+
+app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { motivation } = z.object({ motivation: z.string().min(30).max(1200) }).parse(request.body);
+  const userId = currentId(request);
+  const profile = await prisma.profile.findUnique({ where: { userId } });
+  if (!profile?.profileCompleted) return reply.code(409).send({ error: "Complétez votre profil avant de candidater" });
+  const existing = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
+  if (existing) return reply.code(409).send({ error: "Une candidature existe déjà pour cet événement", application: existing });
+  const application = await prisma.application.create({ data: { eventId: id, userId, motivation } });
+  await notify(userId, "Candidature reçue", "Choisissez maintenant un créneau pour votre entretien.");
+  await audit(userId, "CREATE_APPLICATION", "Application", application.id);
+  return reply.code(201).send(application);
+});
+
+app.post("/applications/:id/schedule", { preHandler: auth }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { slotId } = z.object({ slotId: z.string() }).parse(request.body);
+  const userId = currentId(request);
+  const application = await prisma.application.findFirstOrThrow({ where: { id, userId } });
+  const slot = await prisma.screeningCall.findFirst({ where: { id: slotId, eventId: application.eventId, applicationId: null } });
+  if (!slot) return reply.code(409).send({ error: "Ce créneau n’est plus disponible" });
+  await prisma.$transaction([
+    prisma.screeningCall.update({ where: { id: slot.id }, data: { applicationId: application.id } }),
+    prisma.application.update({ where: { id }, data: { status: ApplicationStatus.CALL_SCHEDULED } })
+  ]);
+  await notify(userId, "Entretien planifié", `Votre appel est prévu le ${slot.startsAt.toLocaleString("fr-FR")}.`);
+  return { scheduled: true, slot };
+});
+
+app.get("/me/applications", { preHandler: auth }, async (request) => prisma.application.findMany({ where: { userId: currentId(request) }, include: { event: { include: { organizer: true } }, call: true, reservation: { include: { payment: true, ticket: true } } }, orderBy: { createdAt: "desc" } }));
+
+app.post("/events/:id/waitlist", { preHandler: auth }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params); const userId = currentId(request);
+  const position = await prisma.waitlistEntry.count({ where: { eventId: id } }) + 1;
+  return prisma.waitlistEntry.upsert({ where: { eventId_userId: { eventId: id, userId } }, update: {}, create: { eventId: id, userId, position } });
+});
+
+app.post("/checkout/:reservationId", { preHandler: auth }, async (request, reply) => {
+  const { reservationId } = z.object({ reservationId: z.string() }).parse(request.params);
+  const { cardNumber } = z.object({ cardNumber: z.string().regex(/^\d{16}$/) }).parse(request.body);
+  const userId = currentId(request);
+  const reservation = await prisma.reservation.findFirstOrThrow({ where: { id: reservationId, userId }, include: { event: true, application: true } });
+  if (reservation.expiresAt < new Date()) return reply.code(409).send({ error: "Le délai de paiement est expiré" });
+  const confirmedCount = await prisma.reservation.count({ where: { eventId: reservation.eventId, confirmedAt: { not: null }, cancelledAt: null, id: { not: reservation.id } } });
+  if (confirmedCount >= reservation.event.capacity) return reply.code(409).send({ error: "L’événement est désormais complet" });
+  if (testCardOutcome(cardNumber) === "FAILED") {
+    await prisma.payment.upsert({ where: { reservationId }, update: { status: PaymentStatus.FAILED }, create: { reservationId, amountCents: reservation.event.priceCents, status: PaymentStatus.FAILED, providerRef: randomUUID() } });
+    return reply.code(402).send({ error: "Paiement refusé en mode test" });
+  }
+  const ticketCode = `NOUR-${randomUUID().toUpperCase()}`;
+  const [, ticket] = await prisma.$transaction([
+    prisma.payment.upsert({ where: { reservationId }, update: { status: PaymentStatus.SUCCEEDED, paidAt: new Date(), providerRef: randomUUID() }, create: { reservationId, amountCents: reservation.event.priceCents, status: PaymentStatus.SUCCEEDED, paidAt: new Date(), providerRef: randomUUID() } }),
+    prisma.ticket.upsert({ where: { reservationId }, update: {}, create: { reservationId, code: ticketCode } }),
+    prisma.reservation.update({ where: { id: reservationId }, data: { confirmedAt: new Date() } }),
+    prisma.application.update({ where: { id: reservation.applicationId }, data: { status: ApplicationStatus.CONFIRMED } })
+  ]);
+  await notify(userId, "Paiement confirmé", `Votre billet pour ${reservation.event.title} est disponible.`);
+  await audit(userId, "PAYMENT_SUCCEEDED", "Reservation", reservationId, { amountCents: reservation.event.priceCents });
+  return { success: true, ticket, qrDataUrl: await QRCode.toDataURL(ticket.code) };
+});
+
+app.get("/me/tickets", { preHandler: auth }, async (request) => {
+  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: true } } }, orderBy: { createdAt: "desc" } });
+  return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await QRCode.toDataURL(t.code) })));
+});
+
+app.get("/me/share-qr", { preHandler: auth }, async (request) => {
+  const profile = await prisma.profile.findUniqueOrThrow({ where: { userId: currentId(request) } });
+  return { code: profile.shareCode, qrDataUrl: await QRCode.toDataURL(profile.shareCode) };
+});
+
+app.get("/profiles/code/:code", { preHandler: auth }, async (request, reply) => {
+  const { code } = z.object({ code: z.string() }).parse(request.params);
+  const profile = await prisma.profile.findUnique({ where: { shareCode: code }, include: { user: true } });
+  if (!profile || !profile.validatedAt) return reply.code(404).send({ error: "Code invalide ou révoqué" });
+  if (profile.userId === currentId(request)) return reply.code(409).send({ error: "Il s’agit de votre propre code" });
+  return { userId: profile.userId, displayName: profile.user.displayName, age: profileAge(profile.birthDate), city: profile.city, profession: profile.profession, interests: profile.interests, bio: profile.bio, validated: true };
+});
+
+app.post("/contacts/request", { preHandler: auth }, async (request) => {
+  const { recipientId } = z.object({ recipientId: z.string() }).parse(request.body); const requesterId = currentId(request);
+  const requestRow = await prisma.contactRequest.upsert({ where: { requesterId_recipientId: { requesterId, recipientId } }, update: { status: ContactRequestStatus.PENDING }, create: { requesterId, recipientId } });
+  await notify(recipientId, "Nouvelle demande de contact", "Un participant souhaite entrer en contact avec vous.");
+  return requestRow;
+});
+
+app.get("/me/contact-requests", { preHandler: auth }, async (request) => {
+  const userId = currentId(request);
+  return prisma.contactRequest.findMany({ where: { OR: [{ requesterId: userId }, { recipientId: userId }] }, include: { requester: { include: { profile: true } }, recipient: { include: { profile: true } } }, orderBy: { createdAt: "desc" } });
+});
+
+app.post("/contacts/:id/respond", { preHandler: auth }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params); const { accept } = z.object({ accept: z.boolean() }).parse(request.body); const userId = currentId(request);
+  const contact = await prisma.contactRequest.findFirstOrThrow({ where: { id, recipientId: userId } });
+  const updated = await prisma.contactRequest.update({ where: { id }, data: { status: accept ? ContactRequestStatus.ACCEPTED : ContactRequestStatus.REFUSED } });
+  if (accept) {
+    const conversation = await prisma.conversation.create({ data: { members: { create: [{ userId: contact.requesterId }, { userId: contact.recipientId }] } } });
+    await notify(contact.requesterId, "Demande acceptée", "Vous pouvez maintenant échanger des messages.");
+    return { contact: updated, conversation };
+  }
+  return reply.send({ contact: updated });
+});
+
+app.get("/conversations", { preHandler: auth }, async (request) => prisma.conversation.findMany({ where: { members: { some: { userId: currentId(request) } } }, include: { members: { include: { user: { include: { profile: true } } } }, messages: { orderBy: { createdAt: "desc" }, take: 1 } }, orderBy: { createdAt: "desc" } }));
+app.get("/conversations/:id/messages", { preHandler: auth }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params); const userId = currentId(request);
+  await prisma.conversationMember.findUniqueOrThrow({ where: { conversationId_userId: { conversationId: id, userId } } });
+  return prisma.message.findMany({ where: { conversationId: id }, include: { sender: true }, orderBy: { createdAt: "asc" } });
+});
+app.post("/conversations/:id/messages", { preHandler: auth }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params); const userId = currentId(request); const { body, imageUrl } = z.object({ body: z.string().max(2000).optional(), imageUrl: z.string().url().optional() }).refine(v => v.body || v.imageUrl).parse(request.body);
+  const member = await prisma.conversationMember.findUniqueOrThrow({ where: { conversationId_userId: { conversationId: id, userId } } });
+  if (member.blockedAt) throw httpError(403, "Conversation bloquée");
+  return prisma.message.create({ data: { conversationId: id, senderId: userId, body, imageUrl }, include: { sender: true } });
+});
+
+app.post("/reports", { preHandler: auth }, async (request) => {
+  const input = z.object({ reportedId: z.string(), reason: z.string().min(3), details: z.string().max(1000).optional(), block: z.boolean().default(true) }).parse(request.body); const reporterId = currentId(request);
+  const report = await prisma.report.create({ data: { reporterId, reportedId: input.reportedId, reason: input.reason, details: input.details } });
+  if (input.block) await prisma.conversationMember.updateMany({ where: { userId: reporterId, conversation: { members: { some: { userId: input.reportedId } } } }, data: { blockedAt: new Date() } });
+  await audit(reporterId, "CREATE_REPORT", "Report", report.id);
+  return report;
+});
+
+app.get("/notifications", { preHandler: auth }, async (request) => prisma.notification.findMany({ where: { userId: currentId(request) }, orderBy: { createdAt: "desc" }, take: 50 }));
+app.get("/loyalty", { preHandler: auth }, async (request) => {
+  const entries = await prisma.loyaltyEntry.findMany({ where: { userId: currentId(request) }, orderBy: { createdAt: "desc" } });
+  return { balance: entries.reduce((n, e) => n + e.points, 0), entries };
+});
+
+app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER, UserRole.MODERATOR) }, async () => {
+  const [events, applications, payments, reports] = await Promise.all([prisma.event.count(), prisma.application.count(), prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED }, _sum: { amountCents: true } }), prisma.report.count({ where: { status: "OPEN" } })]);
+  return { events, applications, revenueCents: payments._sum.amountCents ?? 0, openReports: reports };
+});
+app.get("/admin/applications", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const token = request.user as TokenUser;
+  const organizer = token.role === UserRole.ORGANIZER ? await prisma.organizer.findUniqueOrThrow({ where: { ownerId: token.sub } }) : null;
+  return prisma.application.findMany({ where: organizer ? { event: { organizerId: organizer.id } } : undefined, include: { user: { include: { profile: true } }, event: true, call: true, reservation: { include: { payment: true } } }, orderBy: { createdAt: "desc" } });
+});
+app.post("/admin/applications/:id/decision", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params); const { accept, notes } = z.object({ accept: z.boolean(), notes: z.string().max(1000).optional() }).parse(request.body);
+  const application = await prisma.application.findUniqueOrThrow({ where: { id }, include: { event: { include: { organizer: true } } } });
+  const token = request.user as TokenUser;
+  if (token.role === UserRole.ORGANIZER && application.event.organizer.ownerId !== token.sub) throw httpError(403, "Cette candidature appartient à un autre organisateur");
+  if (!accept) { const refused = await prisma.application.update({ where: { id }, data: { status: ApplicationStatus.REFUSED, notes, decidedAt: new Date() } }); await notify(application.userId, "Candidature examinée", "Votre candidature n’a pas été retenue pour cet événement."); return refused; }
+  const occupied = await prisma.reservation.count({ where: { eventId: application.eventId, cancelledAt: null } });
+  if (occupied >= application.event.capacity) throw httpError(409, "L’événement est complet. Proposez la liste d’attente.");
+  const reservation = await prisma.reservation.upsert({ where: { applicationId: id }, update: { expiresAt: paymentDeadline() }, create: { eventId: application.eventId, userId: application.userId, applicationId: id, expiresAt: paymentDeadline() } });
+  await prisma.application.update({ where: { id }, data: { status: ApplicationStatus.PAYMENT_PENDING, notes, decidedAt: new Date() } });
+  await notify(application.userId, "Candidature acceptée", `Vous avez 24 heures pour payer votre billet de ${(application.event.priceCents / 100).toFixed(2)} €.`);
+  await audit(currentId(request), "ACCEPT_APPLICATION", "Application", id);
+  return { accepted: true, reservation };
+});
+app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const input = z.object({ organizerId: z.string(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.string(), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false) }).parse(request.body);
+  const token = request.user as TokenUser;
+  const ownOrganizer = token.role === UserRole.ORGANIZER ? await prisma.organizer.findUniqueOrThrow({ where: { ownerId: token.sub } }) : null;
+  const event = await prisma.event.create({ data: { ...input, organizerId: ownOrganizer?.id ?? input.organizerId, startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), status: input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT } });
+  await audit(currentId(request), "CREATE_EVENT", "Event", event.id); return event;
+});
+app.post("/admin/tickets/scan", { preHandler: roles(UserRole.ADMIN, UserRole.RECEPTION, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { code } = z.object({ code: z.string() }).parse(request.body); const ticket = await prisma.ticket.findUnique({ where: { code }, include: { reservation: { include: { user: true, event: true } } } });
+  if (!ticket || ticket.status === TicketStatus.CANCELLED) return reply.code(404).send({ valid: false, reason: "Billet invalide" });
+  if (ticket.status === TicketStatus.USED) return reply.code(409).send({ valid: false, reason: "Billet déjà utilisé", usedAt: ticket.usedAt });
+  const usedAt = new Date();
+  const updated = await prisma.ticket.updateMany({ where: { id: ticket.id, status: TicketStatus.VALID, usedAt: null }, data: { status: TicketStatus.USED, usedAt } });
+  if (updated.count !== 1) return reply.code(409).send({ valid: false, reason: "Billet déjà utilisé" });
+  await audit(currentId(request), "SCAN_TICKET", "Ticket", ticket.id); return { valid: true, participant: ticket.reservation.user.displayName, event: ticket.reservation.event.title };
+});
+app.get("/admin/outbox", { preHandler: roles(UserRole.ADMIN) }, async () => prisma.outboxMessage.findMany({ orderBy: { createdAt: "desc" }, take: 100 }));
+
+const close = async () => { await prisma.$disconnect(); await app.close(); };
+process.on("SIGINT", close); process.on("SIGTERM", close);
+await app.listen({ port: env.API_PORT, host: "0.0.0.0" });

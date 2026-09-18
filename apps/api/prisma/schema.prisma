@@ -1,0 +1,310 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  PARTICIPANT
+  ORGANIZER
+  MODERATOR
+  RECEPTION
+  ADMIN
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  FULL
+  CANCELLED
+  COMPLETED
+}
+
+enum ApplicationStatus {
+  PENDING_CALL
+  CALL_SCHEDULED
+  CALL_COMPLETED
+  ACCEPTED
+  REFUSED
+  PAYMENT_PENDING
+  CONFIRMED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum TicketStatus {
+  VALID
+  USED
+  CANCELLED
+}
+
+enum ContactRequestStatus {
+  PENDING
+  ACCEPTED
+  REFUSED
+  CANCELLED
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+model User {
+  id               String           @id @default(cuid())
+  phone            String           @unique
+  email            String?          @unique
+  displayName      String
+  role             UserRole         @default(PARTICIPANT)
+  suspendedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  profile          Profile?
+  organizer        Organizer?
+  applications     Application[]
+  reservations     Reservation[]
+  waitlistEntries  WaitlistEntry[]
+  sentRequests     ContactRequest[] @relation("requester")
+  receivedRequests ContactRequest[] @relation("recipient")
+  conversationMembers ConversationMember[]
+  messages         Message[]
+  reportsMade      Report[]         @relation("reporter")
+  reportsReceived  Report[]         @relation("reported")
+  notifications    Notification[]
+  loyaltyEntries   LoyaltyEntry[]
+}
+
+model Profile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  birthDate       DateTime?
+  city            String?
+  profession      String?
+  interests       String[]
+  bio             String?
+  photoUrl        String?
+  shareCode       String   @unique @default(cuid())
+  profileCompleted Boolean @default(false)
+  validatedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Organizer {
+  id             String   @id @default(cuid())
+  ownerId        String   @unique
+  owner          User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  commissionRate Int      @default(15)
+  verifiedAt     DateTime?
+  events         Event[]
+}
+
+model Event {
+  id             String      @id @default(cuid())
+  slug           String      @unique
+  organizerId    String
+  organizer      Organizer   @relation(fields: [organizerId], references: [id])
+  title          String
+  category       String
+  description    String
+  startsAt       DateTime
+  endsAt         DateTime
+  district       String
+  address        String
+  capacity       Int
+  priceCents     Int
+  status         EventStatus @default(DRAFT)
+  applications   Application[]
+  callSlots      ScreeningCall[]
+  reservations   Reservation[]
+  waitlist       WaitlistEntry[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model Application {
+  id          String            @id @default(cuid())
+  eventId     String
+  userId      String
+  event       Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  motivation  String
+  notes       String?
+  status      ApplicationStatus @default(PENDING_CALL)
+  decidedAt   DateTime?
+  call        ScreeningCall?
+  reservation Reservation?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  @@unique([eventId, userId])
+}
+
+model ScreeningCall {
+  id            String       @id @default(cuid())
+  eventId       String
+  applicationId String?      @unique
+  event         Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  application   Application? @relation(fields: [applicationId], references: [id])
+  startsAt      DateTime
+  endsAt        DateTime
+  completedAt   DateTime?
+  notes         String?
+}
+
+model Reservation {
+  id            String       @id @default(cuid())
+  eventId       String
+  userId        String
+  applicationId String       @unique
+  event         Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application   Application  @relation(fields: [applicationId], references: [id])
+  expiresAt     DateTime
+  confirmedAt   DateTime?
+  cancelledAt   DateTime?
+  payment       Payment?
+  ticket        Ticket?
+  createdAt     DateTime     @default(now())
+  @@unique([eventId, userId])
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  reservationId String        @unique
+  reservation   Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  amountCents   Int
+  status        PaymentStatus @default(PENDING)
+  provider      String        @default("fake")
+  providerRef   String?
+  paidAt        DateTime?
+  refundedAt    DateTime?
+  createdAt     DateTime      @default(now())
+}
+
+model Ticket {
+  id            String       @id @default(cuid())
+  reservationId String       @unique
+  reservation   Reservation  @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  code          String       @unique
+  status        TicketStatus @default(VALID)
+  usedAt        DateTime?
+  createdAt     DateTime     @default(now())
+}
+
+model WaitlistEntry {
+  id        String   @id @default(cuid())
+  eventId   String
+  userId    String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position  Int
+  offeredAt DateTime?
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([eventId, userId])
+}
+
+model ContactRequest {
+  id          String               @id @default(cuid())
+  requesterId String
+  recipientId String
+  requester   User                 @relation("requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  recipient   User                 @relation("recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  status      ContactRequestStatus @default(PENDING)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  @@unique([requesterId, recipientId])
+}
+
+model Conversation {
+  id        String               @id @default(cuid())
+  members   ConversationMember[]
+  messages  Message[]
+  createdAt DateTime             @default(now())
+}
+
+model ConversationMember {
+  conversationId String
+  userId         String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadAt     DateTime?
+  blockedAt      DateTime?
+  @@id([conversationId, userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  senderId       String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  body           String?
+  imageUrl       String?
+  createdAt      DateTime     @default(now())
+}
+
+model Report {
+  id         String       @id @default(cuid())
+  reporterId String
+  reportedId String
+  reporter   User         @relation("reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported   User         @relation("reported", fields: [reportedId], references: [id], onDelete: Cascade)
+  reason     String
+  details    String?
+  status     ReportStatus @default(OPEN)
+  createdAt  DateTime     @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+}
+
+model LoyaltyEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  points    Int
+  reason    String
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+}
+
+model OutboxMessage {
+  id        String   @id @default(cuid())
+  channel   String
+  recipient String
+  subject   String?
+  body      String
+  createdAt DateTime @default(now())
+}
