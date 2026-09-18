@@ -58,9 +58,10 @@ const notify = async (userId: string, title: string, body: string) => {
 const assertEventAccess = async (request: FastifyRequest, eventId: string) => {
   const token = request.user as TokenUser;
   if (token.role === UserRole.ADMIN) return prisma.event.findUniqueOrThrow({ where: { id: eventId } });
-  const organizer = await prisma.organizer.findUniqueOrThrow({ where: { ownerId: token.sub } });
-  return prisma.event.findFirstOrThrow({ where: { id: eventId, organizerId: organizer.id } });
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: token.sub } });
+  return prisma.event.findFirstOrThrow({ where: { id: eventId, controllerRestaurantId: restaurant.id } });
 };
+const ownRestaurant = (token: TokenUser) => token.role === UserRole.ORGANIZER ? prisma.restaurant.findUniqueOrThrow({ where: { ownerId: token.sub } }) : Promise.resolve(null);
 const profileAge = (birthDate?: Date | null) => birthDate ? Math.floor((Date.now() - birthDate.getTime()) / 31_557_600_000) : null;
 const defaultCategoryImage = (category: string) => EVENT_CATEGORIES.find(c => c.name === category)?.defaultImage ?? EVENT_CATEGORIES[0].defaultImage;
 const publicEvent = (event: any, revealAddress = false) => ({
@@ -68,7 +69,8 @@ const publicEvent = (event: any, revealAddress = false) => ({
   startsAt: event.startsAt, endsAt: event.endsAt, district: event.district, address: revealAddress ? event.address : null,
   imageUrl: event.imageUrl ?? defaultCategoryImage(event.category),
   capacity: event.capacity, confirmedCount: event._count?.reservations ?? 0, priceCents: event.priceCents, status: event.status,
-  organizer: { id: event.organizer.id, name: event.organizer.name }
+  organizer: event.controllerRestaurant ? { id: event.controllerRestaurant.id, name: event.controllerRestaurant.name } : { id: null, name: "Nūr Meet" },
+  venue: event.venueRestaurant ? { id: event.venueRestaurant.id, name: event.venueRestaurant.name } : null
 });
 
 app.setErrorHandler((error, _request, reply) => {
@@ -121,13 +123,13 @@ app.patch("/me/profile", { preHandler: auth }, async (request) => {
 
 app.get("/events", async (request) => {
   const query = z.object({ category: z.string().optional(), q: z.string().optional() }).parse(request.query);
-  const events = await prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" } }, { description: { contains: query.q, mode: "insensitive" } }] : undefined }, include: { organizer: true, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" } });
+  const events = await prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" } }, { description: { contains: query.q, mode: "insensitive" } }] : undefined }, include: { controllerRestaurant: true, venueRestaurant: true, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" } });
   return events.map(e => publicEvent(e));
 });
 
 app.get("/events/:id", async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const event = await prisma.event.findFirstOrThrow({ where: { OR: [{ id }, { slug: id }] }, include: { organizer: true, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } } });
+  const event = await prisma.event.findFirstOrThrow({ where: { OR: [{ id }, { slug: id }] }, include: { controllerRestaurant: true, venueRestaurant: true, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } } });
   return publicEvent(event);
 });
 
@@ -176,7 +178,7 @@ app.post("/applications/:id/schedule", { preHandler: auth }, async (request, rep
   return { scheduled: true, slot };
 });
 
-app.get("/me/applications", { preHandler: auth }, async (request) => prisma.application.findMany({ where: { userId: currentId(request) }, include: { event: { include: { organizer: true } }, call: true, reservation: { include: { payment: true, ticket: true } } }, orderBy: { createdAt: "desc" } }));
+app.get("/me/applications", { preHandler: auth }, async (request) => prisma.application.findMany({ where: { userId: currentId(request) }, include: { event: true, call: true, reservation: { include: { payment: true, ticket: true } } }, orderBy: { createdAt: "desc" } }));
 
 app.post("/events/:id/waitlist", { preHandler: auth }, async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params); const userId = currentId(request);
@@ -326,20 +328,75 @@ app.get("/loyalty", { preHandler: auth }, async (request) => {
   return { balance: entries.reduce((n, e) => n + e.points, 0), entries };
 });
 
-app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER, UserRole.MODERATOR) }, async () => {
-  const [events, applications, payments, reports] = await Promise.all([prisma.event.count(), prisma.application.count(), prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED }, _sum: { amountCents: true } }), prisma.report.count({ where: { status: "OPEN" } })]);
-  return { events, applications, revenueCents: payments._sum.amountCents ?? 0, openReports: reports };
+app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
+  const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) } });
+  if (!restaurant) return reply.code(404).send({ error: "Aucune demande restaurateur" });
+  return restaurant;
+});
+app.post("/restaurants/apply", { preHandler: auth }, async (request, reply) => {
+  const input = z.object({ name: z.string().min(2).max(120), description: z.string().max(1000).optional(), district: z.string().max(120).optional(), address: z.string().max(200).optional(), phone: z.string().max(30).optional() }).parse(request.body);
+  const userId = currentId(request);
+  const existing = await prisma.restaurant.findUnique({ where: { ownerId: userId } });
+  if (existing?.status === "APPROVED") return reply.code(409).send({ error: "Vous êtes déjà restaurateur" });
+  if (existing?.status === "PENDING") return reply.code(409).send({ error: "Votre demande est déjà en cours d’examen" });
+  const restaurant = await prisma.restaurant.upsert({
+    where: { ownerId: userId },
+    update: { ...input, status: "PENDING", submittedAt: new Date(), rejectionReason: null, reviewedBy: null },
+    create: { ownerId: userId, ...input, status: "PENDING" }
+  });
+  const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+  await Promise.all(admins.map(a => notify(a.id, "Nouvelle demande restaurateur", `${input.name} souhaite ouvrir un compte professionnel.`)));
+  await audit(userId, "APPLY_RESTAURANT", "Restaurant", restaurant.id);
+  return reply.code(201).send(restaurant);
+});
+app.get("/admin/restaurants", { preHandler: roles(UserRole.ADMIN) }, async (request) => {
+  const query = z.object({ status: z.enum(["PENDING", "APPROVED", "REJECTED", "SUSPENDED"]).optional() }).parse(request.query);
+  return prisma.restaurant.findMany({ where: query.status ? { status: query.status } : undefined, include: { owner: true }, orderBy: { submittedAt: "desc" } });
+});
+app.post("/admin/restaurants/:id/decision", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { accept, reason } = z.object({ accept: z.boolean(), reason: z.string().max(1000).optional() }).parse(request.body);
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id }, include: { owner: true } });
+  if (restaurant.status !== "PENDING") return reply.code(409).send({ error: "Cette demande a déjà été traitée" });
+  const adminId = currentId(request);
+  if (accept) {
+    const [updated] = await prisma.$transaction([
+      prisma.restaurant.update({ where: { id }, data: { status: "APPROVED", verifiedAt: new Date(), reviewedBy: adminId, rejectionReason: null } }),
+      prisma.user.update({ where: { id: restaurant.ownerId }, data: { role: restaurant.owner.role === UserRole.PARTICIPANT ? UserRole.ORGANIZER : restaurant.owner.role } })
+    ]);
+    await notify(restaurant.ownerId, "Compte restaurateur approuvé", "Votre établissement est validé, vous pouvez préparer vos événements.");
+    await audit(adminId, "APPROVE_RESTAURANT", "Restaurant", id);
+    return updated;
+  }
+  const updated = await prisma.restaurant.update({ where: { id }, data: { status: "REJECTED", reviewedBy: adminId, rejectionReason: reason ?? null } });
+  await notify(restaurant.ownerId, "Demande restaurateur refusée", reason ?? "Votre demande n’a pas été retenue.");
+  await audit(adminId, "REJECT_RESTAURANT", "Restaurant", id, { reason });
+  return updated;
+});
+
+app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const token = request.user as TokenUser;
+  const restaurant = await ownRestaurant(token);
+  const eventScope = restaurant ? { controllerRestaurantId: restaurant.id } : undefined;
+  const [events, applications, payments] = await Promise.all([
+    prisma.event.count({ where: eventScope }),
+    prisma.application.count({ where: restaurant ? { event: { controllerRestaurantId: restaurant.id } } : undefined }),
+    prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED, ...(restaurant ? { reservation: { event: { controllerRestaurantId: restaurant.id } } } : {}) }, _sum: { amountCents: true } })
+  ]);
+  // Les signalements de modération concernent des comptes utilisateurs, pas un restaurant précis : réservés au super-admin.
+  const openReports = restaurant ? null : await prisma.report.count({ where: { status: "OPEN" } });
+  return { events, applications, revenueCents: payments._sum.amountCents ?? 0, openReports };
 });
 app.get("/admin/applications", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
-  const organizer = token.role === UserRole.ORGANIZER ? await prisma.organizer.findUniqueOrThrow({ where: { ownerId: token.sub } }) : null;
-  return prisma.application.findMany({ where: organizer ? { event: { organizerId: organizer.id } } : undefined, include: { user: { include: { profile: true } }, event: true, call: true, reservation: { include: { payment: true } } }, orderBy: { createdAt: "desc" } });
+  const restaurant = await ownRestaurant(token);
+  return prisma.application.findMany({ where: restaurant ? { event: { controllerRestaurantId: restaurant.id } } : undefined, include: { user: { include: { profile: true } }, event: true, call: true, reservation: { include: { payment: true } } }, orderBy: { createdAt: "desc" } });
 });
 app.post("/admin/applications/:id/decision", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params); const { accept, notes } = z.object({ accept: z.boolean(), notes: z.string().max(1000).optional() }).parse(request.body);
-  const application = await prisma.application.findUniqueOrThrow({ where: { id }, include: { event: { include: { organizer: true } } } });
+  const application = await prisma.application.findUniqueOrThrow({ where: { id }, include: { event: { include: { controllerRestaurant: true } } } });
   const token = request.user as TokenUser;
-  if (token.role === UserRole.ORGANIZER && application.event.organizer.ownerId !== token.sub) throw httpError(403, "Cette candidature appartient à un autre organisateur");
+  if (token.role === UserRole.ORGANIZER && application.event.controllerRestaurant?.ownerId !== token.sub) throw httpError(403, "Cette candidature appartient à un autre restaurateur");
   if (!accept) { const refused = await prisma.application.update({ where: { id }, data: { status: ApplicationStatus.REFUSED, notes, decidedAt: new Date() } }); await notify(application.userId, "Candidature examinée", "Votre candidature n’a pas été retenue pour cet événement."); return refused; }
   const occupied = await prisma.reservation.count({ where: { eventId: application.eventId, cancelledAt: null } });
   if (occupied >= application.event.capacity) throw httpError(409, "L’événement est complet. Proposez la liste d’attente.");
@@ -351,8 +408,8 @@ app.post("/admin/applications/:id/decision", { preHandler: roles(UserRole.ADMIN,
 });
 app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
-  const organizer = token.role === UserRole.ORGANIZER ? await prisma.organizer.findUniqueOrThrow({ where: { ownerId: token.sub } }) : null;
-  const events = await prisma.event.findMany({ where: organizer ? { organizerId: organizer.id } : undefined, orderBy: { startsAt: "asc" } });
+  const restaurant = await ownRestaurant(token);
+  const events = await prisma.event.findMany({ where: restaurant ? { controllerRestaurantId: restaurant.id } : undefined, orderBy: { startsAt: "asc" } });
   return events.map(e => ({ ...e, imageUrl: e.imageUrl ?? defaultCategoryImage(e.category) }));
 });
 app.get("/admin/events/:id/call-slots", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
@@ -392,12 +449,47 @@ app.delete("/admin/events/:id/call-slots/:slotId", { preHandler: roles(UserRole.
   if (deleted.count === 0) return reply.code(409).send({ error: "Ce créneau est réservé ou introuvable : il ne peut pas être supprimé" });
   return reply.code(204).send();
 });
-app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
-  const input = z.object({ organizerId: z.string(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false) }).parse(request.body);
+app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const input = z.object({ venueRestaurantId: z.string().optional(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false) }).parse(request.body);
   const token = request.user as TokenUser;
-  const ownOrganizer = token.role === UserRole.ORGANIZER ? await prisma.organizer.findUniqueOrThrow({ where: { ownerId: token.sub } }) : null;
-  const event = await prisma.event.create({ data: { ...input, organizerId: ownOrganizer?.id ?? input.organizerId, startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), status: input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT } });
+  const restaurant = await ownRestaurant(token);
+  // Un restaurateur ne prépare jamais qu'un brouillon : seul le super-admin peut publier (POST /admin/events/:id/review-decision).
+  // Le super-admin peut publier immédiatement son propre événement, éventuellement accueilli par un restaurant partenaire.
+  let venueRestaurantId: string | null = restaurant?.id ?? null;
+  if (token.role === UserRole.ADMIN && input.venueRestaurantId) {
+    const venue = await prisma.restaurant.findUnique({ where: { id: input.venueRestaurantId } });
+    if (!venue || venue.status !== "APPROVED") return reply.code(400).send({ error: "Restaurant partenaire introuvable ou non approuvé" });
+    venueRestaurantId = venue.id;
+  }
+  const event = await prisma.event.create({ data: {
+    title: input.title, slug: input.slug, category: input.category, description: input.description,
+    startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), district: input.district, address: input.address,
+    capacity: input.capacity, priceCents: input.priceCents,
+    controllerRestaurantId: restaurant?.id ?? null,
+    venueRestaurantId,
+    status: token.role === UserRole.ADMIN && input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT
+  } });
   await audit(currentId(request), "CREATE_EVENT", "Event", event.id); return event;
+});
+app.post("/admin/events/:id/submit-for-review", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const event = await assertEventAccess(request, id);
+  if (event.status !== EventStatus.DRAFT) return reply.code(409).send({ error: "Seul un événement en brouillon peut être soumis" });
+  const updated = await prisma.event.update({ where: { id }, data: { status: EventStatus.PENDING_REVIEW, submittedForReviewAt: new Date(), reviewNote: null } });
+  const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+  await Promise.all(admins.map(a => notify(a.id, "Événement à valider", `« ${event.title} » attend votre validation avant publication.`)));
+  await audit(currentId(request), "SUBMIT_EVENT_FOR_REVIEW", "Event", id);
+  return updated;
+});
+app.post("/admin/events/:id/review-decision", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { accept, note } = z.object({ accept: z.boolean(), note: z.string().max(1000).optional() }).parse(request.body);
+  const event = await prisma.event.findUniqueOrThrow({ where: { id }, include: { controllerRestaurant: true } });
+  if (event.status !== EventStatus.PENDING_REVIEW) return reply.code(409).send({ error: "Cet événement n’est pas en attente de validation" });
+  const updated = await prisma.event.update({ where: { id }, data: { status: accept ? EventStatus.PUBLISHED : EventStatus.DRAFT, reviewedAt: new Date(), reviewNote: note ?? null } });
+  if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, accept ? "Événement publié" : "Événement renvoyé en brouillon", accept ? `« ${event.title} » est maintenant publié.` : `« ${event.title} » nécessite des modifications${note ? ` : ${note}` : "."}`);
+  await audit(currentId(request), accept ? "APPROVE_EVENT" : "REJECT_EVENT", "Event", id, { note });
+  return updated;
 });
 app.post("/admin/events/:id/image", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -416,8 +508,15 @@ app.post("/admin/events/:id/image", { preHandler: roles(UserRole.ADMIN, UserRole
   return { imageUrl, event };
 });
 app.post("/admin/tickets/scan", { preHandler: roles(UserRole.ADMIN, UserRole.RECEPTION, UserRole.ORGANIZER) }, async (request, reply) => {
-  const { code } = z.object({ code: z.string() }).parse(request.body); const ticket = await prisma.ticket.findUnique({ where: { code }, include: { reservation: { include: { user: true, event: true } } } });
+  const { code } = z.object({ code: z.string() }).parse(request.body); const token = request.user as TokenUser;
+  const ticket = await prisma.ticket.findUnique({ where: { code }, include: { reservation: { include: { user: true, event: true } } } });
   if (!ticket || ticket.status === TicketStatus.CANCELLED) return reply.code(404).send({ valid: false, reason: "Billet invalide" });
+  if (token.role !== UserRole.ADMIN) {
+    const staffRestaurantId = token.role === UserRole.ORGANIZER
+      ? (await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: token.sub } })).id
+      : (await prisma.user.findUniqueOrThrow({ where: { id: token.sub } })).restaurantId;
+    if (!staffRestaurantId || ticket.reservation.event.controllerRestaurantId !== staffRestaurantId) return reply.code(403).send({ valid: false, reason: "Ce billet n’appartient pas à l’un de vos événements" });
+  }
   if (ticket.status === TicketStatus.USED) return reply.code(409).send({ valid: false, reason: "Billet déjà utilisé", usedAt: ticket.usedAt });
   const usedAt = new Date();
   const updated = await prisma.ticket.updateMany({ where: { id: ticket.id, status: TicketStatus.VALID, usedAt: null }, data: { status: TicketStatus.USED, usedAt } });

@@ -8,7 +8,8 @@ export const EVENT_CATEGORIES: EventCategoryDef[] = [
 export const EVENT_CATEGORY_NAMES = EVENT_CATEGORIES.map(c => c.name);
 
 export type UserRole = "PARTICIPANT" | "ORGANIZER" | "MODERATOR" | "RECEPTION" | "ADMIN";
-export type EventStatus = "DRAFT" | "PUBLISHED" | "FULL" | "CANCELLED" | "COMPLETED";
+export type EventStatus = "DRAFT" | "PENDING_REVIEW" | "PUBLISHED" | "FULL" | "CANCELLED" | "COMPLETED";
+export type RestaurantStatus = "PENDING" | "APPROVED" | "REJECTED" | "SUSPENDED";
 export type ApplicationStatus = "PENDING_CALL" | "CALL_SCHEDULED" | "CALL_COMPLETED" | "ACCEPTED" | "REFUSED" | "PAYMENT_PENDING" | "CONFIRMED" | "CANCELLED" | "NO_SHOW";
 
 export interface SessionUser {
@@ -35,7 +36,8 @@ export interface PublicEvent {
   confirmedCount: number;
   priceCents: number;
   status: EventStatus;
-  organizer: {id: string; name: string};
+  organizer: {id: string | null; name: string};
+  venue: {id: string; name: string} | null;
 }
 
 export interface ApiError { error: string; details?: unknown }

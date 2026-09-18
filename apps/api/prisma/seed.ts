@@ -13,10 +13,10 @@ async function main() {
     update: {},
     create: { phone: "+33600000002", email: "amana@nour-meet.local", displayName: "Maison Amana", role: UserRole.ORGANIZER, profile: { create: { city: "Paris", interests: ["Culture", "Rencontres"], profileCompleted: true, validatedAt: new Date() } } }
   });
-  const organizer = await prisma.organizer.upsert({
+  const restaurant = await prisma.restaurant.upsert({
     where: { ownerId: organizerUser.id },
     update: {},
-    create: { ownerId: organizerUser.id, name: "Maison Amana", description: "Des expériences raffinées autour de la culture et de la rencontre.", commissionRate: 15, verifiedAt: new Date() }
+    create: { ownerId: organizerUser.id, name: "Maison Amana", description: "Des expériences raffinées autour de la culture et de la rencontre.", district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", phone: "+33145000000", commissionRate: 15, status: "APPROVED", verifiedAt: new Date() }
   });
   const sofia = await prisma.user.upsert({
     where: { phone: "+33612345678" },
@@ -32,15 +32,19 @@ async function main() {
   const event = await prisma.event.upsert({
     where: { slug: "diner-connexions-septembre" },
     update: {},
-    create: { organizerId: organizer.id, slug: "diner-connexions-septembre", title: "Dîner & Connexions", category: "Speed dating", description: "Un dîner en petit comité, des échanges guidés et des temps libres dans un lieu privatisé.", startsAt: new Date("2026-09-26T19:30:00+02:00"), endsAt: new Date("2026-09-26T23:30:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", capacity: 28, priceCents: 3500, status: EventStatus.PUBLISHED }
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "diner-connexions-septembre", title: "Dîner & Connexions", category: "Speed dating", description: "Un dîner en petit comité, des échanges guidés et des temps libres dans un lieu privatisé.", startsAt: new Date("2026-09-26T19:30:00+02:00"), endsAt: new Date("2026-09-26T23:30:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", capacity: 28, priceCents: 3500, status: EventStatus.PUBLISHED }
   });
   await prisma.event.upsert({
     where: { slug: "afterwork-entrepreneurs-octobre" }, update: {},
-    create: { organizerId: organizer.id, slug: "afterwork-entrepreneurs-octobre", title: "Afterwork des entrepreneurs", category: "Networking", description: "Rencontrez des entrepreneurs et indépendants autour d’échanges structurés.", startsAt: new Date("2026-10-01T19:00:00+02:00"), endsAt: new Date("2026-10-01T22:30:00+02:00"), district: "La Défense", address: "2 place de la Défense, 92800 Puteaux", capacity: 40, priceCents: 4500, status: EventStatus.PUBLISHED }
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "afterwork-entrepreneurs-octobre", title: "Afterwork des entrepreneurs", category: "Networking", description: "Rencontrez des entrepreneurs et indépendants autour d’échanges structurés.", startsAt: new Date("2026-10-01T19:00:00+02:00"), endsAt: new Date("2026-10-01T22:30:00+02:00"), district: "La Défense", address: "2 place de la Défense, 92800 Puteaux", capacity: 40, priceCents: 4500, status: EventStatus.PUBLISHED }
   });
   await prisma.event.upsert({
     where: { slug: "art-the-conversations" }, update: {},
-    create: { organizerId: organizer.id, slug: "art-the-conversations", title: "Art, thé & conversations", category: "Networking", description: "Une rencontre culturelle dans un salon privatisé du Marais.", startsAt: new Date("2026-10-04T16:00:00+02:00"), endsAt: new Date("2026-10-04T19:00:00+02:00"), district: "Paris 4e", address: "18 rue des Archives, 75004 Paris", capacity: 20, priceCents: 2900, status: EventStatus.PUBLISHED }
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "art-the-conversations", title: "Art, thé & conversations", category: "Networking", description: "Une rencontre culturelle dans un salon privatisé du Marais.", startsAt: new Date("2026-10-04T16:00:00+02:00"), endsAt: new Date("2026-10-04T19:00:00+02:00"), district: "Paris 4e", address: "18 rue des Archives, 75004 Paris", capacity: 20, priceCents: 2900, status: EventStatus.PUBLISHED }
+  });
+  await prisma.event.upsert({
+    where: { slug: "soiree-nour-x-amana" }, update: {},
+    create: { controllerRestaurantId: null, venueRestaurantId: restaurant.id, slug: "soiree-nour-x-amana", title: "Soirée Nūr × Maison Amana", category: "Networking", description: "Un événement organisé directement par Nūr Meet, accueilli par notre partenaire Maison Amana.", startsAt: new Date("2026-10-10T19:00:00+02:00"), endsAt: new Date("2026-10-10T22:00:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", capacity: 30, priceCents: 4000, status: EventStatus.PUBLISHED }
   });
 
   const slots = ["2026-09-22T18:00:00+02:00", "2026-09-22T18:20:00+02:00", "2026-09-24T18:40:00+02:00", "2026-09-24T19:20:00+02:00"];

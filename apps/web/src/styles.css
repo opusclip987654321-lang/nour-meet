@@ -8,6 +8,13 @@
 .event-photo-card>div{padding:16px;display:grid;gap:8px}
 .event-photo-card small{color:var(--muted)}
 .event-photo-card label{cursor:pointer;justify-self:start}
+.review-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.reject-note{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.reject-note input{background:#121213;color:#fff;border:1px solid #3b3934;border-radius:7px;padding:8px 10px;font-size:12px}
+.restaurant-request{display:flex;justify-content:space-between;align-items:center;gap:20px;text-align:left}
+.restaurant-request h3{font:20px 'Playfair Display';margin:0 0 4px}
+.restaurant-request p{color:var(--muted);margin:2px 0}
+.restaurant-request .decision-buttons{margin-top:0;flex-direction:column;display:flex;gap:8px}
 .modal-overlay{position:fixed;inset:0;background:#000000b8;display:grid;place-items:center;z-index:100;padding:20px}
 .modal{background:var(--panel);border:1px solid #5a482f;border-radius:14px;padding:26px;width:100%;max-width:460px;max-height:calc(100vh - 40px);overflow-y:auto}
 .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
