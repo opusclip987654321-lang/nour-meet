@@ -121,6 +121,7 @@ model Event {
   organizer      Organizer   @relation(fields: [organizerId], references: [id])
   title          String
   category       String
+  imageUrl       String?
   description    String
   startsAt       DateTime
   endsAt         DateTime

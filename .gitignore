@@ -10,6 +10,8 @@ coverage
 .sites-runtime
 apps/api/prisma/dev.db
 apps/api/prisma/dev.db-journal
+apps/api/public/uploads/*
+!apps/api/public/uploads/.gitkeep
 
 # Secrets et configurations locales
 .env.*

@@ -32,7 +32,7 @@ async function main() {
   const event = await prisma.event.upsert({
     where: { slug: "diner-connexions-septembre" },
     update: {},
-    create: { organizerId: organizer.id, slug: "diner-connexions-septembre", title: "Dîner & Connexions", category: "Rencontres", description: "Un dîner en petit comité, des échanges guidés et des temps libres dans un lieu privatisé.", startsAt: new Date("2026-09-26T19:30:00+02:00"), endsAt: new Date("2026-09-26T23:30:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", capacity: 28, priceCents: 3500, status: EventStatus.PUBLISHED }
+    create: { organizerId: organizer.id, slug: "diner-connexions-septembre", title: "Dîner & Connexions", category: "Speed dating", description: "Un dîner en petit comité, des échanges guidés et des temps libres dans un lieu privatisé.", startsAt: new Date("2026-09-26T19:30:00+02:00"), endsAt: new Date("2026-09-26T23:30:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", capacity: 28, priceCents: 3500, status: EventStatus.PUBLISHED }
   });
   await prisma.event.upsert({
     where: { slug: "afterwork-entrepreneurs-octobre" }, update: {},
@@ -40,7 +40,7 @@ async function main() {
   });
   await prisma.event.upsert({
     where: { slug: "art-the-conversations" }, update: {},
-    create: { organizerId: organizer.id, slug: "art-the-conversations", title: "Art, thé & conversations", category: "Culture", description: "Une rencontre culturelle dans un salon privatisé du Marais.", startsAt: new Date("2026-10-04T16:00:00+02:00"), endsAt: new Date("2026-10-04T19:00:00+02:00"), district: "Paris 4e", address: "18 rue des Archives, 75004 Paris", capacity: 20, priceCents: 2900, status: EventStatus.PUBLISHED }
+    create: { organizerId: organizer.id, slug: "art-the-conversations", title: "Art, thé & conversations", category: "Networking", description: "Une rencontre culturelle dans un salon privatisé du Marais.", startsAt: new Date("2026-10-04T16:00:00+02:00"), endsAt: new Date("2026-10-04T19:00:00+02:00"), district: "Paris 4e", address: "18 rue des Archives, 75004 Paris", capacity: 20, priceCents: 2900, status: EventStatus.PUBLISHED }
   });
 
   const slots = ["2026-09-22T18:00:00+02:00", "2026-09-22T18:20:00+02:00", "2026-09-24T18:40:00+02:00", "2026-09-24T19:20:00+02:00"];

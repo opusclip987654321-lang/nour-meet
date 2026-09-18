@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" role="img" aria-label="Illustration Networking">
+  <defs>
+    <radialGradient id="nw-bg" cx="60%" cy="32%" r="80%">
+      <stop offset="0%" stop-color="#332813"/>
+      <stop offset="55%" stop-color="#191410"/>
+      <stop offset="100%" stop-color="#0b0b0c"/>
+    </radialGradient>
+    <linearGradient id="nw-gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e7cf9c"/>
+      <stop offset="100%" stop-color="#a5843f"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="500" fill="url(#nw-bg)"/>
+  <path d="M 120 90 A 320 380 0 0 1 120 410" fill="none" stroke="#8a6d3d" stroke-width="1" opacity="0.35"/>
+  <g stroke="url(#nw-gold)" stroke-width="1.2" opacity="0.55">
+    <line x1="210" y1="150" x2="380" y2="120"/>
+    <line x1="210" y1="150" x2="300" y2="250"/>
+    <line x1="380" y1="120" x2="520" y2="180"/>
+    <line x1="300" y1="250" x2="380" y2="120"/>
+    <line x1="300" y1="250" x2="470" y2="300"/>
+    <line x1="470" y1="300" x2="520" y2="180"/>
+    <line x1="470" y1="300" x2="610" y2="340"/>
+    <line x1="520" y1="180" x2="640" y2="230"/>
+    <line x1="640" y1="230" x2="610" y2="340"/>
+    <line x1="300" y1="250" x2="180" y2="330"/>
+    <line x1="180" y1="330" x2="290" y2="390"/>
+    <line x1="470" y1="300" x2="290" y2="390"/>
+  </g>
+  <g fill="url(#nw-gold)">
+    <circle cx="210" cy="150" r="7"/>
+    <circle cx="380" cy="120" r="9"/>
+    <circle cx="300" cy="250" r="11"/>
+    <circle cx="520" cy="180" r="7"/>
+    <circle cx="470" cy="300" r="9"/>
+    <circle cx="640" cy="230" r="6"/>
+    <circle cx="610" cy="340" r="8"/>
+    <circle cx="180" cy="330" r="6"/>
+    <circle cx="290" cy="390" r="7"/>
+  </g>
+  <text x="400" y="460" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-size="22" fill="#cba969" letter-spacing="2">NETWORKING</text>
+</svg>

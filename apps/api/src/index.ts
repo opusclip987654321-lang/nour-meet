@@ -2,15 +2,27 @@ import Fastify, { FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
+import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
 import QRCode from "qrcode";
 import Stripe from "stripe";
 import { PrismaClient, UserRole, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, EventStatus } from "@prisma/client";
 import { z, ZodError } from "zod";
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES } from "@nour/shared";
 import { env } from "./env.js";
 import { paymentDeadline } from "./domain.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { createSmsVerificationProvider } from "./sms-verification.js";
+
+const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
+const uploadsDir = path.join(publicDir, "uploads", "events");
+await mkdir(uploadsDir, { recursive: true });
+const ALLOWED_IMAGE_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const prisma = new PrismaClient();
 const app = Fastify({ logger: true });
@@ -18,6 +30,8 @@ const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
 await app.register(cors, { origin: env.WEB_ORIGIN === "*" ? true : env.WEB_ORIGIN.split(","), credentials: true });
 await app.register(jwt, { secret: env.JWT_SECRET });
 await app.register(rateLimit, { global: false });
+await app.register(multipart, { limits: { fileSize: MAX_IMAGE_BYTES, files: 1 } });
+await app.register(fastifyStatic, { root: publicDir, prefix: "/static/" });
 const smsVerification = createSmsVerificationProvider({
   mode: env.SMS_MODE,
   devCode: env.DEV_OTP_CODE,
@@ -48,9 +62,11 @@ const assertEventAccess = async (request: FastifyRequest, eventId: string) => {
   return prisma.event.findFirstOrThrow({ where: { id: eventId, organizerId: organizer.id } });
 };
 const profileAge = (birthDate?: Date | null) => birthDate ? Math.floor((Date.now() - birthDate.getTime()) / 31_557_600_000) : null;
+const defaultCategoryImage = (category: string) => EVENT_CATEGORIES.find(c => c.name === category)?.defaultImage ?? EVENT_CATEGORIES[0].defaultImage;
 const publicEvent = (event: any, revealAddress = false) => ({
   id: event.id, slug: event.slug, title: event.title, category: event.category, description: event.description,
   startsAt: event.startsAt, endsAt: event.endsAt, district: event.district, address: revealAddress ? event.address : null,
+  imageUrl: event.imageUrl ?? defaultCategoryImage(event.category),
   capacity: event.capacity, confirmedCount: event._count?.reservations ?? 0, priceCents: event.priceCents, status: event.status,
   organizer: { id: event.organizer.id, name: event.organizer.name }
 });
@@ -336,7 +352,8 @@ app.post("/admin/applications/:id/decision", { preHandler: roles(UserRole.ADMIN,
 app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
   const organizer = token.role === UserRole.ORGANIZER ? await prisma.organizer.findUniqueOrThrow({ where: { ownerId: token.sub } }) : null;
-  return prisma.event.findMany({ where: organizer ? { organizerId: organizer.id } : undefined, orderBy: { startsAt: "asc" } });
+  const events = await prisma.event.findMany({ where: organizer ? { organizerId: organizer.id } : undefined, orderBy: { startsAt: "asc" } });
+  return events.map(e => ({ ...e, imageUrl: e.imageUrl ?? defaultCategoryImage(e.category) }));
 });
 app.get("/admin/events/:id/call-slots", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -376,11 +393,27 @@ app.delete("/admin/events/:id/call-slots/:slotId", { preHandler: roles(UserRole.
   return reply.code(204).send();
 });
 app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
-  const input = z.object({ organizerId: z.string(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.string(), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false) }).parse(request.body);
+  const input = z.object({ organizerId: z.string(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false) }).parse(request.body);
   const token = request.user as TokenUser;
   const ownOrganizer = token.role === UserRole.ORGANIZER ? await prisma.organizer.findUniqueOrThrow({ where: { ownerId: token.sub } }) : null;
   const event = await prisma.event.create({ data: { ...input, organizerId: ownOrganizer?.id ?? input.organizerId, startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), status: input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT } });
   await audit(currentId(request), "CREATE_EVENT", "Event", event.id); return event;
+});
+app.post("/admin/events/:id/image", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  await assertEventAccess(request, id);
+  const file = await request.file();
+  if (!file) return reply.code(400).send({ error: "Aucun fichier reçu" });
+  const extension = ALLOWED_IMAGE_TYPES[file.mimetype];
+  if (!extension) return reply.code(415).send({ error: "Format non pris en charge (jpeg, png ou webp uniquement)" });
+  const buffer = await file.toBuffer();
+  if (buffer.byteLength > MAX_IMAGE_BYTES) return reply.code(413).send({ error: "Image trop volumineuse (5 Mo maximum)" });
+  const filename = `${randomUUID()}.${extension}`;
+  await writeFile(path.join(uploadsDir, filename), buffer);
+  const imageUrl = `/static/uploads/events/${filename}`;
+  const event = await prisma.event.update({ where: { id }, data: { imageUrl } });
+  await audit(currentId(request), "UPDATE_EVENT_IMAGE", "Event", id);
+  return { imageUrl, event };
 });
 app.post("/admin/tickets/scan", { preHandler: roles(UserRole.ADMIN, UserRole.RECEPTION, UserRole.ORGANIZER) }, async (request, reply) => {
   const { code } = z.object({ code: z.string() }).parse(request.body); const ticket = await prisma.ticket.findUnique({ where: { code }, include: { reservation: { include: { user: true, event: true } } } });
