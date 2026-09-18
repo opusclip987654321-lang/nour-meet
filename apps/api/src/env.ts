@@ -15,7 +15,9 @@ const envSchema = z.object({
   TWILIO_AUTH_TOKEN: optionalEnvironmentSecret,
   TWILIO_VERIFY_SERVICE_SID: optionalEnvironmentSecret,
   API_PORT: z.coerce.number().default(4000),
-  WEB_ORIGIN: z.string().default("http://localhost:5173")
+  WEB_ORIGIN: z.string().default("http://localhost:5173"),
+  STRIPE_SECRET_KEY: optionalEnvironmentSecret,
+  STRIPE_WEBHOOK_SECRET: optionalEnvironmentSecret
 }).superRefine((value, ctx) => {
   if (value.NODE_ENV === "production" && value.SMS_MODE === "mock") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["SMS_MODE"], message: "SMS_MODE=mock est interdit en production" });
@@ -24,6 +26,9 @@ const envSchema = z.object({
     for (const key of ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_VERIFY_SERVICE_SID"] as const) {
       if (!value[key]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} est requis avec SMS_MODE=twilio` });
     }
+  }
+  if (value.NODE_ENV === "production" && (!value.STRIPE_SECRET_KEY || !value.STRIPE_WEBHOOK_SECRET)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["STRIPE_SECRET_KEY"], message: "STRIPE_SECRET_KEY et STRIPE_WEBHOOK_SECRET sont requis en production" });
   }
 });
 

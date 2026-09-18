@@ -36,9 +36,16 @@ En configuration locale par défaut (`SMS_MODE=mock`), aucun SMS n’est envoyé
 | Administrateur — Walid | `+33600000001` |
 | Organisateur — Maison Amana | `+33600000002` |
 
-Pour simuler un paiement réussi : `4242 4242 4242 4242`.
+## Paiement (Stripe, mode test)
 
-Pour simuler un paiement refusé : `4000 0000 0000 0002`.
+Le paiement utilise Stripe (PaymentIntents + Elements) en mode test — voir `.env.example` pour les variables `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` et `VITE_STRIPE_PUBLISHABLE_KEY`. En local, les webhooks doivent être relayés avec `stripe listen --forward-to localhost:4000/webhooks/stripe`.
+
+Cartes de test Stripe (date d'expiration future quelconque, CVC à 3 chiffres quelconque) :
+
+- Paiement réussi : `4242 4242 4242 4242`.
+- Paiement refusé : `4000 0000 0000 0002`.
+
+Le billet et le QR code ne sont générés qu'après confirmation du paiement par le webhook Stripe.
 
 ## Application mobile
 

@@ -1,7 +1,3 @@
-export function testCardOutcome(cardNumber: string): "SUCCEEDED" | "FAILED" {
-  return cardNumber === "4000000000000002" ? "FAILED" : "SUCCEEDED";
-}
-
 export function hasCapacity(capacity: number, confirmedCount: number) {
   return confirmedCount < capacity;
 }

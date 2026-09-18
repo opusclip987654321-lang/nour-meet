@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { canUseTicket, hasCapacity, paymentDeadline, testCardOutcome } from "./domain.js";
+import { canUseTicket, hasCapacity, paymentDeadline } from "./domain.js";
 
 describe("règles métier Nūr Meet", () => {
-  it("refuse la carte de test prévue et accepte une carte normale", () => {
-    expect(testCardOutcome("4000000000000002")).toBe("FAILED");
-    expect(testCardOutcome("4242424242424242")).toBe("SUCCEEDED");
-  });
-
   it("empêche la survente", () => {
     expect(hasCapacity(28, 27)).toBe(true);
     expect(hasCapacity(28, 28)).toBe(false);

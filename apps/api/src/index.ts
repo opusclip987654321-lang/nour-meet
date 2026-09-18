@@ -3,16 +3,18 @@ import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import QRCode from "qrcode";
+import Stripe from "stripe";
 import { PrismaClient, UserRole, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, EventStatus } from "@prisma/client";
 import { z, ZodError } from "zod";
 import { randomUUID } from "node:crypto";
 import { env } from "./env.js";
-import { paymentDeadline, testCardOutcome } from "./domain.js";
+import { paymentDeadline } from "./domain.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { createSmsVerificationProvider } from "./sms-verification.js";
 
 const prisma = new PrismaClient();
 const app = Fastify({ logger: true });
+const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
 await app.register(cors, { origin: env.WEB_ORIGIN === "*" ? true : env.WEB_ORIGIN.split(","), credentials: true });
 await app.register(jwt, { secret: env.JWT_SECRET });
 await app.register(rateLimit, { global: false });
@@ -166,28 +168,77 @@ app.post("/events/:id/waitlist", { preHandler: auth }, async (request) => {
   return prisma.waitlistEntry.upsert({ where: { eventId_userId: { eventId: id, userId } }, update: {}, create: { eventId: id, userId, position } });
 });
 
-app.post("/checkout/:reservationId", { preHandler: auth }, async (request, reply) => {
-  const { reservationId } = z.object({ reservationId: z.string() }).parse(request.params);
-  const { cardNumber } = z.object({ cardNumber: z.string().regex(/^\d{16}$/) }).parse(request.body);
+app.post("/reservations/:id/payment-intent", { preHandler: auth }, async (request, reply) => {
+  if (!stripe) return reply.code(503).send({ error: "Le paiement par carte n’est pas configuré sur ce serveur" });
+  const { id } = z.object({ id: z.string() }).parse(request.params);
   const userId = currentId(request);
-  const reservation = await prisma.reservation.findFirstOrThrow({ where: { id: reservationId, userId }, include: { event: true, application: true } });
+  const reservation = await prisma.reservation.findFirstOrThrow({ where: { id, userId }, include: { event: true, application: true, payment: true } });
+  if (reservation.application.status !== ApplicationStatus.PAYMENT_PENDING) return reply.code(409).send({ error: "Cette candidature n’est pas en attente de paiement" });
+  if (reservation.cancelledAt) return reply.code(409).send({ error: "Cette réservation est annulée" });
   if (reservation.expiresAt < new Date()) return reply.code(409).send({ error: "Le délai de paiement est expiré" });
+  if (reservation.payment?.status === PaymentStatus.SUCCEEDED) return reply.code(409).send({ error: "Cette réservation est déjà payée" });
   const confirmedCount = await prisma.reservation.count({ where: { eventId: reservation.eventId, confirmedAt: { not: null }, cancelledAt: null, id: { not: reservation.id } } });
   if (confirmedCount >= reservation.event.capacity) return reply.code(409).send({ error: "L’événement est désormais complet" });
-  if (testCardOutcome(cardNumber) === "FAILED") {
-    await prisma.payment.upsert({ where: { reservationId }, update: { status: PaymentStatus.FAILED }, create: { reservationId, amountCents: reservation.event.priceCents, status: PaymentStatus.FAILED, providerRef: randomUUID() } });
-    return reply.code(402).send({ error: "Paiement refusé en mode test" });
+
+  let clientSecret: string | null = null;
+  if (reservation.payment?.providerRef) {
+    const existing = await stripe.paymentIntents.retrieve(reservation.payment.providerRef);
+    if (["requires_payment_method", "requires_confirmation", "requires_action"].includes(existing.status)) clientSecret = existing.client_secret;
   }
-  const ticketCode = `NOUR-${randomUUID().toUpperCase()}`;
-  const [, ticket] = await prisma.$transaction([
-    prisma.payment.upsert({ where: { reservationId }, update: { status: PaymentStatus.SUCCEEDED, paidAt: new Date(), providerRef: randomUUID() }, create: { reservationId, amountCents: reservation.event.priceCents, status: PaymentStatus.SUCCEEDED, paidAt: new Date(), providerRef: randomUUID() } }),
-    prisma.ticket.upsert({ where: { reservationId }, update: {}, create: { reservationId, code: ticketCode } }),
-    prisma.reservation.update({ where: { id: reservationId }, data: { confirmedAt: new Date() } }),
-    prisma.application.update({ where: { id: reservation.applicationId }, data: { status: ApplicationStatus.CONFIRMED } })
-  ]);
-  await notify(userId, "Paiement confirmé", `Votre billet pour ${reservation.event.title} est disponible.`);
-  await audit(userId, "PAYMENT_SUCCEEDED", "Reservation", reservationId, { amountCents: reservation.event.priceCents });
-  return { success: true, ticket, qrDataUrl: await QRCode.toDataURL(ticket.code) };
+  if (!clientSecret) {
+    const intent = await stripe.paymentIntents.create({
+      amount: reservation.event.priceCents,
+      currency: "eur",
+      payment_method_types: ["card"],
+      metadata: { reservationId: reservation.id, applicationId: reservation.applicationId, userId }
+    });
+    clientSecret = intent.client_secret;
+    await prisma.payment.upsert({
+      where: { reservationId: reservation.id },
+      update: { provider: "stripe", providerRef: intent.id, amountCents: reservation.event.priceCents, status: PaymentStatus.PENDING },
+      create: { reservationId: reservation.id, provider: "stripe", providerRef: intent.id, amountCents: reservation.event.priceCents, status: PaymentStatus.PENDING }
+    });
+  }
+  return { clientSecret, amountCents: reservation.event.priceCents };
+});
+
+await app.register(async (webhooks) => {
+  webhooks.addContentTypeParser("application/json", { parseAs: "buffer" }, (_req, body, done) => done(null, body));
+  webhooks.post("/webhooks/stripe", async (request, reply) => {
+    if (!stripe || !env.STRIPE_WEBHOOK_SECRET) return reply.code(503).send({ error: "Webhook Stripe non configuré" });
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(request.body as Buffer, request.headers["stripe-signature"] as string, env.STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+      return reply.code(400).send({ error: `Signature Stripe invalide : ${(err as Error).message}` });
+    }
+    if (event.type === "payment_intent.succeeded" || event.type === "payment_intent.payment_failed") {
+      const intent = event.data.object as Stripe.PaymentIntent;
+      const reservationId = intent.metadata.reservationId;
+      const reservation = reservationId ? await prisma.reservation.findUnique({ where: { id: reservationId }, include: { payment: true, event: true } }) : null;
+      if (reservation && reservation.payment?.providerRef === intent.id && reservation.payment.status !== PaymentStatus.SUCCEEDED) {
+        if (event.type === "payment_intent.succeeded") {
+          const confirmed = await prisma.$transaction(async (tx) => {
+            const updated = await tx.payment.updateMany({ where: { reservationId, status: { not: PaymentStatus.SUCCEEDED } }, data: { status: PaymentStatus.SUCCEEDED, paidAt: new Date() } });
+            if (updated.count !== 1) return false;
+            const ticketCode = `NOUR-${randomUUID().toUpperCase()}`;
+            await tx.ticket.upsert({ where: { reservationId }, update: {}, create: { reservationId, code: ticketCode } });
+            await tx.reservation.update({ where: { id: reservationId }, data: { confirmedAt: new Date() } });
+            await tx.application.update({ where: { id: reservation.applicationId }, data: { status: ApplicationStatus.CONFIRMED } });
+            return true;
+          });
+          if (confirmed) {
+            await notify(reservation.userId, "Paiement confirmé", `Votre billet pour ${reservation.event.title} est disponible.`);
+            await audit(reservation.userId, "PAYMENT_SUCCEEDED", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });
+          }
+        } else {
+          await prisma.payment.updateMany({ where: { reservationId, status: { not: PaymentStatus.SUCCEEDED } }, data: { status: PaymentStatus.FAILED } });
+          await audit(reservation.userId, "PAYMENT_FAILED", "Reservation", reservationId, { paymentIntentId: intent.id });
+        }
+      }
+    }
+    return reply.send({ received: true });
+  });
 });
 
 app.get("/me/tickets", { preHandler: auth }, async (request) => {

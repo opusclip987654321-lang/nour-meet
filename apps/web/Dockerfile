@@ -2,6 +2,8 @@ FROM node:22-alpine AS build
 WORKDIR /app
 ARG VITE_API_URL=http://localhost:4000
 ENV VITE_API_URL=$VITE_API_URL
+ARG VITE_STRIPE_PUBLISHABLE_KEY=
+ENV VITE_STRIPE_PUBLISHABLE_KEY=$VITE_STRIPE_PUBLISHABLE_KEY
 COPY package*.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json

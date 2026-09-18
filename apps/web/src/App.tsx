@@ -1,7 +1,11 @@
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import type { PublicEvent, SessionUser } from "@nour/shared";
 import { api, getToken, setToken } from "./api";
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? "");
 
 type AuthState = { user: (SessionUser & {profile?: any}) | null; loading: boolean; refresh: () => Promise<void>; logout: () => void };
 const AuthContext = createContext<AuthState>(null as never);
@@ -11,7 +15,6 @@ const money = (cents: number) => new Intl.NumberFormat("fr-FR", { style: "curren
 const dateTime = (value: string) => new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 const dayLabel = (value: string) => new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "2-digit", month: "short" }).format(new Date(value));
 const timeLabel = (value: string) => new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
-const payReservation = (reservationId: string) => api(`/checkout/${reservationId}`, { method: "POST", body: JSON.stringify({ cardNumber: "4242424242424242" }) });
 const APPLICATION_STATUS_LABEL: Record<string,string> = { PENDING_CALL: "En attente de choix d’un créneau", CALL_SCHEDULED: "Entretien programmé", CALL_COMPLETED: "Entretien réalisé", ACCEPTED: "Candidature acceptée", REFUSED: "Candidature refusée", PAYMENT_PENDING: "Acceptée · paiement à finaliser", CONFIRMED: "Place confirmée", CANCELLED: "Annulée", NO_SHOW: "Absence à l’entretien" };
 
 function AuthProvider({ children }: { children: ReactNode }) {
@@ -64,12 +67,76 @@ function CallCalendar({ slots, loading, onSelect, schedulingId }: { slots: any[]
   return <div className="calendar"><h3>Choisissez votre appel</h3><div className="calendar-days">{days.map(day => <button type="button" key={day} className={day===activeDay?"active":""} onClick={()=>setActiveDay(day)}><strong>{dayLabel(day)}</strong></button>)}</div><div className="calendar-slots">{(byDay.get(activeDay ?? "")??[]).map(s => <button type="button" key={s.id} disabled={schedulingId===s.id} onClick={()=>onSelect(s.id)}>{timeLabel(s.startsAt)}{schedulingId===s.id?<i className="mini-spinner"/>:null}</button>)}</div></div>;
 }
 
+function PaymentForm({ amountCents, onSuccess, onCancel }: { amountCents: number; onSuccess: () => void; onCancel: () => void }) {
+  const stripe = useStripe(); const elements = useElements();
+  const [submitting, setSubmitting] = useState(false); const [error, setError] = useState("");
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!stripe || !elements) return;
+    setSubmitting(true); setError("");
+    const { error: confirmError, paymentIntent } = await stripe.confirmPayment({ elements, redirect: "if_required" });
+    if (confirmError) { setError(confirmError.message ?? "Le paiement a été refusé."); setSubmitting(false); return; }
+    if (paymentIntent && (paymentIntent.status === "succeeded" || paymentIntent.status === "processing")) { onSuccess(); return; }
+    setError("Le paiement n’a pas pu être confirmé."); setSubmitting(false);
+  };
+  return <form onSubmit={submit} className="payment-form">
+    <PaymentElement/>
+    {error && <Notice kind="error">{error}</Notice>}
+    <div className="payment-actions">
+      <button type="button" className="button secondary" onClick={onCancel} disabled={submitting}>Annuler</button>
+      <button type="submit" className="button" disabled={!stripe || submitting}>{submitting?"Traitement…":`Payer ${money(amountCents)}`}</button>
+    </div>
+  </form>;
+}
+
+function PaymentModal({ reservationId, eventId, amountCents, onClose, onConfirmed }: { reservationId: string; eventId: string; amountCents: number; onClose: () => void; onConfirmed: () => void }) {
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [phase, setPhase] = useState<"loading" | "ready" | "confirming" | "success" | "timeout">("loading");
+
+  useEffect(() => {
+    api<{ clientSecret: string }>(`/reservations/${reservationId}/payment-intent`, { method: "POST" })
+      .then(r => { setClientSecret(r.clientSecret); setPhase("ready"); })
+      .catch(err => setError((err as Error).message));
+  }, [reservationId]);
+
+  const handleSuccess = async () => {
+    setPhase("confirming");
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      try {
+        const application = await api<any>(`/events/${eventId}/my-application`);
+        if (application.status === "CONFIRMED") { setPhase("success"); setTimeout(onConfirmed, 1200); return; }
+      } catch { /* on retente */ }
+    }
+    setPhase("timeout");
+  };
+
+  return <div className="modal-overlay" role="dialog" aria-modal="true">
+    <div className="modal payment-modal">
+      <div className="modal-head"><h2>Paiement sécurisé</h2><button type="button" className="link-button" onClick={onClose} aria-label="Fermer">×</button></div>
+      <p className="payment-amount">Montant à régler : <b>{money(amountCents)}</b></p>
+      {error && <Notice kind="error">{error}</Notice>}
+      {phase === "loading" && <div className="calendar-state"><div className="spinner small"/><span>Chargement du module de paiement…</span></div>}
+      {phase === "confirming" && <div className="calendar-state"><div className="spinner small"/><span>Confirmation du paiement…</span></div>}
+      {phase === "success" && <Notice kind="success">Paiement confirmé ! Votre billet est prêt.</Notice>}
+      {phase === "timeout" && <><Notice kind="error">Le paiement est en cours de confirmation. Actualisez la page dans un instant.</Notice><button className="button full" onClick={onClose}>Fermer</button></>}
+      {phase === "ready" && clientSecret && <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: "night", variables: { colorPrimary: "#cba969" } } }}>
+        <PaymentForm amountCents={amountCents} onSuccess={handleSuccess} onCancel={onClose}/>
+      </Elements>}
+    </div>
+  </div>;
+}
+
 function ApplicationStatusPanel({ application, event, onPaid }: { application: any; event: PublicEvent; onPaid: () => void }) {
-  const [paying, setPaying] = useState(false); const [error, setError] = useState("");
-  const pay = async () => { setPaying(true); setError(""); try { await payReservation(application.reservation.id); onPaid(); } catch (err) { setError((err as Error).message); } finally { setPaying(false); } };
+  const [showPayment, setShowPayment] = useState(false);
   if (application.status === "REFUSED") return <Notice kind="error">Votre candidature n’a pas été retenue pour cet événement.</Notice>;
   if (application.status === "CONFIRMED") return <Notice kind="success">Votre place est confirmée. Retrouvez votre billet dans votre espace personnel.</Notice>;
-  if (application.status === "PAYMENT_PENDING" && application.reservation) return <div className="payment-block"><Notice kind="success">Candidature acceptée ! Finalisez votre place avant le {dateTime(application.reservation.expiresAt)}.</Notice>{error && <Notice kind="error">{error}</Notice>}<button className="button full" disabled={paying} onClick={pay}>{paying?"Paiement…":`Payer ${money(event.priceCents)}`}</button></div>;
+  if (application.status === "PAYMENT_PENDING" && application.reservation) return <div className="payment-block">
+    <Notice kind="success">Candidature acceptée ! Finalisez votre place avant le {dateTime(application.reservation.expiresAt)}.</Notice>
+    <button className="button full" onClick={() => setShowPayment(true)}>Payer par carte · {money(event.priceCents)}</button>
+    {showPayment && <PaymentModal reservationId={application.reservation.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }}/>}
+  </div>;
   if (application.call) return <div className="call-scheduled"><span className="eyebrow">ENTRETIEN PROGRAMMÉ</span><strong>{dateTime(application.call.startsAt)}</strong><p>L’organisateur vous appellera à cette heure, puis vous serez informé(e) de sa décision.</p></div>;
   return null;
 }
@@ -144,10 +211,11 @@ function ProfileEditor({onSaved}:{onSaved:()=>void}) {
 }
 
 function Dashboard() {
-  const {user,refresh}=useAuth(); const [apps,setApps]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]),[tab,setTab]=useState("reservations"),[paying,setPaying]=useState<string|null>(null),[message,setMessage]=useState("");
+  const {user,refresh}=useAuth(); const [apps,setApps]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]),[tab,setTab]=useState("reservations"),[payingFor,setPayingFor]=useState<{reservationId:string;eventId:string;amountCents:number}|null>(null);
   const load=()=>Promise.all([api<any[]>("/me/applications"),api<any[]>("/me/tickets"),api<any[]>("/notifications")]).then(([a,t,n])=>{setApps(a);setTickets(t);setNotifications(n)}); useEffect(()=>{load()},[]);
-  const pay=async(id:string)=>{setPaying(id);try{await payReservation(id);setMessage("Paiement de test confirmé. Votre billet est prêt.");await load()}catch(e){setMessage((e as Error).message)}finally{setPaying(null)}};
-  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><div className="avatar large">{user?.displayName?.slice(0,2).toUpperCase()}</div><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{[["reservations","Réservations"],["tickets","Billets"],["profile","Profil"],["notifications","Notifications"],["contacts","Contacts et messages"]].map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{tab==="reservations"?"Mes événements":tab==="tickets"?"Mes billets":tab==="profile"?"Mon profil":tab==="notifications"?"Notifications":"Contacts et messages"}</h1>{message&&<Notice kind={message.includes("confirmé")?"success":"error"}>{message}</Notice>}{tab==="reservations"&&<div className="stack">{apps.map(a=><article className="reservation" key={a.id}><div className="date-box"><strong>{new Date(a.event.startsAt).getDate()}</strong><span>{new Date(a.event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</span></div><div><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}</div>{a.status==="PAYMENT_PENDING"&&a.reservation&&<button className="button" disabled={paying===a.reservation.id} onClick={()=>pay(a.reservation.id)}>{paying?"Paiement…":`Payer ${money(a.event.priceCents)}`}</button>}</article>)}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><span className="eyebrow">{new Date(t.reservation.event.startsAt).toLocaleDateString("fr-FR")}</span><h2>{t.reservation.event.title}</h2><p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<ProfileEditor onSaved={refresh}/>} {tab==="notifications"&&<div className="stack">{notifications.map(n=><article className="notification" key={n.id}><i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div></article>)}</div>}{tab==="contacts"&&<Messages/>}</div></section></Layout>;
+  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><div className="avatar large">{user?.displayName?.slice(0,2).toUpperCase()}</div><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{[["reservations","Réservations"],["tickets","Billets"],["profile","Profil"],["notifications","Notifications"],["contacts","Contacts et messages"]].map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{tab==="reservations"?"Mes événements":tab==="tickets"?"Mes billets":tab==="profile"?"Mon profil":tab==="notifications"?"Notifications":"Contacts et messages"}</h1>{tab==="reservations"&&<div className="stack">{apps.map(a=><article className="reservation" key={a.id}><div className="date-box"><strong>{new Date(a.event.startsAt).getDate()}</strong><span>{new Date(a.event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</span></div><div><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}</div>{a.status==="PAYMENT_PENDING"&&a.reservation&&<button className="button" onClick={()=>setPayingFor({reservationId:a.reservation.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>}</article>)}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><span className="eyebrow">{new Date(t.reservation.event.startsAt).toLocaleDateString("fr-FR")}</span><h2>{t.reservation.event.title}</h2><p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<ProfileEditor onSaved={refresh}/>} {tab==="notifications"&&<div className="stack">{notifications.map(n=><article className="notification" key={n.id}><i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div></article>)}</div>}{tab==="contacts"&&<Messages/>}</div></section>
+  {payingFor&&<PaymentModal reservationId={payingFor.reservationId} eventId={payingFor.eventId} amountCents={payingFor.amountCents} onClose={()=>setPayingFor(null)} onConfirmed={()=>{setPayingFor(null);load()}}/>}
+  </Layout>;
 }
 
 function Messages() {
