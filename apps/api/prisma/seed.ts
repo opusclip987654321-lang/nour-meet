@@ -94,6 +94,75 @@ async function main() {
     { userId: sofia.id, title: "Nouveau message de Karim", body: "Avec plaisir, à bientôt !" }
   ], skipDuplicates: true });
   await prisma.auditLog.create({ data: { actorId: admin.id, action: "SEED_DATABASE", entity: "System", metadata: { contactId: contact.id } } });
+
+  // Comptes de test dédiés au développement local (connexion rapide depuis la page de connexion en
+  // mode SMS simulé) : un par état/rôle utile à vérifier manuellement, en plus des comptes de
+  // démonstration ci-dessus (Walid, Maison Amana, Sofia, Karim).
+  const pendingOwner = await prisma.user.upsert({
+    where: { phone: "+33600000010" },
+    update: {},
+    create: { phone: "+33600000010", displayName: "Resto En Attente", role: UserRole.PARTICIPANT, profile: { create: { city: "Paris", interests: [], profileCompleted: true, validatedAt: new Date() } } }
+  });
+  await prisma.restaurant.upsert({
+    where: { ownerId: pendingOwner.id },
+    update: {},
+    create: { ownerId: pendingOwner.id, name: "Le Petit Test", managerName: "En Attente", siret: "98765432100011", description: "Restaurant de test en attente d'approbation.", district: "Paris 11e", address: "3 rue de test, 75011 Paris", phone: "+33146000000", commissionRate: 30, status: "PENDING" }
+  });
+
+  await prisma.user.upsert({
+    where: { phone: "+33600000030" },
+    update: {},
+    create: { phone: "+33600000030", displayName: "Accueil Test", role: UserRole.RECEPTION, restaurantId: restaurant.id, profile: { create: { city: "Paris", interests: [], profileCompleted: true, validatedAt: new Date() } } }
+  });
+  await prisma.user.upsert({
+    where: { phone: "+33600000031" },
+    update: {},
+    create: { phone: "+33600000031", displayName: "Modérateur Test", role: UserRole.MODERATOR, profile: { create: { city: "Paris", interests: [], profileCompleted: true, validatedAt: new Date() } } }
+  });
+
+  const hommeValide = await prisma.user.upsert({
+    where: { phone: "+33600000020" },
+    update: {},
+    create: { phone: "+33600000020", displayName: "Homme Validé", role: UserRole.PARTICIPANT, profile: { create: { city: "Paris", interests: [], profileCompleted: true, validatedAt: new Date(), quotaCategory: "HOMME" } } }
+  });
+  const existingHommeApp = await prisma.application.findFirst({ where: { userId: hommeValide.id, eventId: null } });
+  if (!existingHommeApp) await prisma.application.create({ data: { userId: hommeValide.id, motivation: "Compte de test : participant homme déjà validé.", status: ApplicationStatus.ACCEPTED, decidedAt: new Date() } });
+
+  await prisma.user.upsert({
+    where: { phone: "+33600000021" },
+    update: {},
+    create: { phone: "+33600000021", displayName: "Homme Non Validé", role: UserRole.PARTICIPANT, profile: { create: { city: "Paris", interests: [], profileCompleted: true, quotaCategory: "HOMME" } } }
+  });
+
+  const femmeValidee = await prisma.user.upsert({
+    where: { phone: "+33600000022" },
+    update: {},
+    create: { phone: "+33600000022", displayName: "Femme Validée", role: UserRole.PARTICIPANT, profile: { create: { city: "Paris", interests: [], profileCompleted: true, validatedAt: new Date(), quotaCategory: "FEMME" } } }
+  });
+  const existingFemmeApp = await prisma.application.findFirst({ where: { userId: femmeValidee.id, eventId: null } });
+  if (!existingFemmeApp) await prisma.application.create({ data: { userId: femmeValidee.id, motivation: "Compte de test : participante déjà validée.", status: ApplicationStatus.ACCEPTED, decidedAt: new Date() } });
+
+  await prisma.user.upsert({
+    where: { phone: "+33600000023" },
+    update: {},
+    create: { phone: "+33600000023", displayName: "Femme Non Validée", role: UserRole.PARTICIPANT, profile: { create: { city: "Paris", interests: [], profileCompleted: true, quotaCategory: "FEMME" } } }
+  });
+
+  const refuse = await prisma.user.upsert({
+    where: { phone: "+33600000024" },
+    update: {},
+    create: { phone: "+33600000024", displayName: "Profil Refusé", role: UserRole.PARTICIPANT, profile: { create: { city: "Paris", interests: [], profileCompleted: true } } }
+  });
+  const existingRefusApp = await prisma.application.findFirst({ where: { userId: refuse.id, eventId: null } });
+  if (!existingRefusApp) await prisma.application.create({ data: { userId: refuse.id, motivation: "Compte de test : profil refusé, délai de trois mois en cours.", status: ApplicationStatus.REFUSED, notes: "Refus de test", decidedAt: new Date() } });
+
+  const enAttenteEntretien = await prisma.user.upsert({
+    where: { phone: "+33600000025" },
+    update: {},
+    create: { phone: "+33600000025", displayName: "En Attente D'Entretien", role: UserRole.PARTICIPANT, profile: { create: { city: "Paris", interests: [], profileCompleted: true } } }
+  });
+  const existingWaitingApp = await prisma.application.findFirst({ where: { userId: enAttenteEntretien.id, eventId: null } });
+  if (!existingWaitingApp) await prisma.application.create({ data: { userId: enAttenteEntretien.id, motivation: "Compte de test : entretien demandé, aucun créneau réservé.", status: ApplicationStatus.PENDING_CALL } });
 }
 
 main().finally(() => prisma.$disconnect());
