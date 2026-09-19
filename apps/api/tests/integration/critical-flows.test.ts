@@ -785,6 +785,66 @@ describe("droits RGPD : export, et suppression par anonymisation sans toucher au
   }, 20_000);
 });
 
+describe("photo de profil : envoi, remplacement, suppression, et nettoyage RGPD", () => {
+  const fakeJpeg = () => new Blob([Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00])], { type: "image/jpeg" });
+
+  it("accepte un envoi, remplace le fichier précédent, puis supprime au retrait", async () => {
+    const participant = await directParticipant("PhotoTest");
+    createdUserIds.push(participant.userId);
+
+    const firstForm = new FormData();
+    firstForm.append("file", fakeJpeg(), "photo1.jpg");
+    const firstUpload = await api<{ photoUrl: string }>("/me/profile-photo", { method: "POST", body: firstForm as any }, participant.token);
+    expect(firstUpload.status).toBe(200);
+    const firstUrl = firstUpload.body.photoUrl;
+    const firstFetch = await fetch(`${process.env.API_URL ?? "http://localhost:4000"}${firstUrl}`);
+    expect(firstFetch.status).toBe(200);
+
+    const secondForm = new FormData();
+    secondForm.append("file", fakeJpeg(), "photo2.jpg");
+    const secondUpload = await api<{ photoUrl: string }>("/me/profile-photo", { method: "POST", body: secondForm as any }, participant.token);
+    expect(secondUpload.status).toBe(200);
+    expect(secondUpload.body.photoUrl).not.toBe(firstUrl);
+    // Le remplacement supprime le fichier précédent, jamais juste la référence en base.
+    const firstFetchAfterReplace = await fetch(`${process.env.API_URL ?? "http://localhost:4000"}${firstUrl}`);
+    expect(firstFetchAfterReplace.status).toBe(404);
+
+    const me = await api<{ profile: { photoUrl: string } }>("/me", {}, participant.token);
+    expect(me.body.profile.photoUrl).toBe(secondUpload.body.photoUrl);
+
+    const removed = await api("/me/profile-photo", { method: "DELETE" }, participant.token);
+    expect(removed.status).toBe(204);
+    const secondFetchAfterDelete = await fetch(`${process.env.API_URL ?? "http://localhost:4000"}${secondUpload.body.photoUrl}`);
+    expect(secondFetchAfterDelete.status).toBe(404);
+  });
+
+  it("refuse un type de fichier non autorisé", async () => {
+    const participant = await directParticipant("PhotoRejectTest");
+    createdUserIds.push(participant.userId);
+    const form = new FormData();
+    form.append("file", new Blob([Buffer.from("not an image")], { type: "text/plain" }), "notes.txt");
+    const res = await api("/me/profile-photo", { method: "POST", body: form as any }, participant.token);
+    expect(res.status).toBe(415);
+  });
+
+  it("supprime le fichier de la photo de profil lors de l’anonymisation RGPD, pas seulement la colonne", async () => {
+    const participant = await directParticipant("PhotoRgpdTest");
+    createdUserIds.push(participant.userId);
+    const form = new FormData();
+    form.append("file", fakeJpeg(), "photo.jpg");
+    const upload = await api<{ photoUrl: string }>("/me/profile-photo", { method: "POST", body: form as any }, participant.token);
+    const photoUrl = upload.body.photoUrl;
+
+    const deletion = await api<{ deleted: boolean }>("/me/request-deletion", { method: "POST" }, participant.token);
+    expect(deletion.status).toBe(200);
+
+    const profile = await prisma.profile.findUniqueOrThrow({ where: { userId: participant.userId } });
+    expect(profile.photoUrl).toBeNull();
+    const fileAfterDeletion = await fetch(`${process.env.API_URL ?? "http://localhost:4000"}${photoUrl}`);
+    expect(fileAfterDeletion.status).toBe(404);
+  });
+});
+
 describe("blog éditorial : validation humaine obligatoire, jamais de publication automatique", () => {
   it("refuse le mot interdit et n'affiche jamais un article publiquement avant PUBLISHED", async () => {
     const admin = await adminToken();

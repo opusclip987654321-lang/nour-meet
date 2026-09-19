@@ -123,3 +123,7 @@ button,.button,.link-button,.event-card,.feature-grid>div,.testimonial-card,.sta
 .chat-input button{transition:filter .18s ease,box-shadow .18s ease;cursor:pointer}
 .chat-input button:hover{filter:brightness(1.1);box-shadow:0 8px 20px -10px #cba96990}
 @media (prefers-reduced-motion: no-preference){.bubble{animation:fadeUp .25s ease both}}
+/* --- Photo de profil --- */
+img.avatar{object-fit:cover}
+.profile-photo-editor{display:flex;align-items:center;gap:18px;padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.profile-photo-editor .link-button{margin-left:10px;font-size:13px}

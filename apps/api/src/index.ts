@@ -9,7 +9,7 @@ import Stripe from "stripe";
 import { PrismaClient, Prisma, UserRole, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, EventStatus, QuotaCategory, AlternativeOfferStatus } from "@prisma/client";
 import { z, ZodError } from "zod";
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES, EVENT_ZONES, regionOfZone, eventRequiresScreening, suggestedFlowForCategory } from "@nour/shared";
@@ -28,6 +28,15 @@ const restaurantUploadsDir = path.join(publicDir, "uploads", "restaurants");
 await mkdir(restaurantUploadsDir, { recursive: true });
 const articleUploadsDir = path.join(publicDir, "uploads", "articles");
 await mkdir(articleUploadsDir, { recursive: true });
+const profileUploadsDir = path.join(publicDir, "uploads", "profiles");
+await mkdir(profileUploadsDir, { recursive: true });
+// Supprime un ancien fichier uploadé lors d'un remplacement (photo de profil : une seule à la
+// fois, contrairement aux galeries événement/restaurant) — jamais pour une URL externe ou déjà
+// absente, jamais bloquant si le fichier a déjà disparu du disque.
+const deleteUploadedFile = async (url: string | null | undefined, prefix: string) => {
+  if (!url?.startsWith(prefix)) return;
+  await unlink(path.join(publicDir, url.replace("/static/", ""))).catch(() => {});
+};
 const ALLOWED_IMAGE_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -90,6 +99,7 @@ const audit = (actorId: string | undefined, action: string, entity: string, enti
 // pas une donnée exclusive de ce compte) ; Article (contenu éditorial de la plateforme, pas une
 // donnée personnelle du compte).
 const anonymizeUser = async (userId: string) => {
+  const existingProfile = await prisma.profile.findUnique({ where: { userId } });
   const profileData = { birthDate: null, city: null, profession: null, interests: [] as string[], bio: null, photoUrl: null };
   await prisma.$transaction([
     prisma.user.update({ where: { id: userId }, data: { phone: `deleted-${userId}`, email: null, displayName: "Compte supprimé", deletedAt: new Date() } }),
@@ -98,6 +108,9 @@ const anonymizeUser = async (userId: string) => {
     prisma.networkingAnswer.updateMany({ where: { application: { userId } }, data: { sector: "[supprimé]", currentRole: "[supprimé]", experienceLevel: "[supprimé]", goal: "[supprimé]", soughtProfiles: "[supprimé]", contribution: "[supprimé]", topics: "[supprimé]" } }),
     prisma.testimonial.updateMany({ where: { submittedByUserId: userId }, data: { displayName: "Ancien membre" } })
   ]);
+  // La photo de profil est une vraie donnée personnelle (image de la personne) : nullifier la
+  // colonne ne suffit pas, le fichier lui-même doit disparaître du disque.
+  await deleteUploadedFile(existingProfile?.photoUrl, "/static/uploads/profiles/");
 };
 // SMS hors connexion (Twilio Verify n'est utilisé que pour le code de connexion) : reste simulé
 // pour l'instant, jamais présenté comme envoyé. L'e-mail est réellement envoyé via Resend dès que
@@ -359,6 +372,35 @@ app.patch("/me/profile", { preHandler: auth }, async (request) => {
   const user = await prisma.user.update({ where: { id: userId }, data: { displayName: input.displayName, email: input.email, profile: { upsert: { create: profileData, update: profileData } } }, include: { profile: true } });
   await audit(userId, "UPDATE_PROFILE", "User", userId);
   return user;
+});
+
+// Photo de profil : une seule à la fois (contrairement aux galeries événement/restaurant, qui en
+// acceptent plusieurs) — un nouvel envoi remplace et supprime l'ancien fichier du disque.
+app.post("/me/profile-photo", { preHandler: auth }, async (request, reply) => {
+  const userId = currentId(request);
+  const file = await request.file();
+  if (!file) return reply.code(400).send({ error: "Aucun fichier reçu" });
+  const extension = ALLOWED_IMAGE_TYPES[file.mimetype];
+  if (!extension) return reply.code(415).send({ error: "Format non pris en charge (jpeg, png ou webp uniquement)" });
+  const buffer = await file.toBuffer();
+  if (buffer.byteLength > MAX_IMAGE_BYTES) return reply.code(413).send({ error: "Image trop volumineuse (5 Mo maximum)" });
+  const previous = await prisma.profile.findUnique({ where: { userId } });
+  const filename = `${randomUUID()}.${extension}`;
+  await writeFile(path.join(profileUploadsDir, filename), buffer);
+  const photoUrl = `/static/uploads/profiles/${filename}`;
+  await prisma.profile.upsert({ where: { userId }, update: { photoUrl }, create: { userId, interests: [], photoUrl } });
+  await deleteUploadedFile(previous?.photoUrl, "/static/uploads/profiles/");
+  await audit(userId, "UPDATE_PROFILE_PHOTO", "Profile", userId);
+  return { photoUrl };
+});
+app.delete("/me/profile-photo", { preHandler: auth }, async (request, reply) => {
+  const userId = currentId(request);
+  const profile = await prisma.profile.findUnique({ where: { userId } });
+  if (!profile?.photoUrl) return reply.code(404).send({ error: "Aucune photo de profil" });
+  await prisma.profile.update({ where: { userId }, data: { photoUrl: null } });
+  await deleteUploadedFile(profile.photoUrl, "/static/uploads/profiles/");
+  await audit(userId, "REMOVE_PROFILE_PHOTO", "Profile", userId);
+  return reply.code(204).send();
 });
 
 // Droit d'accès/portabilité (§20) : tout ce que la plateforme détient sur ce compte, en un seul
@@ -786,7 +828,7 @@ app.get("/profiles/code/:code", { preHandler: auth }, async (request, reply) => 
   const profile = await prisma.profile.findUnique({ where: { shareCode: code }, include: { user: true } });
   if (!profile || !profile.validatedAt) return reply.code(404).send({ error: "Code invalide ou révoqué" });
   if (profile.userId === currentId(request)) return reply.code(409).send({ error: "Il s’agit de votre propre code" });
-  return { userId: profile.userId, displayName: profile.user.displayName, age: profileAge(profile.birthDate), city: profile.city, profession: profile.profession, interests: profile.interests, bio: profile.bio, validated: true };
+  return { userId: profile.userId, displayName: profile.user.displayName, photoUrl: profile.photoUrl, age: profileAge(profile.birthDate), city: profile.city, profession: profile.profession, interests: profile.interests, bio: profile.bio, validated: true };
 });
 
 app.post("/contacts/request", { preHandler: auth }, async (request) => {
