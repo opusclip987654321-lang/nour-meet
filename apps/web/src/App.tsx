@@ -105,7 +105,7 @@ function TestimonialsSection({ eventType }: { eventType?: string }) {
   const [items,setItems]=useState<any[]>([]);
   useEffect(()=>{api<any[]>(`/testimonials${eventType?`?eventType=${encodeURIComponent(eventType)}`:""}`).then(setItems).catch(()=>{})},[eventType]);
   if(items.length===0) return null;
-  return <section className="section"><div className="section-title"><span className="eyebrow">ILS EN PARLENT</span><h2>Des rencontres qui comptent.</h2></div><div className="feature-grid">{items.map(t=><div key={t.id} className="testimonial-card"><span className="eyebrow">{t.eventType.toUpperCase()}</span><blockquote>« {t.text} »</blockquote><b>{t.displayName}</b>{t.rating&&<span className="fine">{"★".repeat(t.rating)}{"☆".repeat(5-t.rating)}</span>}</div>)}</div></section>;
+  return <section className="section"><div className="section-title"><span className="eyebrow">ILS EN PARLENT</span><h2>Des rencontres qui comptent.</h2></div><div className="feature-grid">{items.map(t=><div key={t.id} className="testimonial-card"><div className="testimonial-head"><span className="testimonial-avatar">{t.displayName.slice(0,2).toUpperCase()}</span><div><b>{t.displayName}</b><span className="eyebrow">{t.eventType.toUpperCase()}</span></div></div><blockquote>« {t.text} »</blockquote>{t.rating&&<span className="fine">{"★".repeat(t.rating)}{"☆".repeat(5-t.rating)}</span>}</div>)}</div></section>;
 }
 
 function Home() {

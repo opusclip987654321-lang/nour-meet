@@ -65,3 +65,35 @@
 .testimonial-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:26px;display:grid;gap:12px}.testimonial-card blockquote{margin:0;color:#ddd;font-style:italic;line-height:1.6}
 .settings-row input{width:100%;background:#121213;border:1px solid #3b3934;border-radius:6px;color:#fff;padding:8px 10px}.settings-row span:last-child{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
 .article-body{color:#ddd;line-height:1.8;font-size:16px}.article-body p{margin:0 0 18px}
+
+/* --- Passe UX : transitions, retours visuels au survol/focus, entrée en douceur --- */
+::selection{background:var(--gold);color:#111}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:4px}
+button,.button,.link-button,.event-card,.feature-grid>div,.testimonial-card,.stat,.category-badge,.full-badge,.avatar,input,select,textarea{transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease,background-color .18s ease,color .18s ease}
+.button{box-shadow:0 1px 0 #00000030}
+.button:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 12px 26px -10px #cba96980}
+.button:active:not(:disabled){transform:translateY(0);box-shadow:0 3px 8px -3px #cba96966}
+.button.secondary:hover:not(:disabled){border-color:var(--gold);background:#242422}
+.button.danger:hover:not(:disabled){box-shadow:0 12px 26px -10px #8d343a90}
+.button:disabled{opacity:.55;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+.link-button:hover{color:var(--gold)}
+.site-header nav a{position:relative;padding-bottom:4px}
+.site-header nav a:after{content:"";position:absolute;left:0;right:100%;bottom:0;height:1px;background:var(--gold);transition:right .25s ease}
+.site-header nav a:hover:after,.site-header nav a.active:after{right:0}
+.event-card:hover{transform:translateY(-5px);box-shadow:0 20px 44px -20px #000000cc;border-color:#5a482f}
+.feature-grid>div:hover,.stat:hover{transform:translateY(-3px);border-color:#5a482f}
+.testimonial-card:hover{transform:translateY(-3px);border-color:#5a482f}
+.filters input:focus,.filters select:focus,label input:focus,label textarea:focus,.event-edit-form input:focus,.event-edit-form textarea:focus,.reject-note input:focus{border-color:var(--gold);box-shadow:0 0 0 3px #cba96925;outline:none}
+.category-badge,.full-badge{backdrop-filter:blur(6px)}
+.testimonial-head{display:flex;align-items:center;gap:12px}
+.testimonial-avatar{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#d2b168,#74562d);color:#111;display:grid;place-items:center;font-weight:900;font-size:14px;flex:0 0 auto}
+.testimonial-head .eyebrow{display:block;margin-top:2px}
+@media (prefers-reduced-motion: no-preference){
+  .hero>div:first-child{animation:fadeUp .7s ease both}
+  .hero-art{animation:fadeUp .7s ease .1s both}
+  .section-title{animation:fadeUp .6s ease both}
+  .event-grid>*,.feature-grid>*{animation:fadeUp .5s ease both}
+  .event-grid>*:nth-child(2),.feature-grid>*:nth-child(2){animation-delay:.06s}
+  .event-grid>*:nth-child(3),.feature-grid>*:nth-child(3){animation-delay:.12s}
+}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
