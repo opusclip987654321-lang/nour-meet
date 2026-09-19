@@ -66,6 +66,7 @@ const loadCurrentUser = async (request: FastifyRequest) => {
   const token = request.user as TokenUser;
   const current = await prisma.user.findUniqueOrThrow({ where: { id: token.sub } });
   if (current.suspendedAt) throw httpError(403, "Compte suspendu");
+  if (current.deletedAt) throw httpError(403, "Compte supprimé");
   token.role = current.role;
 };
 const auth = async (request: FastifyRequest) => { await loadCurrentUser(request); };
@@ -75,12 +76,38 @@ const roles = (...allowed: UserRole[]) => async (request: FastifyRequest) => {
 };
 const currentId = (request: FastifyRequest) => (request.user as TokenUser).sub;
 const audit = (actorId: string | undefined, action: string, entity: string, entityId?: string, metadata?: unknown) => prisma.auditLog.create({ data: { actorId, action, entity, entityId, metadata: metadata as object | undefined } });
+
+// Suppression RGPD (§20) : jamais une ligne User supprimée physiquement — la cascade Prisma
+// détruirait Reservation puis Payment puis LedgerEntry, dont la conservation est une obligation
+// légale, pas une option. Anonymise à la place les données directement identifiantes. Documenté ici
+// plutôt que dans un fichier séparé, pour rester la seule source de vérité de ce qui est concerné :
+// - User/Profile : coordonnées et informations personnelles remplacées ou vidées ; deletedAt bloque
+//   toute nouvelle connexion (voir loadCurrentUser et /auth/verify-otp).
+// - ScreeningAnswer/NetworkingAnswer (réponses libres aux questionnaires) : texte remplacé.
+// - Témoignage(s) soumis par ce compte : pseudonyme remplacé par un libellé générique.
+// Volontairement CONSERVÉS tels quels, sans exception : Payment, LedgerEntry, Ticket, AuditLog
+// (obligation légale de conservation comptable) ; Message et Report (contenu partagé avec un tiers,
+// pas une donnée exclusive de ce compte) ; Article (contenu éditorial de la plateforme, pas une
+// donnée personnelle du compte).
+const anonymizeUser = async (userId: string) => {
+  const profileData = { birthDate: null, city: null, profession: null, interests: [] as string[], bio: null, photoUrl: null };
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: userId }, data: { phone: `deleted-${userId}`, email: null, displayName: "Compte supprimé", deletedAt: new Date() } }),
+    prisma.profile.updateMany({ where: { userId }, data: profileData }),
+    prisma.screeningAnswer.updateMany({ where: { application: { userId } }, data: { motivation: "[supprimé]", relationshipGoal: "[supprimé]", personality: "[supprimé]", desiredQualities: "[supprimé]", ageRangeSought: "[supprimé]", valuesAndLifestyle: "[supprimé]", noteForOrganizer: null } }),
+    prisma.networkingAnswer.updateMany({ where: { application: { userId } }, data: { sector: "[supprimé]", currentRole: "[supprimé]", experienceLevel: "[supprimé]", goal: "[supprimé]", soughtProfiles: "[supprimé]", contribution: "[supprimé]", topics: "[supprimé]" } }),
+    prisma.testimonial.updateMany({ where: { submittedByUserId: userId }, data: { displayName: "Ancien membre" } })
+  ]);
+};
 // SMS hors connexion (Twilio Verify n'est utilisé que pour le code de connexion) : reste simulé
 // pour l'instant, jamais présenté comme envoyé. L'e-mail est réellement envoyé via Resend dès que
 // RESEND_API_KEY et RESEND_FROM_EMAIL sont configurés ; sinon il reste lui aussi simulé (mode mock).
 // Le statut réel (en file, envoyé, échoué) est toujours tracé dans OutboxMessage.
 const notify = async (userId: string, title: string, body: string) => {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  // Un compte anonymisé (§20) n'a plus de coordonnées réelles : rien à notifier, et surtout jamais
+  // rien à envoyer vers le numéro/e-mail de substitution posé par la suppression RGPD.
+  if (user.deletedAt) return;
   await prisma.notification.create({ data: { userId, title, body } });
   await prisma.outboxMessage.create({ data: { channel: "SMS", recipient: user.phone, body: `${title} — ${body}` } });
   if (user.email) {
@@ -329,6 +356,7 @@ app.post("/auth/verify-otp", { config: { rateLimit: { max: smsVerification.mode 
   let user = await prisma.user.findUnique({ where: { phone }, include: { profile: true } });
   if (!user) user = await prisma.user.create({ data: { phone, displayName: input.displayName ?? "Nouveau membre", profile: { create: { interests: [] } } }, include: { profile: true } });
   if (user.suspendedAt) return reply.code(403).send({ error: "Compte suspendu" });
+  if (user.deletedAt) return reply.code(403).send({ error: "Compte supprimé" });
   const token = app.jwt.sign({ sub: user.id, role: user.role, phone: user.phone }, { expiresIn: "30d" });
   return { token, user: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profileCompleted: user.profile?.profileCompleted ?? false } };
 });
@@ -345,6 +373,48 @@ app.patch("/me/profile", { preHandler: auth }, async (request) => {
   const user = await prisma.user.update({ where: { id: userId }, data: { displayName: input.displayName, email: input.email, profile: { upsert: { create: profileData, update: profileData } } }, include: { profile: true } });
   await audit(userId, "UPDATE_PROFILE", "User", userId);
   return user;
+});
+
+// Droit d'accès/portabilité (§20) : tout ce que la plateforme détient sur ce compte, en un seul
+// export. Le nom/téléphone/e-mail de tiers (organisateur d'un événement, autre participant d'une
+// conversation) n'est jamais inclus, seul le point de vue de ce compte sur ses propres données.
+app.get("/me/export", { preHandler: auth }, async (request) => {
+  const userId = currentId(request);
+  const [user, applications, reservations, tickets, payments, waitlistEntries, alternativeOffers, notifications, loyaltyEntries, shareLinks, testimonials, contactRequestsSent, contactRequestsReceived] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { profile: true } }),
+    prisma.application.findMany({ where: { userId }, include: { screeningAnswer: true, networkingAnswer: true, event: { select: { title: true, slug: true } } } }),
+    prisma.reservation.findMany({ where: { userId }, include: { event: { select: { title: true, slug: true } } } }),
+    prisma.ticket.findMany({ where: { reservation: { userId } } }),
+    prisma.payment.findMany({ where: { reservation: { userId } } }),
+    prisma.waitlistEntry.findMany({ where: { userId } }),
+    prisma.alternativeOffer.findMany({ where: { userId } }),
+    prisma.notification.findMany({ where: { userId } }),
+    prisma.loyaltyEntry.findMany({ where: { userId } }),
+    prisma.shareLink.findMany({ where: { userId } }),
+    prisma.testimonial.findMany({ where: { submittedByUserId: userId } }),
+    prisma.contactRequest.findMany({ where: { requesterId: userId } }),
+    prisma.contactRequest.findMany({ where: { recipientId: userId } })
+  ]);
+  await audit(userId, "EXPORT_PERSONAL_DATA", "User", userId);
+  return {
+    exportedAt: new Date().toISOString(),
+    account: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, createdAt: user.createdAt },
+    profile: user.profile,
+    applications, reservations, tickets, payments, waitlistEntries, alternativeOffers, notifications, loyaltyEntries, shareLinks, testimonials,
+    contactRequests: { sent: contactRequestsSent, received: contactRequestsReceived }
+  };
+});
+
+// Droit à l'effacement (§20) : anonymise plutôt que supprimer (voir anonymizeUser). Bloqué tant
+// qu'une réservation active porte sur un événement encore à venir, pour ne jamais perdre le lien
+// entre le billet/QR code déjà émis et son titulaire avant que l'événement ait eu lieu.
+app.post("/me/request-deletion", { preHandler: auth }, async (request, reply) => {
+  const userId = currentId(request);
+  const upcomingActive = await prisma.reservation.findFirst({ where: { userId, cancelledAt: null, event: { startsAt: { gt: new Date() } } } });
+  if (upcomingActive) return reply.code(409).send({ error: "Vous avez une réservation active pour un événement à venir. Annulez-la ou attendez qu’il soit passé avant de supprimer votre compte." });
+  await anonymizeUser(userId);
+  await audit(userId, "SELF_DELETE_ACCOUNT", "User", userId);
+  return { deleted: true };
 });
 
 app.get("/events", async (request) => {

@@ -574,6 +574,92 @@ describe("politique d’annulation/remboursement autour de la limite exacte de 2
   }, 20_000);
 });
 
+describe("droits RGPD : export, et suppression par anonymisation sans toucher aux données comptables (§20)", () => {
+  it("l’export personnel reprend le profil, les candidatures, réservations et paiements du compte", async () => {
+    const event = await prisma.event.create({ data: {
+      slug: `test-rgpd-export-${Date.now()}`, title: "Test export RGPD", category: "Networking", flow: "DIRECT",
+      description: "Événement de test pour l'export RGPD.",
+      startsAt: new Date(Date.now() + 20 * 86_400_000), endsAt: new Date(Date.now() + 20 * 86_400_000 + 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2200, status: "PUBLISHED"
+    } });
+    createdEventIds.push(event.id);
+    const participant = await directParticipant("RgpdExport");
+    createdUserIds.push(participant.userId);
+    const applyRes = await applyToEvent(event.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    await payAndConfirm(applyRes.body.application.id, participant.token);
+
+    const exportRes = await api<any>("/me/export", {}, participant.token);
+    expect(exportRes.status).toBe(200);
+    expect(exportRes.body.account.id).toBe(participant.userId);
+    expect(exportRes.body.applications).toHaveLength(1);
+    expect(exportRes.body.applications[0].networkingAnswer.sector).toBe(NETWORKING_ANSWERS_FIXTURE.sector);
+    expect(exportRes.body.reservations).toHaveLength(1);
+    expect(exportRes.body.payments).toHaveLength(1);
+    expect(exportRes.body.payments[0].amountCents).toBe(2200);
+  });
+
+  it("refuse la suppression tant qu’une réservation active porte sur un événement à venir", async () => {
+    const event = await prisma.event.create({ data: {
+      slug: `test-rgpd-blocked-${Date.now()}`, title: "Test suppression bloquée", category: "Networking", flow: "DIRECT",
+      description: "Événement de test pour le blocage de la suppression RGPD.",
+      startsAt: new Date(Date.now() + 20 * 86_400_000), endsAt: new Date(Date.now() + 20 * 86_400_000 + 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2200, status: "PUBLISHED"
+    } });
+    createdEventIds.push(event.id);
+    const participant = await directParticipant("RgpdBlocked");
+    createdUserIds.push(participant.userId);
+    const applyRes = await applyToEvent(event.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    await payAndConfirm(applyRes.body.application.id, participant.token);
+
+    const deletion = await api("/me/request-deletion", { method: "POST" }, participant.token);
+    expect(deletion.status).toBe(409);
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: participant.userId } });
+    expect(user.deletedAt).toBeNull();
+  });
+
+  it("anonymise le compte sans toucher au paiement déjà encaissé, et bloque toute connexion ultérieure", async () => {
+    const event = await prisma.event.create({ data: {
+      slug: `test-rgpd-delete-${Date.now()}`, title: "Test suppression RGPD", category: "Networking", flow: "DIRECT",
+      description: "Événement de test pour la suppression RGPD.",
+      startsAt: new Date(Date.now() + 48 * 60 * 60_000), endsAt: new Date(Date.now() + 50 * 60 * 60_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2600, status: "PUBLISHED"
+    } });
+    createdEventIds.push(event.id);
+    const participant = await directParticipant("RgpdDelete");
+    createdUserIds.push(participant.userId);
+    const applyRes = await applyToEvent(event.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    await payAndConfirm(applyRes.body.application.id, participant.token);
+    // Libère la réservation (remboursable, > 24h de l'événement) pour ne plus bloquer la suppression.
+    const cancelRes = await api<{ refunded: boolean }>(`/me/applications/${applyRes.body.application.id}/cancel`, { method: "POST" }, participant.token);
+    expect(cancelRes.body.refunded).toBe(true);
+
+    const paymentBefore = await prisma.payment.findFirstOrThrow({ where: { reservation: { applicationId: applyRes.body.application.id } } });
+    const phoneBefore = (await prisma.user.findUniqueOrThrow({ where: { id: participant.userId } })).phone;
+
+    const deletion = await api<{ deleted: boolean }>("/me/request-deletion", { method: "POST" }, participant.token);
+    expect(deletion.status).toBe(200);
+    expect(deletion.body.deleted).toBe(true);
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: participant.userId } });
+    expect(user.deletedAt).toBeTruthy();
+    expect(user.email).toBeNull();
+    expect(user.displayName).toBe("Compte supprimé");
+    expect(user.phone).not.toBe(phoneBefore);
+
+    const networkingAnswer = await prisma.networkingAnswer.findUniqueOrThrow({ where: { applicationId: applyRes.body.application.id } });
+    expect(networkingAnswer.sector).toBe("[supprimé]");
+
+    // Comptable : jamais touché par l'anonymisation, quel que soit le statut du compte.
+    const paymentAfter = await prisma.payment.findUniqueOrThrow({ where: { id: paymentBefore.id } });
+    expect(paymentAfter.amountCents).toBe(paymentBefore.amountCents);
+    expect(paymentAfter.status).toBe(paymentBefore.status);
+
+    const blockedMe = await api("/me", {}, participant.token);
+    expect(blockedMe.status).toBe(403);
+  }, 20_000);
+});
+
 describe("blog éditorial : validation humaine obligatoire, jamais de publication automatique", () => {
   it("refuse le mot interdit et n'affiche jamais un article publiquement avant PUBLISHED", async () => {
     const admin = await adminToken();
