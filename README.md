@@ -144,6 +144,7 @@ Les valeurs configurables (durée du verrou de paiement, quota mensuel restaurat
 - Abonnement mensuel restaurateur (100 €/mois par défaut, quota d'événements publiables par mois) remplaçant la commission 30/70 ; l'ancien registre 30/70 reste en base mais n'est plus utilisé par défaut (`AppSetting ENABLE_COMMISSION_LEDGER`).
 - Minimum de participants par événement avec date limite de décision et notification automatique du restaurateur.
 - Scaffolding marketplace (comptes Stripe Connect en mode test) préparé mais aucun virement réel n'est jamais déclenché (`AppSetting MARKETPLACE_PAYOUTS_ENABLED`, désactivé par défaut, bloqué par validation juridique).
+- Partage attribué « J'y vais, viens avec moi » avec statistiques de conversion admin, témoignages modérés, page « Le concept » et blog éditorial (brouillons manuels ou générés par IA, toujours validés par un administrateur avant publication — jamais automatique).
 - Billet et QR code unique.
 - Contrôle d’entrée et protection contre le double scan.
 - Liste d’attente.

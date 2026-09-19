@@ -64,3 +64,4 @@
 .concept-video{width:100%;max-height:520px;border-radius:14px;margin-top:30px;background:#000}.concept-video-placeholder{margin-top:30px;height:320px;border-radius:14px;background:var(--panel);border:1px solid var(--line);display:grid;place-items:center;text-align:center;gap:14px;padding:30px}.concept-video-placeholder span{font-size:50px;color:var(--gold)}.concept-video-placeholder p{color:var(--muted);max-width:420px}
 .testimonial-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:26px;display:grid;gap:12px}.testimonial-card blockquote{margin:0;color:#ddd;font-style:italic;line-height:1.6}
 .settings-row input{width:100%;background:#121213;border:1px solid #3b3934;border-radius:6px;color:#fff;padding:8px 10px}.settings-row span:last-child{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.article-body{color:#ddd;line-height:1.8;font-size:16px}.article-body p{margin:0 0 18px}

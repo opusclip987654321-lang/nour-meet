@@ -15,11 +15,13 @@ async function tracked(displayName?: string, quotaCategory?: "HOMME" | "FEMME") 
 // Suivis séparément des utilisateurs (nettoyage en afterAll même si un test échoue en cours de
 // route, plutôt qu'un delete en fin de bloc qui ne s'exécuterait jamais dans ce cas).
 const createdEventIds: string[] = [];
+const createdArticleIds: string[] = [];
 
 beforeAll(ensureServerRunning);
 afterAll(async () => {
   await deleteTestUsers(createdUserIds);
   for (const id of createdEventIds) await prisma.event.delete({ where: { id } }).catch(() => {});
+  for (const id of createdArticleIds) await prisma.article.delete({ where: { id } }).catch(() => {});
 });
 
 describe("rôle et suspension vérifiés en direct (pas seulement dans le jeton)", () => {
@@ -400,4 +402,55 @@ describe("politique d’annulation/remboursement autour de la limite exacte de 2
     expect(withReason.body.refunded).toBe(true);
     expect(withReason.body.exception).toBe(true);
   }, 20_000);
+});
+
+describe("blog éditorial : validation humaine obligatoire, jamais de publication automatique", () => {
+  it("refuse le mot interdit et n'affiche jamais un article publiquement avant PUBLISHED", async () => {
+    const admin = await adminToken();
+
+    const forbidden = await api("/admin/articles", { method: "POST", body: JSON.stringify({
+      title: "Un sujet de couple", slug: `forbidden-word-${Date.now()}`, content: "Un article destiné à un public musulman de la plateforme.",
+      category: "Couple", keywords: []
+    }) }, admin);
+    expect(forbidden.status).toBe(400);
+
+    const { body: article } = await api<{ id: string; slug: string; status: string }>("/admin/articles", { method: "POST", body: JSON.stringify({
+      title: "Bien communiquer en couple", slug: `bien-communiquer-${Date.now()}`, content: "Un contenu suffisamment long pour passer la validation du formulaire soumis.",
+      category: "Communication", keywords: ["couple", "communication"]
+    }) }, admin);
+    createdArticleIds.push(article.id);
+    expect(article.status).toBe("DRAFT");
+
+    // Toujours invisible publiquement avant PUBLISHED, à chaque étape du circuit de validation.
+    const notYetPublic = await api(`/articles/${article.slug}`);
+    expect(notYetPublic.status).toBe(404);
+
+    await api(`/admin/articles/${article.id}/submit-for-review`, { method: "POST" }, admin);
+    const stillNotPublic = await api(`/articles/${article.slug}`);
+    expect(stillNotPublic.status).toBe(404);
+
+    const decision = await api<{ status: string }>(`/admin/articles/${article.id}/decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
+    expect(decision.body.status).toBe("APPROVED");
+    const approvedNotPublic = await api(`/articles/${article.slug}`);
+    expect(approvedNotPublic.status).toBe(404);
+
+    const published = await api<{ status: string }>(`/admin/articles/${article.id}/publish`, { method: "POST" }, admin);
+    expect(published.body.status).toBe("PUBLISHED");
+
+    const nowPublic = await api<{ title: string }>(`/articles/${article.slug}`);
+    expect(nowPublic.status).toBe(200);
+    expect(nowPublic.body.title).toBe("Bien communiquer en couple");
+
+    const history = await api<{ reviewLogs: any[] }>(`/admin/articles/${article.id}`, {}, admin);
+    expect(history.body.reviewLogs.map((l: any) => l.toStatus)).toEqual(expect.arrayContaining(["IN_REVIEW", "APPROVED", "PUBLISHED"]));
+  });
+
+  it("un brouillon généré par IA reste un brouillon, jamais publié automatiquement", async () => {
+    const admin = await adminToken();
+    const generated = await api<{ id: string; status: string; aiGenerated: boolean }>("/admin/articles/generate", { method: "POST", body: JSON.stringify({ topic: "Comment surmonter la solitude", category: "Solitude" }) }, admin);
+    expect(generated.status).toBe(201);
+    createdArticleIds.push(generated.body.id);
+    expect(generated.body.status).toBe("DRAFT");
+    expect(generated.body.aiGenerated).toBe(true);
+  });
 });

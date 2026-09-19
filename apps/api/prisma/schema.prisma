@@ -125,6 +125,7 @@ model User {
   loyaltyEntries   LoyaltyEntry[]
   alternativeOffers AlternativeOffer[]
   shareLinks       ShareLink[]
+  articles         Article[]
 }
 
 model Profile {
@@ -712,4 +713,54 @@ model ConnectedAccount {
   externalAccountId String
   status            ConnectedAccountStatus @default(PENDING)
   createdAt         DateTime               @default(now())
+}
+
+// Blog éditorial (§18) : socle éditorial d'abord, jamais de génération autonome en production.
+// Un brouillon généré par IA (aiGenerated=true) suit exactement le même circuit de validation
+// qu'un article écrit à la main — aucun statut ne permet de le publier sans passage explicite par
+// un administrateur (voir POST /admin/articles/:id/decision puis /publish).
+enum ArticleStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+model Article {
+  id              String            @id @default(cuid())
+  title           String
+  slug            String            @unique
+  excerpt         String?
+  content         String
+  imageUrl        String?
+  category        String
+  keywords        String[]
+  metaTitle       String?
+  metaDescription String?
+  authorId        String?
+  author          User?             @relation(fields: [authorId], references: [id])
+  status          ArticleStatus     @default(DRAFT)
+  // Programmation : publiée automatiquement par le balayage périodique une fois cette date atteinte,
+  // seulement si le statut est déjà APPROVED (jamais depuis DRAFT ou IN_REVIEW).
+  scheduledAt     DateTime?
+  publishedAt     DateTime?
+  archivedAt      DateTime?
+  aiGenerated     Boolean           @default(false)
+  aiPrompt        String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  reviewLogs      ArticleReviewLog[]
+}
+
+// Journal de validation (§18) : une ligne par changement de statut, jamais effacée.
+model ArticleReviewLog {
+  id         String        @id @default(cuid())
+  articleId  String
+  article    Article       @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  actorId    String?
+  fromStatus ArticleStatus
+  toStatus   ArticleStatus
+  note       String?
+  createdAt  DateTime      @default(now())
 }

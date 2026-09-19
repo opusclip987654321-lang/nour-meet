@@ -35,7 +35,7 @@ const STAFF_ROLES = ["ADMIN","ORGANIZER","MODERATOR","RECEPTION"];
 function Header() {
   const { user, logout } = useAuth();
   const isStaff = !!user && STAFF_ROLES.includes(user.role);
-  return <header className="site-header"><Logo/><nav>{isStaff?<><NavLink to="/admin">Administration</NavLink><NavLink to="/">Voir le site public</NavLink></>:<><NavLink to="/">Accueil</NavLink><NavLink to="/events">Événements</NavLink><NavLink to="/concept">Le concept</NavLink>{user && <NavLink to="/dashboard">Mon espace</NavLink>}</>}</nav><div className="header-actions">{user ? <><span className="member-name">{user.displayName}</span><button className="link-button" onClick={logout}>Déconnexion</button></> : <Link className="button small" to="/login">Se connecter</Link>}</div></header>;
+  return <header className="site-header"><Logo/><nav>{isStaff?<><NavLink to="/admin">Administration</NavLink><NavLink to="/">Voir le site public</NavLink></>:<><NavLink to="/">Accueil</NavLink><NavLink to="/events">Événements</NavLink><NavLink to="/concept">Le concept</NavLink><NavLink to="/blog">Blog</NavLink>{user && <NavLink to="/dashboard">Mon espace</NavLink>}</>}</nav><div className="header-actions">{user ? <><span className="member-name">{user.displayName}</span><button className="link-button" onClick={logout}>Déconnexion</button></> : <Link className="button small" to="/login">Se connecter</Link>}</div></header>;
 }
 function Layout({ children }: {children: ReactNode}) { return <><Header/><main>{children}</main><footer><Logo/><p>Paris et Île-de-France · Expérience privée · Données protégées</p></footer></>; }
 function Loading() { return <div className="state-page"><div className="spinner"/><h2>Chargement…</h2></div>; }
@@ -115,6 +115,43 @@ function Concept() {
       <div><b>04</b><h3>Paiement et billet</h3><p>La place n’est acquise qu’après paiement confirmé ; un billet avec QR code personnel est alors délivré pour l’entrée.</p></div>
       <div><b>05</b><h3>Déroulement de la soirée</h3><p>Accueil personnalisé, animation légère, temps libres, et la possibilité d’échanger un contact avec les personnes rencontrées.</p></div>
     </div>
+  </section></Layout>;
+}
+
+const BLOG_CATEGORIES=["Couple","Rencontre","Solitude","Mariage","Communication","Vie relationnelle"];
+
+function Blog() {
+  const [articles,setArticles]=useState<any[]>([]);
+  const [category,setCategory]=useState("");
+  useEffect(()=>{api<any[]>(`/articles${category?`?category=${encodeURIComponent(category)}`:""}`).then(setArticles).catch(()=>{})},[category]);
+  return <Layout><section className="page"><span className="eyebrow">LE BLOG</span><h1>Couple, rencontre et vie relationnelle.</h1>
+    <div className="filters"><select value={category} onChange={e=>setCategory(e.target.value)}><option value="">Tous les thèmes</option>{BLOG_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
+    {articles.length===0?<div className="empty"><span>◇</span><h2>Aucun article pour le moment</h2></div>:<div className="event-grid">{articles.map(a=><Link key={a.id} to={`/blog/${a.slug}`} className="event-card"><div className="event-art">{a.imageUrl?<img src={imgUrl(a.imageUrl)} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span className="eyebrow">{a.category.toUpperCase()}</span>}</div><div className="event-copy"><small>{a.category.toUpperCase()}</small><h3>{a.title}</h3><p>{a.excerpt}</p></div></Link>)}</div>}
+  </section></Layout>;
+}
+
+function ArticlePage() {
+  const {id}=useParams();
+  const [article,setArticle]=useState<any>(null);
+  const [notFound,setNotFound]=useState(false);
+  useEffect(()=>{api<any>(`/articles/${id}`).then(setArticle).catch(()=>setNotFound(true))},[id]);
+  useEffect(()=>{
+    if(!article)return;
+    document.title=article.metaTitle||`${article.title} — Nūr Meet`;
+    let meta=document.querySelector('meta[name="description"]');
+    if(!meta){meta=document.createElement("meta");meta.setAttribute("name","description");document.head.appendChild(meta)}
+    meta.setAttribute("content",article.metaDescription||article.excerpt||"");
+    return ()=>{document.title="Nūr Meet"};
+  },[article]);
+  if(notFound)return <Layout><div className="empty"><span>◇</span><h2>Article introuvable</h2></div></Layout>;
+  if(!article)return <Layout><Loading/></Layout>;
+  return <Layout><section className="page" style={{maxWidth:760}}>
+    <span className="eyebrow">{article.category.toUpperCase()}</span>
+    <h1>{article.title}</h1>
+    {article.author&&<p className="fine">Par {article.author.displayName} · {new Date(article.publishedAt).toLocaleDateString("fr-FR")}</p>}
+    {article.imageUrl&&<img src={imgUrl(article.imageUrl)} alt="" style={{width:"100%",borderRadius:14,margin:"20px 0"}}/>}
+    <div className="article-body">{article.content.split("\n\n").map((p:string,i:number)=><p key={i}>{p}</p>)}</div>
+    {article.keywords?.length>0&&<div className="chips" style={{marginTop:30}}>{article.keywords.map((k:string)=><span key={k}>{k}</span>)}</div>}
   </section></Layout>;
 }
 
@@ -614,6 +651,7 @@ function AdminNav(){
     {(role==="ADMIN"||role==="MODERATOR")&&<NavLink to="/admin/moderation">Modération</NavLink>}
     {role==="ADMIN"&&<NavLink to="/admin/outbox">Notifications</NavLink>}
     {role==="ADMIN"&&<NavLink to="/admin/testimonials">Témoignages</NavLink>}
+    {role==="ADMIN"&&<NavLink to="/admin/blog">Blog</NavLink>}
     {role==="ADMIN"&&<NavLink to="/admin/settings">Paramètres</NavLink>}
     <Link to="/">Voir le site public</Link>
   </aside>;
@@ -1143,6 +1181,140 @@ function AdminTestimonials() {
   </div></section></Layout>;
 }
 
+const ARTICLE_STATUS_LABEL:Record<string,string>={DRAFT:"Brouillon",IN_REVIEW:"En validation",APPROVED:"Validé",PUBLISHED:"Publié",ARCHIVED:"Archivé"};
+
+function AdminBlog() {
+  const [items,setItems]=useState<any[]>([]);
+  const [status,setStatus]=useState("");
+  const [genForm,setGenForm]=useState({topic:"",category:BLOG_CATEGORIES[0]});
+  const [newForm,setNewForm]=useState({title:"",category:BLOG_CATEGORIES[0]});
+  const [busy,setBusy]=useState(false);
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const navigate=useNavigate();
+  const load=()=>api<any[]>(`/admin/articles${status?`?status=${status}`:""}`).then(setItems);
+  useEffect(()=>{load()},[status]);
+  const slugify=(t:string)=>t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+
+  const generate=async(e:FormEvent)=>{
+    e.preventDefault();setBusy(true);setNotice(null);
+    try{const article=await api<{id:string}>("/admin/articles/generate",{method:"POST",body:JSON.stringify(genForm)});navigate(`/admin/blog/${article.id}`)}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(false)}
+  };
+  const createManual=async(e:FormEvent)=>{
+    e.preventDefault();setBusy(true);setNotice(null);
+    try{
+      const article=await api<{id:string}>("/admin/articles",{method:"POST",body:JSON.stringify({title:newForm.title,slug:`${slugify(newForm.title)}-${Date.now().toString().slice(-5)}`,category:newForm.category,content:"À rédiger.",keywords:[]})});
+      navigate(`/admin/blog/${article.id}`);
+    }catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(false)}
+  };
+
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Blog</h1><p className="fine left">Aucun article — écrit à la main ou généré par IA — n’est jamais publié sans validation humaine explicite.</p>
+    {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    <div className="admin-grid">
+      <form className="panel form-grid" onSubmit={createManual}>
+        <div className="panel-title"><h2>Nouvel article</h2></div>
+        <label>Titre<input required value={newForm.title} onChange={e=>setNewForm({...newForm,title:e.target.value})}/></label>
+        <label>Thème<select value={newForm.category} onChange={e=>setNewForm({...newForm,category:e.target.value})}>{BLOG_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
+        <button className="button small" disabled={busy}>Créer et modifier</button>
+      </form>
+      <form className="panel form-grid" onSubmit={generate}>
+        <div className="panel-title"><h2>Générer un brouillon (IA)</h2></div>
+        <label>Sujet<input required value={genForm.topic} onChange={e=>setGenForm({...genForm,topic:e.target.value})} placeholder="Ex. : bien communiquer après une dispute"/></label>
+        <label>Thème<select value={genForm.category} onChange={e=>setGenForm({...genForm,category:e.target.value})}>{BLOG_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
+        <button className="button small secondary" disabled={busy}>Générer un brouillon</button>
+      </form>
+    </div>
+    <div className="filters"><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tous les statuts</option>{Object.entries(ARTICLE_STATUS_LABEL).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
+    {items.length===0?<div className="empty"><span>◇</span><h2>Aucun article</h2></div>:<div className="panel table">
+      <div className="table-row head"><span>Titre</span><span>Thème</span><span>Statut</span></div>
+      {items.map(a=><Link key={a.id} to={`/admin/blog/${a.id}`} className="table-row"><span><b>{a.title}</b>{a.aiGenerated&&<small>Généré par IA</small>}</span><span>{a.category}</span><span>{ARTICLE_STATUS_LABEL[a.status]}</span></Link>)}
+    </div>}
+  </div></section></Layout>;
+}
+
+function AdminArticleEditor() {
+  const {id}=useParams();
+  const navigate=useNavigate();
+  const [article,setArticle]=useState<any>(null);
+  const [form,setForm]=useState({title:"",slug:"",excerpt:"",content:"",category:"",keywords:"",metaTitle:"",metaDescription:""});
+  const [busy,setBusy]=useState<string|null>(null);
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const [preview,setPreview]=useState(false);
+  const [socialCopy,setSocialCopy]=useState<any[]|null>(null);
+  const [scheduleAt,setScheduleAt]=useState("");
+  const [rejectNote,setRejectNote]=useState("");
+
+  const load=()=>api<any>(`/admin/articles/${id}`).then(a=>{setArticle(a);setForm({title:a.title,slug:a.slug,excerpt:a.excerpt??"",content:a.content,category:a.category,keywords:(a.keywords??[]).join(", "),metaTitle:a.metaTitle??"",metaDescription:a.metaDescription??""})});
+  useEffect(()=>{load()},[id]);
+
+  const save=async(e:FormEvent)=>{
+    e.preventDefault();setBusy("save");setNotice(null);
+    try{await api(`/admin/articles/${id}`,{method:"PATCH",body:JSON.stringify({...form,keywords:form.keywords.split(",").map(k=>k.trim()).filter(Boolean)})});setNotice({kind:"success",text:"Enregistré."});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+  const action=async(path:string,body?:unknown)=>{
+    setBusy(path);setNotice(null);
+    try{await api(`/admin/articles/${id}/${path}`,{method:"POST",body:body?JSON.stringify(body):undefined});setNotice({kind:"success",text:"Mis à jour."});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+  const uploadImage=async(file:File)=>{
+    const body=new FormData();body.append("file",file);
+    try{await api(`/admin/articles/${id}/image`,{method:"POST",body});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+  };
+  const generateSocial=async()=>{
+    setBusy("social");setNotice(null);
+    try{setSocialCopy(await api<any[]>(`/admin/articles/${id}/social-copy`,{method:"POST"}))}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+  const remove=async()=>{setBusy("delete");try{await api(`/admin/articles/${id}`,{method:"DELETE"});navigate("/admin/blog")}catch(err){setNotice({kind:"error",text:(err as Error).message});setBusy(null)}};
+
+  if(!article)return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><Loading/></div></section></Layout>;
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main">
+    <div className="admin-heading"><div><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>{article.title}</h1><p className="fine left">Statut : <b>{ARTICLE_STATUS_LABEL[article.status]}</b>{article.aiGenerated&&" · généré par IA"}</p></div><button type="button" className="button small secondary" onClick={()=>setPreview(!preview)}>{preview?"Modifier":"Aperçu"}</button></div>
+    {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    {preview?<div className="panel" style={{maxWidth:760}}>
+      <span className="eyebrow">{form.category.toUpperCase()}</span><h2 style={{fontFamily:"'Playfair Display',serif"}}>{form.title}</h2>
+      <div className="article-body">{form.content.split("\n\n").map((p,i)=><p key={i}>{p}</p>)}</div>
+    </div>:<form className="panel form-grid" onSubmit={save}>
+      <label>Titre<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+      <label>Identifiant (slug)<input required pattern="[a-z0-9-]+" value={form.slug} onChange={e=>setForm({...form,slug:e.target.value})}/></label>
+      <label>Thème<select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>{BLOG_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
+      <label>Mots-clés (séparés par des virgules)<input value={form.keywords} onChange={e=>setForm({...form,keywords:e.target.value})}/></label>
+      <label className="wide">Extrait<textarea value={form.excerpt} onChange={e=>setForm({...form,excerpt:e.target.value})}/></label>
+      <label className="wide">Contenu (un paragraphe par ligne vide)<textarea required style={{minHeight:260}} value={form.content} onChange={e=>setForm({...form,content:e.target.value})}/></label>
+      <label>Titre SEO (facultatif)<input value={form.metaTitle} onChange={e=>setForm({...form,metaTitle:e.target.value})}/></label>
+      <label>Méta-description SEO (facultatif)<input value={form.metaDescription} onChange={e=>setForm({...form,metaDescription:e.target.value})}/></label>
+      <label className="fine">Image principale<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>e.target.files?.[0]&&uploadImage(e.target.files[0])}/></label>
+      <button className="button" disabled={busy==="save"}>Enregistrer</button>
+    </form>}
+    <div className="panel" style={{marginTop:20}}>
+      <div className="panel-title"><h2>Circuit de validation</h2></div>
+      <div className="decision-buttons">
+        {article.status==="DRAFT"&&<button className="button" disabled={!!busy} onClick={()=>action("submit-for-review")}>Soumettre à validation</button>}
+        {article.status==="IN_REVIEW"&&<><button className="button" disabled={!!busy} onClick={()=>action("decision",{accept:true})}>Valider</button><div className="reject-note"><input value={rejectNote} onChange={e=>setRejectNote(e.target.value)} placeholder="Motif du renvoi (optionnel)"/><button className="button danger" disabled={!!busy} onClick={()=>action("decision",{accept:false,note:rejectNote})}>Renvoyer en brouillon</button></div></>}
+        {article.status==="APPROVED"&&<><button className="button" disabled={!!busy} onClick={()=>action("publish")}>Publier maintenant</button><div className="time-row"><input type="datetime-local" value={scheduleAt} onChange={e=>setScheduleAt(e.target.value)}/><button className="button secondary" disabled={!!busy||!scheduleAt} onClick={()=>action("schedule",{publishAt:new Date(scheduleAt).toISOString()})}>Programmer</button></div></>}
+        {article.status==="PUBLISHED"&&<button className="button secondary" disabled={!!busy} onClick={()=>action("archive")}>Archiver</button>}
+        <button className="button danger" disabled={!!busy} onClick={remove}>Supprimer</button>
+      </div>
+      {article.scheduledAt&&<p className="fine left">Publication programmée le {new Date(article.scheduledAt).toLocaleString("fr-FR")}.</p>}
+    </div>
+    <div className="panel" style={{marginTop:20}}>
+      <div className="panel-title"><h2>Propositions sociales (IA)</h2><button type="button" className="button small secondary" disabled={busy==="social"} onClick={generateSocial}>Générer</button></div>
+      {socialCopy&&<div className="stack">{socialCopy.map((s,i)=><div key={i} className="notice"><b>{s.platform}</b><p>{s.text}</p></div>)}</div>}
+    </div>
+    {article.reviewLogs?.length>0&&<div className="panel" style={{marginTop:20}}>
+      <div className="panel-title"><h2>Journal de validation</h2></div>
+      {article.reviewLogs.map((l:any)=><p key={l.id} className="fine left">{new Date(l.createdAt).toLocaleString("fr-FR")} — {ARTICLE_STATUS_LABEL[l.fromStatus]} → {ARTICLE_STATUS_LABEL[l.toStatus]}{l.note?` : ${l.note}`:""}</p>)}
+    </div>}
+  </div></section></Layout>;
+}
+
 function AdminModeration() {
   const {user}=useAuth();
   const [items,setItems]=useState<any[]>([]);
@@ -1254,4 +1426,4 @@ function Scanner() {
   </div><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b>✓</b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b>×</b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Présentez le QR code du billet devant la caméra, ou saisissez le code manuellement.</p></>}</aside></div></div></section></Layout>;
 }
 
-export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/concept" element={<Concept/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/settings" element={<Protected roles={["ADMIN"]}><AdminSettings/></Protected>}/><Route path="/admin/testimonials" element={<Protected roles={["ADMIN"]}><AdminTestimonials/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}
+export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/concept" element={<Concept/>}/><Route path="/blog" element={<Blog/>}/><Route path="/blog/:id" element={<ArticlePage/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/settings" element={<Protected roles={["ADMIN"]}><AdminSettings/></Protected>}/><Route path="/admin/testimonials" element={<Protected roles={["ADMIN"]}><AdminTestimonials/></Protected>}/><Route path="/admin/blog" element={<Protected roles={["ADMIN"]}><AdminBlog/></Protected>}/><Route path="/admin/blog/:id" element={<Protected roles={["ADMIN"]}><AdminArticleEditor/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}
