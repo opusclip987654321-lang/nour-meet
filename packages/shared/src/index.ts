@@ -1,9 +1,14 @@
-export interface EventCategoryDef { name: string; defaultImage: string }
+// "color" sert à distinguer visuellement les types d'événement (§15 : couleur, icône et badge
+// distincts pour le speed dating et le networking) — une teinte, pas un composant, pour rester
+// utilisable aussi bien côté web que mobile sans dépendre de React. L'icône associée à chaque
+// catégorie vit côté web/mobile (voir CATEGORY_ICON dans App.tsx) : une catégorie sans icône
+// enregistrée retombe sur un simple point de la bonne couleur plutôt que de casser l'affichage.
+export interface EventCategoryDef { name: string; defaultImage: string; color: string }
 // Catégories disponibles au lancement. Pour en ajouter une nouvelle : ajouter une entrée ici
 // (aucune migration de base de données n'est nécessaire, "category" est un simple champ texte).
 export const EVENT_CATEGORIES: EventCategoryDef[] = [
-  { name: "Speed dating", defaultImage: "/static/defaults/speed-dating.svg" },
-  { name: "Networking", defaultImage: "/static/defaults/networking.svg" }
+  { name: "Speed dating", defaultImage: "/static/defaults/speed-dating.svg", color: "#cba969" },
+  { name: "Networking", defaultImage: "/static/defaults/networking.svg", color: "#b97a52" }
 ];
 export const EVENT_CATEGORY_NAMES = EVENT_CATEGORIES.map(c => c.name);
 
