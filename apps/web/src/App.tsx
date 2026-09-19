@@ -1,5 +1,6 @@
-import { createContext, FormEvent, ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, FormEvent, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import jsQR from "jsqr";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { EVENT_CATEGORIES, EVENT_ZONES } from "@nour/shared";
@@ -405,6 +406,7 @@ function AdminNav(){
     <NavLink to="/admin/scanner">Scanner les billets</NavLink>
     {role==="ADMIN"&&<NavLink to="/admin/restaurants">Demandes restaurateurs</NavLink>}
     {(role==="ADMIN"||role==="MODERATOR")&&<NavLink to="/admin/moderation">Modération</NavLink>}
+    {role==="ADMIN"&&<NavLink to="/admin/outbox">Notifications</NavLink>}
     <Link to="/">Voir le site public</Link>
   </aside>;
 }
@@ -813,6 +815,19 @@ function AdminStaff() {
   </div></section></Layout>;
 }
 
+function AdminOutbox() {
+  const [items,setItems]=useState<any[]>([]);
+  const [loading,setLoading]=useState(true);
+  useEffect(()=>{api<any[]>("/admin/outbox").then(setItems).finally(()=>setLoading(false))},[]);
+  const STATUS_LABEL:Record<string,string>={QUEUED:"En file d’attente",SENT:"Envoyé",FAILED:"Échec d’envoi"};
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Notifications SMS / e-mail</h1><p className="fine left">« Envoyé » signifie accepté par le fournisseur réel (Resend pour l’e-mail). Le SMS hors connexion reste simulé pour l’instant : il n’est jamais présenté comme envoyé.</p>
+    {loading?<Loading/>:items.length===0?<div className="empty"><span>◇</span><h2>Aucun message pour le moment</h2></div>:<div className="panel table">
+      <div className="table-row head"><span>Destinataire</span><span>Message</span><span>Statut</span></div>
+      {items.map(m=><div key={m.id} className="table-row"><span><b>{m.channel}</b><small>{m.recipient}</small></span><span>{m.subject&&<b>{m.subject} — </b>}{m.body}</span><span>{STATUS_LABEL[m.status]??m.status}{m.error&&<small className="fine left">{m.error}</small>}</span></div>)}
+    </div>}
+  </div></section></Layout>;
+}
+
 function AdminModeration() {
   const {user}=useAuth();
   const [items,setItems]=useState<any[]>([]);
@@ -852,8 +867,76 @@ function AdminModeration() {
 }
 
 function Scanner() {
-  const [code,setCode]=useState("NOUR-TICKET-DEMO-482"),[result,setResult]=useState<any>(null),[error,setError]=useState(""); const scan=async(e:FormEvent)=>{e.preventDefault();setResult(null);setError("");try{setResult(await api("/admin/tickets/scan",{method:"POST",body:JSON.stringify({code})}))}catch(err){setError((err as Error).message)}};
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ACCUEIL</span><h1>Scanner un billet</h1><div className="scanner-layout"><form className="scanner panel" onSubmit={scan}><div className="scan-frame"><i/><span>QR</span></div><label>Code du billet<input value={code} onChange={e=>setCode(e.target.value)}/></label><button className="button full">Vérifier et valider l’entrée</button></form><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b>✓</b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b>×</b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Scannez ou saisissez le code.</p></>}</aside></div></div></section></Layout>;
+  const [code,setCode]=useState("");
+  const [result,setResult]=useState<any>(null);
+  const [error,setError]=useState("");
+  const [cameraError,setCameraError]=useState("");
+  const [scanning,setScanning]=useState(false);
+  const videoRef=useRef<HTMLVideoElement>(null);
+  const canvasRef=useRef<HTMLCanvasElement>(null);
+  const streamRef=useRef<MediaStream|null>(null);
+  const rafRef=useRef<number|null>(null);
+  const lastScanRef=useRef<{code:string;at:number}>({code:"",at:0});
+  const busyRef=useRef(false);
+
+  const runScan=async(scannedCode:string)=>{
+    if(!scannedCode||busyRef.current)return;
+    busyRef.current=true;setResult(null);setError("");
+    try{setResult(await api("/admin/tickets/scan",{method:"POST",body:JSON.stringify({code:scannedCode})}))}
+    catch(err){setError((err as Error).message)}
+    finally{busyRef.current=false}
+  };
+  const submitManual=(e:FormEvent)=>{e.preventDefault();runScan(code)};
+
+  useEffect(()=>{
+    let cancelled=false;
+    if(!window.isSecureContext){setCameraError("La caméra nécessite une connexion sécurisée (HTTPS). Utilisez la saisie manuelle ci-dessous.");return}
+    if(!navigator.mediaDevices?.getUserMedia){setCameraError("Caméra non prise en charge par ce navigateur. Utilisez la saisie manuelle ci-dessous.");return}
+    const tick=()=>{
+      const video=videoRef.current,canvas=canvasRef.current;
+      if(video&&canvas&&video.readyState===video.HAVE_ENOUGH_DATA){
+        canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+        const ctx=canvas.getContext("2d");
+        if(ctx){
+          ctx.drawImage(video,0,0,canvas.width,canvas.height);
+          const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
+          const found=jsQR(imageData.data,imageData.width,imageData.height);
+          if(found?.data){
+            const now=Date.now();
+            if(found.data!==lastScanRef.current.code||now-lastScanRef.current.at>3000){
+              lastScanRef.current={code:found.data,at:now};
+              runScan(found.data);
+            }
+          }
+        }
+      }
+      rafRef.current=requestAnimationFrame(tick);
+    };
+    navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
+      .then(stream=>{
+        if(cancelled){stream.getTracks().forEach(t=>t.stop());return}
+        streamRef.current=stream;
+        if(videoRef.current){videoRef.current.srcObject=stream;videoRef.current.play().catch(()=>{})}
+        setScanning(true);
+        rafRef.current=requestAnimationFrame(tick);
+      })
+      .catch(()=>setCameraError("Accès à la caméra refusé ou indisponible. Utilisez la saisie manuelle ci-dessous."));
+    return ()=>{
+      cancelled=true;
+      if(rafRef.current)cancelAnimationFrame(rafRef.current);
+      streamRef.current?.getTracks().forEach(t=>t.stop());
+    };
+  },[]);
+
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ACCUEIL</span><h1>Scanner un billet</h1><div className="scanner-layout"><div className="scanner panel">
+    <div className="scan-frame">
+      {cameraError?<div className="camera-fallback"><span>QR</span><p>{cameraError}</p></div>
+      :<video ref={videoRef} muted playsInline/>}
+      {scanning&&<span className="camera-live">● Caméra active</span>}
+    </div>
+    <canvas ref={canvasRef} style={{display:"none"}}/>
+    <form className="manual-fallback" onSubmit={submitManual}><label>Saisie manuelle (secours)<input value={code} onChange={e=>setCode(e.target.value)} placeholder="Code du billet"/></label><button className="button full">Vérifier et valider l’entrée</button></form>
+  </div><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b>✓</b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b>×</b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Présentez le QR code du billet devant la caméra, ou saisissez le code manuellement.</p></>}</aside></div></div></section></Layout>;
 }
 
-export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}
+export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}

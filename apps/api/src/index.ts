@@ -17,6 +17,7 @@ import { env } from "./env.js";
 import { paymentDeadline, interviewRetryDate } from "./domain.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { createSmsVerificationProvider } from "./sms-verification.js";
+import { createEmailProvider } from "./email-provider.js";
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const uploadsDir = path.join(publicDir, "uploads", "events");
@@ -43,6 +44,7 @@ const smsVerification = createSmsVerificationProvider({
   authToken: env.TWILIO_AUTH_TOKEN,
   serviceSid: env.TWILIO_VERIFY_SERVICE_SID
 });
+const emailProvider = createEmailProvider({ apiKey: env.RESEND_API_KEY, from: env.RESEND_FROM_EMAIL });
 
 type TokenUser = { sub: string; role: UserRole; phone: string };
 const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode });
@@ -66,11 +68,26 @@ const roles = (...allowed: UserRole[]) => async (request: FastifyRequest) => {
 };
 const currentId = (request: FastifyRequest) => (request.user as TokenUser).sub;
 const audit = (actorId: string | undefined, action: string, entity: string, entityId?: string, metadata?: unknown) => prisma.auditLog.create({ data: { actorId, action, entity, entityId, metadata: metadata as object | undefined } });
+// SMS hors connexion (Twilio Verify n'est utilisé que pour le code de connexion) : reste simulé
+// pour l'instant, jamais présenté comme envoyé. L'e-mail est réellement envoyé via Resend dès que
+// RESEND_API_KEY et RESEND_FROM_EMAIL sont configurés ; sinon il reste lui aussi simulé (mode mock).
+// Le statut réel (en file, envoyé, échoué) est toujours tracé dans OutboxMessage.
 const notify = async (userId: string, title: string, body: string) => {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
   await prisma.notification.create({ data: { userId, title, body } });
   await prisma.outboxMessage.create({ data: { channel: "SMS", recipient: user.phone, body: `${title} — ${body}` } });
-  if (user.email) await prisma.outboxMessage.create({ data: { channel: "EMAIL", recipient: user.email, subject: title, body } });
+  if (user.email) {
+    const outboxEmail = await prisma.outboxMessage.create({ data: { channel: "EMAIL", recipient: user.email, subject: title, body } });
+    if (emailProvider.mode === "resend") {
+      try {
+        await emailProvider.send(user.email, title, body);
+        await prisma.outboxMessage.update({ where: { id: outboxEmail.id }, data: { status: "SENT", sentAt: new Date() } });
+      } catch (err) {
+        await prisma.outboxMessage.update({ where: { id: outboxEmail.id }, data: { status: "FAILED", error: (err as Error).message } });
+        app.log.warn({ err }, "Échec d’envoi d’e-mail réel via Resend");
+      }
+    }
+  }
 };
 type ClaimableApplication = { id: string; userId: string; quotaCategory: QuotaCategory | null };
 type ClaimResult = { ok: true; reservation: Awaited<ReturnType<typeof prisma.reservation.upsert>> } | { ok: false; reason: "NO_CATEGORY" | "FULL" };

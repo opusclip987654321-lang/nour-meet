@@ -17,8 +17,13 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().default(4000),
   WEB_ORIGIN: z.string().default("http://localhost:5173"),
   STRIPE_SECRET_KEY: optionalEnvironmentSecret,
-  STRIPE_WEBHOOK_SECRET: optionalEnvironmentSecret
+  STRIPE_WEBHOOK_SECRET: optionalEnvironmentSecret,
+  RESEND_API_KEY: optionalEnvironmentSecret,
+  RESEND_FROM_EMAIL: z.string().email().optional()
 }).superRefine((value, ctx) => {
+  if (value.RESEND_API_KEY && !value.RESEND_FROM_EMAIL) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["RESEND_FROM_EMAIL"], message: "RESEND_FROM_EMAIL est requis avec RESEND_API_KEY" });
+  }
   if (value.NODE_ENV === "production" && value.SMS_MODE === "mock") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["SMS_MODE"], message: "SMS_MODE=mock est interdit en production" });
   }

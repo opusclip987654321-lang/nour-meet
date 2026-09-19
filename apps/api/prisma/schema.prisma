@@ -460,11 +460,22 @@ model AuditLog {
   createdAt DateTime @default(now())
 }
 
+// Statut réel d'un message : QUEUED tant qu'aucun fournisseur n'a réellement tenté l'envoi (jamais
+// affiché comme "envoyé" côté interface), SENT seulement après acceptation confirmée par le
+// fournisseur, FAILED en cas d'échec d'envoi (avec le motif dans `error`).
+enum OutboxStatus {
+  QUEUED
+  SENT
+  FAILED
+}
 model OutboxMessage {
-  id        String   @id @default(cuid())
+  id        String       @id @default(cuid())
   channel   String
   recipient String
   subject   String?
   body      String
-  createdAt DateTime @default(now())
+  status    OutboxStatus @default(QUEUED)
+  sentAt    DateTime?
+  error     String?
+  createdAt DateTime     @default(now())
 }

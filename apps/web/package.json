@@ -13,6 +13,7 @@
     "@nour/shared": "1.0.0",
     "@stripe/react-stripe-js": "^6.10.0",
     "@stripe/stripe-js": "^9.16.0",
+    "jsqr": "^1.4.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-router-dom": "^7.18.4"
