@@ -111,3 +111,7 @@ button,.button,.link-button,.event-card,.feature-grid>div,.testimonial-card,.sta
 .notification>i{transition:background-color .18s ease,box-shadow .18s ease}
 .notification.unread>i{box-shadow:0 0 0 3px #cba96925}
 .notification.read>i{background:#4a4740}
+/* --- Passe UX : page de connexion, vraie photo au lieu du dégradé + arche décorative --- */
+.auth-visual{background-size:cover;background-position:center}
+.auth-visual:after{content:none}
+.auth-visual blockquote{text-shadow:0 2px 12px #000a}
