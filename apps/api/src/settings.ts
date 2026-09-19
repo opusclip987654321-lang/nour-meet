@@ -75,6 +75,11 @@ export const SETTINGS_SCHEMA = {
     schema: z.string(),
     default: "" as const,
     description: "Fichier de sous-titres (.vtt) de la vidéo de présentation, pour l'accessibilité."
+  },
+  EVENT_REMINDER_HOURS_BEFORE: {
+    schema: z.number().int().positive(),
+    default: 24,
+    description: "Délai avant le début d'un événement auquel le rappel (§13) est envoyé à chaque réservation confirmée, une seule fois."
   }
 } as const;
 

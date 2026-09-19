@@ -1205,7 +1205,9 @@ app.post("/admin/global-interviews/:id/decision", { preHandler: roles(UserRole.A
   const adminId = currentId(request);
   if (!accept) {
     const refused = await prisma.application.update({ where: { id }, data: { status: ApplicationStatus.REFUSED, notes, decidedAt: new Date() } });
-    await notify(application.userId, "Profil non validé", `Votre profil n’a pas été validé pour le moment.${notes ? ` ${notes}` : ""} Vous pourrez redemander un entretien à partir du ${interviewRetryDate(refused.decidedAt!).toLocaleDateString("fr-FR")}.`);
+    // §4.1 : un refus reste neutre et sans motif pour le participant, quoi que l'admin ait consigné
+    // dans `notes` (visible uniquement en interne, jamais renvoyé dans la notification).
+    await notify(application.userId, "Profil non validé", `Votre profil n’a pas été validé pour le moment. Vous pourrez redemander un entretien à partir du ${interviewRetryDate(refused.decidedAt!).toLocaleDateString("fr-FR")}.`);
     await audit(adminId, "REFUSE_GLOBAL_INTERVIEW", "Application", id, { notes });
     return refused;
   }
@@ -1216,6 +1218,25 @@ app.post("/admin/global-interviews/:id/decision", { preHandler: roles(UserRole.A
   await notify(application.userId, "Profil validé", "Votre profil est validé : vous pouvez désormais vous inscrire directement aux événements, sans nouvel entretien.");
   await audit(adminId, "VALIDATE_PROFILE", "Application", id);
   return updatedApplication;
+});
+// §13/§14 : reprogrammer l'entretien d'un candidat (action rapide admin), jamais laissée à la charge
+// du participant qui devrait sinon annuler puis reprendre un nouveau créneau. L'ancien créneau est
+// libéré (redevient disponible pour quelqu'un d'autre) dans la même transaction que la prise du
+// nouveau, pour ne jamais perdre le créneau d'origine si le nouveau est déjà pris entre-temps.
+app.post("/admin/global-interviews/:id/reschedule", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { slotId } = z.object({ slotId: z.string() }).parse(request.body);
+  const application = await prisma.application.findFirstOrThrow({ where: { id, eventId: null }, include: { call: true } });
+  if (!application.call) return reply.code(409).send({ error: "Aucun entretien programmé pour cette candidature" });
+  const slot = await prisma.$transaction(async (tx) => {
+    await tx.screeningCall.update({ where: { id: application.call!.id }, data: { applicationId: null } });
+    const updated = await tx.screeningCall.updateMany({ where: { id: slotId, eventId: null, applicationId: null }, data: { applicationId: application.id } });
+    if (updated.count !== 1) throw httpError(409, "Ce créneau vient d’être réservé par un autre participant. Choisissez-en un autre.");
+    return tx.screeningCall.findUniqueOrThrow({ where: { id: slotId } });
+  });
+  await notify(application.userId, "Entretien reprogrammé", `Votre appel est désormais prévu le ${slot.startsAt.toLocaleString("fr-FR")}.`);
+  await audit(currentId(request), "RESCHEDULE_GLOBAL_INTERVIEW", "Application", id, { slotId });
+  return { rescheduled: true, slot };
 });
 app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
@@ -1948,6 +1969,23 @@ const checkMinParticipantsThresholds = async () => {
   }
 };
 setInterval(() => { checkMinParticipantsThresholds().catch(err => app.log.error(err)); }, 60_000);
+
+// Rappel d'événement (§13) : envoyé une seule fois par réservation confirmée, dans la fenêtre qui
+// précède le début de l'événement (AppSetting EVENT_REMINDER_HOURS_BEFORE, §23 — délai provisoire
+// non fixé par le cahier des charges). reminderSentAt rend le balayage idempotent même si le
+// serveur redémarre entre deux passages.
+const sendEventReminders = async () => {
+  const hoursBefore = getSetting("EVENT_REMINDER_HOURS_BEFORE");
+  const due = await prisma.reservation.findMany({
+    where: { confirmedAt: { not: null }, cancelledAt: null, reminderSentAt: null, event: { startsAt: { gt: new Date(), lte: new Date(Date.now() + hoursBefore * 60 * 60_000) } } },
+    include: { event: true }
+  });
+  for (const reservation of due) {
+    await prisma.reservation.update({ where: { id: reservation.id }, data: { reminderSentAt: new Date() } });
+    await notify(reservation.userId, "Votre événement approche", `« ${reservation.event.title} » a lieu le ${reservation.event.startsAt.toLocaleString("fr-FR")}. À très vite !`);
+  }
+};
+setInterval(() => { sendEventReminders().catch(err => app.log.error(err)); }, 60_000);
 
 // Programmation d'articles (§18) : ne publie jamais depuis DRAFT ou IN_REVIEW, uniquement un
 // article déjà explicitement validé (APPROVED) dont la date programmée est atteinte.

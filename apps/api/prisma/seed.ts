@@ -1,4 +1,4 @@
-import { PrismaClient, UserRole, EventStatus, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus } from "@prisma/client";
+import { PrismaClient, UserRole, EventStatus, EventFlow, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -31,8 +31,13 @@ async function main() {
 
   const event = await prisma.event.upsert({
     where: { slug: "diner-connexions-septembre" },
-    update: { zone: "Paris intra-muros" },
-    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "diner-connexions-septembre", title: "Dîner & Connexions", category: "Speed dating", description: "Un dîner en petit comité, des échanges guidés et des temps libres dans un lieu privatisé.", startsAt: new Date("2026-09-26T19:30:00+02:00"), endsAt: new Date("2026-09-26T23:30:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 28, priceCents: 3500, status: EventStatus.PUBLISHED }
+    // flow explicite ici : la migration qui backfillait "flow" pour les événements Speed dating
+    // existants (20260919151801) ne s'applique qu'aux lignes déjà présentes au moment où elle
+    // tourne. Sur une installation neuve (migrate deploy puis seed, table Event vide au moment de
+    // la migration), sans ce champ explicite, cet événement retomberait sur le défaut DIRECT du
+    // schéma alors qu'il doit exiger un entretien (§4.1).
+    update: { zone: "Paris intra-muros", flow: EventFlow.SCREENING },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "diner-connexions-septembre", title: "Dîner & Connexions", category: "Speed dating", flow: EventFlow.SCREENING, description: "Un dîner en petit comité, des échanges guidés et des temps libres dans un lieu privatisé.", startsAt: new Date("2026-09-26T19:30:00+02:00"), endsAt: new Date("2026-09-26T23:30:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 28, priceCents: 3500, status: EventStatus.PUBLISHED }
   });
   await prisma.eventQuota.upsert({ where: { eventId_category: { eventId: event.id, category: "HOMME" } }, update: {}, create: { eventId: event.id, category: "HOMME", capacity: 14 } });
   await prisma.eventQuota.upsert({ where: { eventId_category: { eventId: event.id, category: "FEMME" } }, update: {}, create: { eventId: event.id, category: "FEMME", capacity: 14, heldCount: 1 } });

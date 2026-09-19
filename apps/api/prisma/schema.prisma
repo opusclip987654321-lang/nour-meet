@@ -433,6 +433,9 @@ model Reservation {
   expiresAt     DateTime
   confirmedAt   DateTime?
   cancelledAt   DateTime?
+  // §13 : posé au moment où le rappel avant événement est envoyé, jamais avant — garantit l'envoi
+  // une seule fois par réservation confirmée (voir sendEventReminders côté API).
+  reminderSentAt DateTime?
   payment       Payment?
   ticket        Ticket?
   alternativeOffer AlternativeOffer?
