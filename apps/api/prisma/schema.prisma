@@ -479,3 +479,14 @@ model OutboxMessage {
   error     String?
   createdAt DateTime     @default(now())
 }
+
+// Paramètres applicatifs centralisés (voir src/settings.ts) : toute valeur "provisoire" du cahier
+// des charges (verrou de paiement, quota mensuel restaurateur, drapeaux de fonction...) vit ici,
+// jamais en dur dans le code. Une clé absente retombe sur sa valeur par défaut codée dans
+// settings.ts, donc l'absence de ligne n'est jamais une erreur.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}

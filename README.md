@@ -28,7 +28,7 @@ Les données de démonstration sont ajoutées automatiquement.
 
 ## Comptes de démonstration
 
-En configuration locale par défaut (`SMS_MODE=mock`), aucun SMS n’est envoyé et le code affiché après la demande est `123456`.
+En configuration locale par défaut (`SMS_MODE=mock`), aucun SMS n’est envoyé et le code affiché après la demande est `123456`. Dans ce mode, la page de connexion affiche aussi des boutons de connexion en un clic vers un compte de test par état (administrateur, modérateur, personnel d'accueil, restaurateur approuvé/en attente, participant validé/non validé par catégorie, profil refusé, entretien en attente, plus un compte jamais inscrit généré à la volée) — voir `apps/api/prisma/seed.ts` pour la liste complète des numéros.
 
 | Rôle | Téléphone |
 |---|---|
@@ -117,22 +117,37 @@ npm run db:seed
 npm run dev
 ```
 
+## Migrations de base de données
+
+Le schéma est versionné avec de vraies migrations Prisma (`apps/api/prisma/migrations/`), plus gérées par `prisma db push`.
+
+- Développement (crée une nouvelle migration à partir des changements de `schema.prisma`) : `npm run db:migrate`.
+- Déploiement (applique les migrations déjà créées, utilisé par Docker et en production) : `npm run db:migrate:deploy`.
+
+Pour toute nouvelle colonne obligatoire sur une table déjà peuplée : ajouter d'abord la colonne en nullable ou avec une valeur par défaut, migrer les données existantes, puis ajouter la contrainte dans une migration séparée — jamais en une seule étape qui casserait les données en place.
+
+## Paramètres applicatifs (`AppSetting`)
+
+Les valeurs configurables (durée du verrou de paiement, quota mensuel restaurateur, drapeaux de fonction comme `ENABLE_GENDER_PRICING` ou `MARKETPLACE_PAYOUTS_ENABLED`...) sont centralisées dans la table `AppSetting` plutôt qu'en dur dans le code — voir `apps/api/src/settings.ts` pour la liste complète, les valeurs par défaut et leur description. Un administrateur peut les consulter (`GET /admin/settings`) et les modifier (`PATCH /admin/settings/:key`) sans redéploiement ; chaque modification est validée et journalisée dans `AuditLog`.
+
 ## Fonctions opérationnelles
 
 - Connexion par téléphone avec mode local gratuit ou véritables codes Twilio Verify.
 - Profils privés et profil validé.
 - Catalogue, filtres et fiches événements.
-- Candidature et choix du créneau d’appel.
+- Entretien global de validation du profil (une seule démarche par personne, pas par événement), avec délai de trois mois avant nouvelle demande après un refus.
 - Acceptation/refus dans l’administration.
-- Réservation temporaire de 24 heures.
-- Paiement simulé réussi ou refusé.
+- Réservation temporaire de 24 heures avant paiement (règle amenée à changer, voir le cahier des charges v3 en cours).
+- Paiement réel Stripe (mode test) avec webhook, protection contre la survente sur paiement tardif.
+- Tarifs différenciés par catégorie et prestations réelles par événement.
+- Comptabilité 30/70 restaurateur (reversements manuels, jamais de virement automatique).
 - Billet et QR code unique.
 - Contrôle d’entrée et protection contre le double scan.
 - Liste d’attente.
 - QR personnel, recherche d’un profil et demande de contact.
 - Messagerie après acceptation.
 - Blocage et signalement.
-- Notifications, boîte d’envoi SMS/e-mail de test et fidélité.
+- Notifications, boîte d’envoi (SMS toujours simulé, e-mail réel via Resend si configuré, sinon simulé) et fidélité.
 - Rôles participant, organisateur, modérateur, accueil et administrateur.
 - Journal des actions sensibles.
 
@@ -146,4 +161,4 @@ Ouvrir ensuite <http://localhost:5555>. Prisma Studio permet de consulter les ut
 
 ## Passage en production
 
-La connexion SMS prend déjà en charge Twilio Verify. Pour une ouverture au public, activer `NODE_ENV=production`, `SMS_MODE=twilio`, remplacer le paiement et les e-mails simulés, modifier `JWT_SECRET`, activer HTTPS et réaliser les vérifications juridiques et de sécurité prévues.
+La connexion SMS prend déjà en charge Twilio Verify, le paiement utilise déjà Stripe en mode test et l'e-mail réel via Resend est déjà câblé (voir plus haut). Pour une ouverture au public : activer `NODE_ENV=production`, `SMS_MODE=twilio`, renseigner de vraies clés Stripe/Resend, changer `JWT_SECRET` (le serveur refuse de démarrer en production avec la valeur par défaut), déployer les migrations avec `npm run db:migrate:deploy` (jamais `db push`) et activer HTTPS. Les paramètres `ENABLE_GENDER_PRICING` et `MARKETPLACE_PAYOUTS_ENABLED` (table `AppSetting`, désactivés par défaut) sont réservés à des fonctions à venir et ne doivent être activés qu'après validation juridique correspondante.

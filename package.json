@@ -13,6 +13,7 @@
     "test": "npm run test -w @nour/api",
     "db:generate": "npm run prisma:generate -w @nour/api",
     "db:migrate": "npm run prisma:migrate -w @nour/api",
+    "db:migrate:deploy": "npm run prisma:migrate:deploy -w @nour/api",
     "db:seed": "npm run prisma:seed -w @nour/api",
     "db:studio": "npm run prisma:studio -w @nour/api"
   },

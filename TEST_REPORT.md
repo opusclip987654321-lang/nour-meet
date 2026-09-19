@@ -1,50 +1,37 @@
 # Rapport de vérification — Nūr Meet
 
-Date : 17 septembre 2026
+Dernière mise à jour : 19 septembre 2026 (Lot 0 du cahier des charges v3 — baseline et migrations versionnées).
 
-## Vérifications réussies
+## Vérifications automatisées exécutées à chaque lot
 
-- Génération du client Prisma depuis le schéma PostgreSQL.
-- Vérification TypeScript de l’API Node.js.
-- Vérification TypeScript du site React.
-- Vérification TypeScript de l’application React Native.
-- Compilation de production de l’API.
-- Compilation de production du site web avec Vite.
-- Export du bundle iOS avec Expo/Metro : 596 modules intégrés.
-- Dix tests automatisés :
-  - paiement accepté ou refusé en mode test ;
-  - prévention de la survente ;
-  - prévention du double scan ;
-  - délai de paiement de 24 heures ;
-  - normalisation des numéros français au format international ;
-  - validation du code SMS local ;
-  - construction de la requête Twilio Verify ;
-  - validation du statut Twilio `approved`.
-- Vérification que le serveur refuse `SMS_MODE=mock` en production.
-- Vérification que le mode local accepte les variables Twilio laissées vides par Docker Compose.
-- Validation syntaxique du fichier Docker Compose et de ses trois services : PostgreSQL, API et Web.
-- Validation du fichier de configuration Expo iOS/Android.
+- `npm run typecheck` (workspaces `@nour/api`, `@nour/web`, `@nour/mobile`, `@nour/shared`) : succès.
+- `npm test` (`@nour/api`, unitaires) : 14 tests, succès.
+- `npm run -w @nour/api test:integration` (contre le vrai serveur de développement Docker + PostgreSQL réel) : 7 tests, succès — rôle/suspension vérifiés en direct, isolation entre restaurateurs, entretien global (porte d'entrée + délai de trois mois), atomicité des quotas sous concurrence réelle, tarification différenciée, absence de survente sur paiement Stripe tardif.
+- `npm run build` (shared → api → web) : succès.
+- `npx prisma migrate status` : à jour, aucune dérive entre `schema.prisma` et les migrations versionnées.
+- Démarrage réel `docker compose up --build` (PostgreSQL, API, Web) : vérifié, `prisma migrate deploy` s'exécute sans erreur au démarrage du conteneur API, `/health` répond `ok`.
 
-## Vérification à effectuer sur l’ordinateur de destination
+## État fonctionnel réel (au-delà du commit initial)
 
-Le moteur Docker n’est pas présent dans l’environnement ayant servi à générer le projet. Le démarrage réel des trois conteneurs n’a donc pas pu être exécuté ici.
+Le rapport précédent datait du commit initial et ne reflétait aucune des phases réalisées depuis. État réel actuel :
 
-Sur le Mac de destination :
+- Authentification par téléphone : mode local gratuit (`SMS_MODE=mock`) ou Twilio Verify réel — inchangé, testé.
+- Entretien global de validation du profil (une démarche par personne, pas par événement), avec délai de trois mois avant nouvelle demande après refus.
+- Paiement **réel** Stripe (PaymentIntents + Elements), webhook signé, protection testée contre la survente sur paiement reçu après expiration de la réservation.
+- Tarification différenciée par catégorie (HOMME/FEMME) et prestations réelles par événement, galerie photo.
+- Comptabilité 30/70 restaurateur avec reversements et remboursements sur demande admin (aucun virement automatique).
+- Propositions d'événements alternatifs par région avec vérification de place réelle disponible.
+- Scanner de billets par caméra réelle (`jsqr` côté web, `expo-camera` côté mobile) et protection contre le double scan.
+- E-mail réel via Resend si configuré, sinon simulé (jamais affiché comme envoyé avant confirmation du fournisseur).
+- `JWT_SECRET` : le serveur refuse de démarrer en production avec la valeur par défaut.
+- Comptes de test par persona + connexion rapide en un clic sur la page de connexion, visibles uniquement en mode SMS simulé.
+- Base de données gérée par de vraies migrations Prisma versionnées (`apps/api/prisma/migrations/`), plus par `db push`.
+- Paramètres applicatifs centralisés dans `AppSetting` (voir `apps/api/src/settings.ts`), modifiables par un administrateur sans redéploiement.
 
-```bash
-docker compose up --build
-```
+## Écart connu : application mobile
 
-Puis vérifier :
-
-1. `http://localhost:4000/health` renvoie un statut `ok`.
-2. `http://localhost:5173` affiche l’accueil Nūr Meet.
-3. La connexion avec `+33612345678` et `123456` ouvre l’espace participant.
-4. La connexion avec `+33600000001` et `123456` ouvre l’administration.
-5. Le billet `NOUR-TICKET-DEMO-482` est accepté une seule fois par le scanner.
-6. Prisma Studio affiche les données avec `docker compose run --rm -p 5555:5555 api npx prisma studio --hostname 0.0.0.0 --port 5555`.
-7. En mode Twilio, un véritable SMS arrive sur un numéro autorisé et son code ouvre le même compte depuis le web et le mobile.
+`apps/mobile` n'a pas suivi les évolutions ci-dessus (encore l'ancien flux de candidature sans entretien global, sans tarification différenciée, sans galerie). Écart identifié dans l'audit du cahier des charges v3 ; à combler progressivement, lot par lot, uniquement sur les parcours qui doivent être mobiles.
 
 ## Limites de la vérification
 
-L’intégration Twilio Verify est implémentée et testée avec un serveur HTTP simulé. Un envoi réel ne peut être validé qu’après ajout des trois identifiants du compte Twilio du propriétaire. Les paiements et les e-mails restent simulés ; aucun prélèvement réel n’est effectué.
+Les paiements et e-mails utilisent des modes test/sandbox réels (Stripe test mode, Resend si clé fournie) ; aucun encaissement ni envoi réel non-test n'est déclenché sans clé de production explicitement fournie. L'intégration Twilio Verify reste testée avec un serveur HTTP simulé ; un envoi réel nécessite les identifiants du compte Twilio du propriétaire.

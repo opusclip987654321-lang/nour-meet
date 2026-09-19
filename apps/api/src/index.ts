@@ -18,6 +18,7 @@ import { paymentDeadline, interviewRetryDate } from "./domain.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { createSmsVerificationProvider } from "./sms-verification.js";
 import { createEmailProvider } from "./email-provider.js";
+import { loadSettings, updateSetting, listSettingsForAdmin, SETTINGS_SCHEMA } from "./settings.js";
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const uploadsDir = path.join(publicDir, "uploads", "events");
@@ -1157,6 +1158,17 @@ app.post("/admin/tickets/scan", { preHandler: roles(UserRole.ADMIN, UserRole.REC
 });
 app.get("/admin/outbox", { preHandler: roles(UserRole.ADMIN) }, async () => prisma.outboxMessage.findMany({ orderBy: { createdAt: "desc" }, take: 100 }));
 
+// Paramètres applicatifs centralisés (voir settings.ts) : valeurs provisoires du cahier des charges,
+// modifiables sans redéploiement, jamais en dur ailleurs dans le code.
+app.get("/admin/settings", { preHandler: roles(UserRole.ADMIN) }, async () => listSettingsForAdmin());
+app.patch("/admin/settings/:key", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { key } = z.object({ key: z.enum(Object.keys(SETTINGS_SCHEMA) as [string, ...string[]]) }).parse(request.params);
+  const { value } = z.object({ value: z.unknown() }).parse(request.body);
+  const updated = await updateSetting(prisma, key as keyof typeof SETTINGS_SCHEMA, value, currentId(request));
+  await audit(currentId(request), "UPDATE_APP_SETTING", "AppSetting", key, { value: updated });
+  return { key, value: updated };
+});
+
 // Libère toutes les 60 secondes les réservations temporaires expirées (place + quota), enchaîne sur la
 // liste d'attente correspondante, et marque comme expirées les propositions d'événements alternatifs
 // restées sans réponse au-delà de leur délai.
@@ -1194,4 +1206,5 @@ setInterval(() => { backfillStripeFees().catch(err => app.log.error(err)); }, 60
 
 const close = async () => { await prisma.$disconnect(); await app.close(); };
 process.on("SIGINT", close); process.on("SIGTERM", close);
+await loadSettings(prisma);
 await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
