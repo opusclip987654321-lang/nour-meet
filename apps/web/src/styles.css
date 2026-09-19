@@ -97,3 +97,17 @@ button,.button,.link-button,.event-card,.feature-grid>div,.testimonial-card,.sta
   .event-grid>*:nth-child(3),.feature-grid>*:nth-child(3){animation-delay:.12s}
 }
 @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+
+/* --- Passe UX : "Mon espace" (dashboard participant) --- */
+.dashboard-shell>aside>button:hover:not(.active){background:#ffffff08;color:#ddd}
+.reservation,.notification,.alt-offer{transition:background-color .18s ease,border-color .18s ease}
+.reservation:hover{background:#1a1a1b;border-color:#443c30}
+.notification:hover{background:#141415}
+.alt-offer:hover{border-color:#6b5533}
+.ticket{transition:transform .22s ease,box-shadow .22s ease}
+.ticket:hover{transform:translateY(-4px);box-shadow:0 20px 40px -18px #000c}
+/* Une notification déjà lue garde son point plus discret, jamais la même intensité qu'une nouvelle
+   (readAt existe déjà côté API, seulement jamais utilisé côté affichage jusqu'ici). */
+.notification>i{transition:background-color .18s ease,box-shadow .18s ease}
+.notification.unread>i{box-shadow:0 0 0 3px #cba96925}
+.notification.read>i{background:#4a4740}
