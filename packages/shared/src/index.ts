@@ -42,9 +42,14 @@ export interface PublicEvent {
   address?: string | null;
   zone: string | null;
   imageUrl: string;
+  photos: string[];
+  perks: { drink: boolean; starter: boolean; main: boolean; dessert: boolean; description: string | null };
   capacity: number;
   confirmedCount: number;
   priceCents: number;
+  priceTiers: { category: QuotaCategory; amountCents: number }[];
+  proposedStartsAt: string | null;
+  proposedEndsAt: string | null;
   status: EventStatus;
   organizer: {id: string | null; name: string};
   venue: {id: string; name: string} | null;

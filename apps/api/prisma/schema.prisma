@@ -168,15 +168,29 @@ model Event {
   zone                    String?
   capacity                Int
   priceCents              Int
+  // Prestations réellement incluses avec le billet (choix prédéfinis) : ne jamais en afficher
+  // une comme incluse sur la fiche publique si le champ correspondant n'est pas à true.
+  includesDrink           Boolean     @default(false)
+  includesStarter         Boolean     @default(false)
+  includesMain            Boolean     @default(false)
+  includesDessert         Boolean     @default(false)
+  perksDescription        String?
   status                  EventStatus @default(DRAFT)
   submittedForReviewAt    DateTime?
   reviewedAt              DateTime?
   reviewNote              String?
+  // Un changement de date proposé alors qu'au moins un participant a déjà payé ou est bloqué
+  // reste une simple proposition tant que le super-admin ne l'a pas approuvée (voir §4).
+  proposedStartsAt        DateTime?
+  proposedEndsAt          DateTime?
+  dateChangeRequestedAt   DateTime?
   applications            Application[]
   callSlots               ScreeningCall[]
   reservations            Reservation[]
   waitlist                WaitlistEntry[]
   quotas                  EventQuota[]
+  priceTiers              PriceTier[]
+  photos                  EventPhoto[]
   originalOffers          AlternativeOffer[] @relation("OriginalEvent")
   alternativeOffers       AlternativeOffer[] @relation("AlternativeEvent")
   createdAt               DateTime    @default(now())
@@ -191,6 +205,28 @@ model EventQuota {
   capacity  Int
   heldCount Int           @default(0)
   @@unique([eventId, category])
+}
+
+// Tarif différencié par catégorie (ex. homme/femme), indépendant des quotas. Un événement sans
+// ligne ici garde un tarif unique (Event.priceCents) — la différenciation est donc toujours
+// facultative, jamais automatique, conformément à la vérification juridique encore à réaliser.
+model PriceTier {
+  id        String        @id @default(cuid())
+  eventId   String
+  event     Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  category  QuotaCategory
+  amountCents Int
+  @@unique([eventId, category])
+}
+
+// Galerie complémentaire à la photo principale (Event.imageUrl) : jusqu'à 5 photos additionnelles.
+model EventPhoto {
+  id        String   @id @default(cuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  url       String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
 }
 
 // Une ligne sans eventId représente l'entretien global de validation du profil (un seul entretien

@@ -122,8 +122,11 @@ const releaseReservationSlot = async (tx: Prisma.TransactionClient, reservation:
 
 // Dès qu'une place se libère, la propose automatiquement au premier inscrit (ordre chronologique) de la
 // liste d'attente correspondante, avec le même délai de paiement que pour une acceptation classique.
+// La catégorie ne partitionne la liste d'attente que si l'événement a de vrais quotas : un tarif
+// différencié seul (sans quota) ne doit jamais créer de file d'attente séparée par catégorie.
 const offerNextWaitlistEntry = async (eventId: string, category: QuotaCategory | null) => {
-  const entry = await prisma.waitlistEntry.findFirst({ where: { eventId, quotaCategory: category, offeredAt: null }, orderBy: { createdAt: "asc" }, include: { application: true } });
+  const hasQuotas = (await prisma.eventQuota.count({ where: { eventId } })) > 0;
+  const entry = await prisma.waitlistEntry.findFirst({ where: { eventId, offeredAt: null, ...(hasQuotas ? { quotaCategory: category } : {}) }, orderBy: { createdAt: "asc" }, include: { application: true } });
   if (!entry) return;
   const result = await claimReservation(eventId, entry.application);
   if (!result.ok) return;
@@ -160,12 +163,22 @@ const assertEventAccess = async (request: FastifyRequest, eventId: string) => {
 const ownRestaurant = (token: TokenUser) => token.role === UserRole.ORGANIZER ? prisma.restaurant.findUniqueOrThrow({ where: { ownerId: token.sub } }) : Promise.resolve(null);
 const profileAge = (birthDate?: Date | null) => birthDate ? Math.floor((Date.now() - birthDate.getTime()) / 31_557_600_000) : null;
 const defaultCategoryImage = (category: string) => EVENT_CATEGORIES.find(c => c.name === category)?.defaultImage ?? EVENT_CATEGORIES[0].defaultImage;
+// Un événement sans tarif différencié pour la catégorie du participant garde le tarif unique
+// (event.priceCents). La différenciation homme/femme reste donc toujours facultative.
+const resolvePriceCents = (event: { priceCents: number; priceTiers?: { category: QuotaCategory; amountCents: number }[] }, quotaCategory: QuotaCategory | null) => {
+  const tier = quotaCategory ? event.priceTiers?.find(t => t.category === quotaCategory) : undefined;
+  return tier ? tier.amountCents : event.priceCents;
+};
 const publicEvent = (event: any, revealAddress = false) => ({
   id: event.id, slug: event.slug, title: event.title, category: event.category, description: event.description,
   startsAt: event.startsAt, endsAt: event.endsAt, district: event.district, address: revealAddress ? event.address : null,
   zone: event.zone ?? null,
   imageUrl: event.imageUrl ?? defaultCategoryImage(event.category),
+  photos: (event.photos ?? []).map((p: any) => p.url),
+  perks: { drink: event.includesDrink, starter: event.includesStarter, main: event.includesMain, dessert: event.includesDessert, description: event.perksDescription ?? null },
   capacity: event.capacity, confirmedCount: event._count?.reservations ?? 0, priceCents: event.priceCents, status: event.status,
+  priceTiers: (event.priceTiers ?? []).map((t: any) => ({ category: t.category, amountCents: t.amountCents })),
+  proposedStartsAt: event.proposedStartsAt ?? null, proposedEndsAt: event.proposedEndsAt ?? null,
   organizer: event.controllerRestaurant ? { id: event.controllerRestaurant.id, name: event.controllerRestaurant.name } : { id: null, name: "Nūr Meet" },
   venue: event.venueRestaurant ? { id: event.venueRestaurant.id, name: event.venueRestaurant.name } : null,
   quotas: (event.quotas ?? []).map((q: any) => ({ category: q.category, capacity: q.capacity, heldCount: q.heldCount }))
@@ -222,13 +235,13 @@ app.patch("/me/profile", { preHandler: auth }, async (request) => {
 
 app.get("/events", async (request) => {
   const query = z.object({ category: z.string().optional(), q: z.string().optional() }).parse(request.query);
-  const events = await prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" } }, { description: { contains: query.q, mode: "insensitive" } }] : undefined }, include: { controllerRestaurant: true, venueRestaurant: true, quotas: true, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" } });
+  const events = await prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" } }, { description: { contains: query.q, mode: "insensitive" } }] : undefined }, include: { controllerRestaurant: true, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" } });
   return events.map(e => publicEvent(e));
 });
 
 app.get("/events/:id", async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const event = await prisma.event.findFirstOrThrow({ where: { OR: [{ id }, { slug: id }] }, include: { controllerRestaurant: true, venueRestaurant: true, quotas: true, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } } });
+  const event = await prisma.event.findFirstOrThrow({ where: { OR: [{ id }, { slug: id }] }, include: { controllerRestaurant: true, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } } });
   return publicEvent(event);
 });
 
@@ -250,10 +263,13 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   if (!profile.validatedAt) return reply.code(409).send({ error: "Votre profil doit d’abord être validé lors d’un entretien avant de vous inscrire à un événement" });
   const existing = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
   if (existing) return reply.code(409).send({ error: "Vous êtes déjà inscrit(e) à cet événement", application: existing });
-  const event = await prisma.event.findUniqueOrThrow({ where: { id } });
+  const event = await prisma.event.findUniqueOrThrow({ where: { id }, include: { priceTiers: true } });
   const quotas = await prisma.eventQuota.findMany({ where: { eventId: id } });
+  // La catégorie est nécessaire pour les quotas (Speed dating) ET pour résoudre un tarif différencié
+  // éventuel (Networking inclus) — sans jamais transformer ce tarif en quota implicite pour autant.
+  const needsCategory = quotas.length > 0 || event.priceTiers.length > 0;
   let quotaCategory: QuotaCategory | null = null;
-  if (quotas.length > 0) {
+  if (needsCategory) {
     if (!profile.quotaCategory) return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement" });
     quotaCategory = profile.quotaCategory;
   }
@@ -261,7 +277,7 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   await audit(userId, "CREATE_APPLICATION", "Application", application.id);
   const result = await claimReservation(id, application);
   if (result.ok) {
-    await notify(userId, "Inscription confirmée", `Vous avez jusqu’au ${result.reservation.expiresAt.toLocaleString("fr-FR")} pour régler votre billet de ${(event.priceCents / 100).toFixed(2)} €.`);
+    await notify(userId, "Inscription confirmée", `Vous avez jusqu’au ${result.reservation.expiresAt.toLocaleString("fr-FR")} pour régler votre billet de ${(resolvePriceCents(event, quotaCategory) / 100).toFixed(2)} €.`);
     return reply.code(201).send({ application: { ...application, status: ApplicationStatus.PAYMENT_PENDING }, reservation: result.reservation });
   }
   if (result.reason === "NO_CATEGORY") return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement" });
@@ -362,7 +378,8 @@ app.get("/events/:id/waitlist/me", { preHandler: auth }, async (request, reply) 
   const { id } = z.object({ id: z.string() }).parse(request.params); const userId = currentId(request);
   const entry = await prisma.waitlistEntry.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
   if (!entry) return reply.code(404).send({ error: "Vous n’êtes pas sur la liste d’attente de cet événement" });
-  const rank = await prisma.waitlistEntry.count({ where: { eventId: id, quotaCategory: entry.quotaCategory, createdAt: { lt: entry.createdAt } } }) + 1;
+  const hasQuotas = (await prisma.eventQuota.count({ where: { eventId: id } })) > 0;
+  const rank = await prisma.waitlistEntry.count({ where: { eventId: id, ...(hasQuotas ? { quotaCategory: entry.quotaCategory } : {}), createdAt: { lt: entry.createdAt } } }) + 1;
   return { ...entry, rank };
 });
 
@@ -378,13 +395,17 @@ app.post("/reservations/:id/payment-intent", { preHandler: auth }, async (reques
   if (!stripe) return reply.code(503).send({ error: "Le paiement par carte n’est pas configuré sur ce serveur" });
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const userId = currentId(request);
-  const reservation = await prisma.reservation.findFirstOrThrow({ where: { id, userId }, include: { event: true, application: true, payment: true } });
+  const reservation = await prisma.reservation.findFirstOrThrow({ where: { id, userId }, include: { event: { include: { priceTiers: true } }, application: true, payment: true } });
   if (reservation.application.status !== ApplicationStatus.PAYMENT_PENDING) return reply.code(409).send({ error: "Cette candidature n’est pas en attente de paiement" });
   if (reservation.cancelledAt) return reply.code(409).send({ error: "Cette réservation est annulée" });
   if (reservation.expiresAt < new Date()) return reply.code(409).send({ error: "Le délai de paiement est expiré" });
   if (reservation.payment?.status === PaymentStatus.SUCCEEDED) return reply.code(409).send({ error: "Cette réservation est déjà payée" });
   const confirmedCount = await prisma.reservation.count({ where: { eventId: reservation.eventId, confirmedAt: { not: null }, cancelledAt: null, id: { not: reservation.id } } });
   if (confirmedCount >= reservation.event.capacity) return reply.code(409).send({ error: "L’événement est désormais complet" });
+  // Le tarif est résolu (unique ou différencié selon la catégorie) puis figé dans le paiement au
+  // moment de sa création : une modification ultérieure du tarif de l'événement ne s'applique
+  // jamais rétroactivement à cette vente.
+  const amountCents = resolvePriceCents(reservation.event, reservation.quotaCategory);
 
   let clientSecret: string | null = null;
   if (reservation.payment?.providerRef) {
@@ -393,7 +414,7 @@ app.post("/reservations/:id/payment-intent", { preHandler: auth }, async (reques
   }
   if (!clientSecret) {
     const intent = await stripe.paymentIntents.create({
-      amount: reservation.event.priceCents,
+      amount: amountCents,
       currency: "eur",
       payment_method_types: ["card"],
       metadata: { reservationId: reservation.id, applicationId: reservation.applicationId, userId }
@@ -401,11 +422,11 @@ app.post("/reservations/:id/payment-intent", { preHandler: auth }, async (reques
     clientSecret = intent.client_secret;
     await prisma.payment.upsert({
       where: { reservationId: reservation.id },
-      update: { provider: "stripe", providerRef: intent.id, amountCents: reservation.event.priceCents, status: PaymentStatus.PENDING },
-      create: { reservationId: reservation.id, provider: "stripe", providerRef: intent.id, amountCents: reservation.event.priceCents, status: PaymentStatus.PENDING }
+      update: { provider: "stripe", providerRef: intent.id, amountCents, status: PaymentStatus.PENDING },
+      create: { reservationId: reservation.id, provider: "stripe", providerRef: intent.id, amountCents, status: PaymentStatus.PENDING }
     });
   }
-  return { clientSecret, amountCents: reservation.event.priceCents };
+  return { clientSecret, amountCents };
 });
 
 await app.register(async (webhooks) => {
@@ -528,8 +549,10 @@ app.post("/alternative-offers/:id/respond", { preHandler: auth }, async (request
   if (!accept) return prisma.alternativeOffer.update({ where: { id }, data: { status: AlternativeOfferStatus.DECLINED, respondedAt: new Date() } });
   const profile = await prisma.profile.findUniqueOrThrow({ where: { userId } });
   const quotas = await prisma.eventQuota.findMany({ where: { eventId: offer.alternativeEventId } });
-  const quotaCategory = quotas.length > 0 ? profile.quotaCategory : null;
-  if (quotas.length > 0 && !quotaCategory) return reply.code(409).send({ error: "Complétez votre catégorie de quota dans votre profil avant d’accepter" });
+  const priceTiers = await prisma.priceTier.findMany({ where: { eventId: offer.alternativeEventId } });
+  const needsCategory = quotas.length > 0 || priceTiers.length > 0;
+  const quotaCategory = needsCategory ? profile.quotaCategory : null;
+  if (needsCategory && !quotaCategory) return reply.code(409).send({ error: "Complétez votre catégorie dans votre profil avant d’accepter" });
   let application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: offer.alternativeEventId, userId } } });
   if (!application) application = await prisma.application.create({ data: { eventId: offer.alternativeEventId, userId, motivation: "Candidature via une proposition d’événement alternatif.", quotaCategory } });
   const result = await claimReservation(offer.alternativeEventId, application);
@@ -700,7 +723,7 @@ app.post("/admin/global-interviews/:id/decision", { preHandler: roles(UserRole.A
 app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
-  const events = await prisma.event.findMany({ where: restaurant ? { controllerRestaurantId: restaurant.id } : undefined, include: { quotas: true }, orderBy: { startsAt: "asc" } });
+  const events = await prisma.event.findMany({ where: restaurant ? { controllerRestaurantId: restaurant.id } : undefined, include: { quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } } }, orderBy: { startsAt: "asc" } });
   return events.map(e => ({ ...e, imageUrl: e.imageUrl ?? defaultCategoryImage(e.category) }));
 });
 app.post("/admin/events/:id/quotas", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
@@ -797,8 +820,9 @@ app.delete("/admin/interview-slots/:id", { preHandler: roles(UserRole.ADMIN) }, 
   if (deleted.count === 0) return reply.code(409).send({ error: "Ce créneau est réservé ou introuvable : il ne peut pas être supprimé" });
   return reply.code(204).send();
 });
+const perksInput = { includesDrink: z.boolean().default(false), includesStarter: z.boolean().default(false), includesMain: z.boolean().default(false), includesDessert: z.boolean().default(false), perksDescription: z.string().max(500).optional() };
 app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
-  const input = z.object({ venueRestaurantId: z.string().optional(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), zone: z.enum(EVENT_ZONES as [string, ...string[]]), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false) }).parse(request.body);
+  const input = z.object({ venueRestaurantId: z.string().optional(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), zone: z.enum(EVENT_ZONES as [string, ...string[]]), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false), ...perksInput }).parse(request.body);
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
   // Un restaurateur ne prépare jamais qu'un brouillon : seul le super-admin peut publier (POST /admin/events/:id/review-decision).
@@ -813,11 +837,110 @@ app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER
     title: input.title, slug: input.slug, category: input.category, description: input.description,
     startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), district: input.district, address: input.address, zone: input.zone,
     capacity: input.capacity, priceCents: input.priceCents,
+    includesDrink: input.includesDrink, includesStarter: input.includesStarter, includesMain: input.includesMain, includesDessert: input.includesDessert, perksDescription: input.perksDescription,
     controllerRestaurantId: restaurant?.id ?? null,
     venueRestaurantId,
     status: token.role === UserRole.ADMIN && input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT
   } });
   await audit(currentId(request), "CREATE_EVENT", "Event", event.id); return event;
+});
+// Modification d'un événement déjà créé. La capacité ne peut jamais descendre sous les places déjà
+// payées ou temporairement bloquées ; un changement de date alors qu'au moins une réservation est
+// payée ou bloquée reste une proposition (voir /date-change/decision), jamais appliquée directement.
+app.patch("/admin/events/:id", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const event = await assertEventAccess(request, id);
+  const input = z.object({
+    title: z.string().min(3).optional(), description: z.string().min(20).optional(), district: z.string().optional(), address: z.string().optional(),
+    capacity: z.number().int().min(5).max(500).optional(), priceCents: z.number().int().min(0).optional(),
+    startsAt: z.string().optional(), endsAt: z.string().optional(),
+    ...Object.fromEntries(Object.entries(perksInput).map(([k, v]) => [k, v.optional()]))
+  }).parse(request.body);
+  const activeReservations = await prisma.reservation.count({ where: { eventId: id, cancelledAt: null } });
+  if (input.capacity !== undefined && input.capacity < activeReservations) return reply.code(400).send({ error: `Impossible de descendre sous ${activeReservations} places déjà payées ou bloquées` });
+  const data: Record<string, unknown> = { ...input };
+  delete data.startsAt; delete data.endsAt;
+  const dateChanged = (input.startsAt && new Date(input.startsAt).getTime() !== event.startsAt.getTime()) || (input.endsAt && new Date(input.endsAt).getTime() !== event.endsAt.getTime());
+  if (dateChanged && activeReservations > 0) {
+    data.proposedStartsAt = input.startsAt ? new Date(input.startsAt) : event.startsAt;
+    data.proposedEndsAt = input.endsAt ? new Date(input.endsAt) : event.endsAt;
+    data.dateChangeRequestedAt = new Date();
+    const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+    await Promise.all(admins.map(a => notify(a.id, "Changement de date proposé", `« ${event.title} » : nouvelle date proposée, en attente de votre approbation.`)));
+  } else if (dateChanged) {
+    if (input.startsAt) data.startsAt = new Date(input.startsAt);
+    if (input.endsAt) data.endsAt = new Date(input.endsAt);
+  }
+  const updated = await prisma.event.update({ where: { id }, data });
+  await audit(currentId(request), "UPDATE_EVENT", "Event", id, input);
+  return updated;
+});
+app.post("/admin/events/:id/date-change/decision", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { accept } = z.object({ accept: z.boolean() }).parse(request.body);
+  const event = await prisma.event.findUniqueOrThrow({ where: { id } });
+  if (!event.dateChangeRequestedAt || !event.proposedStartsAt || !event.proposedEndsAt) return reply.code(409).send({ error: "Aucun changement de date en attente" });
+  const affected = await prisma.reservation.findMany({ where: { eventId: id, cancelledAt: null }, select: { userId: true } });
+  const updated = await prisma.event.update({ where: { id }, data: accept
+    ? { startsAt: event.proposedStartsAt, endsAt: event.proposedEndsAt, proposedStartsAt: null, proposedEndsAt: null, dateChangeRequestedAt: null }
+    : { proposedStartsAt: null, proposedEndsAt: null, dateChangeRequestedAt: null } });
+  if (accept) await Promise.all(affected.map(r => notify(r.userId, "Date de l’événement modifiée", `« ${event.title} » a désormais lieu le ${event.proposedStartsAt!.toLocaleString("fr-FR")}.`)));
+  await audit(currentId(request), accept ? "APPROVE_DATE_CHANGE" : "REJECT_DATE_CHANGE", "Event", id);
+  return updated;
+});
+// Tarifs : un événement garde un tarif unique par défaut ; la différenciation homme/femme reste
+// facultative et sa conformité légale doit être vérifiée avant toute activation en production.
+app.post("/admin/events/:id/pricing", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  await assertEventAccess(request, id);
+  const input = z.discriminatedUnion("mode", [
+    z.object({ mode: z.literal("flat"), amountCents: z.number().int().min(0) }),
+    z.object({ mode: z.literal("differentiated"), homme: z.number().int().min(0), femme: z.number().int().min(0) })
+  ]).parse(request.body);
+  if (input.mode === "flat") {
+    await prisma.$transaction([
+      prisma.priceTier.deleteMany({ where: { eventId: id } }),
+      prisma.event.update({ where: { id }, data: { priceCents: input.amountCents } })
+    ]);
+  } else {
+    await prisma.$transaction([
+      prisma.priceTier.upsert({ where: { eventId_category: { eventId: id, category: QuotaCategory.HOMME } }, update: { amountCents: input.homme }, create: { eventId: id, category: QuotaCategory.HOMME, amountCents: input.homme } }),
+      prisma.priceTier.upsert({ where: { eventId_category: { eventId: id, category: QuotaCategory.FEMME } }, update: { amountCents: input.femme }, create: { eventId: id, category: QuotaCategory.FEMME, amountCents: input.femme } })
+    ]);
+  }
+  await audit(currentId(request), "SET_EVENT_PRICING", "Event", id, input);
+  return { priceTiers: await prisma.priceTier.findMany({ where: { eventId: id } }) };
+});
+// Galerie : jusqu'à 5 photos en plus de la photo principale (POST /admin/events/:id/image).
+app.post("/admin/events/:id/photos", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  await assertEventAccess(request, id);
+  const count = await prisma.eventPhoto.count({ where: { eventId: id } });
+  if (count >= 5) return reply.code(409).send({ error: "5 photos supplémentaires maximum : supprimez-en une avant d’en ajouter une nouvelle" });
+  const file = await request.file();
+  if (!file) return reply.code(400).send({ error: "Aucun fichier reçu" });
+  const extension = ALLOWED_IMAGE_TYPES[file.mimetype];
+  if (!extension) return reply.code(415).send({ error: "Format non pris en charge (jpeg, png ou webp uniquement)" });
+  const buffer = await file.toBuffer();
+  if (buffer.byteLength > MAX_IMAGE_BYTES) return reply.code(413).send({ error: "Image trop volumineuse (5 Mo maximum)" });
+  const filename = `${randomUUID()}.${extension}`;
+  await writeFile(path.join(uploadsDir, filename), buffer);
+  const photo = await prisma.eventPhoto.create({ data: { eventId: id, url: `/static/uploads/events/${filename}`, position: count } });
+  await audit(currentId(request), "ADD_EVENT_PHOTO", "Event", id);
+  return reply.code(201).send(photo);
+});
+app.delete("/admin/events/:id/photos/:photoId", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id, photoId } = z.object({ id: z.string(), photoId: z.string() }).parse(request.params);
+  await assertEventAccess(request, id);
+  const deleted = await prisma.eventPhoto.deleteMany({ where: { id: photoId, eventId: id } });
+  if (deleted.count === 0) return reply.code(404).send({ error: "Photo introuvable" });
+  return reply.code(204).send();
+});
+// Historique des soumissions et décisions de cet événement, à partir du journal d'audit existant.
+app.get("/admin/events/:id/history", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  await assertEventAccess(request, id);
+  return prisma.auditLog.findMany({ where: { entity: "Event", entityId: id }, orderBy: { createdAt: "desc" } });
 });
 app.post("/admin/events/:id/submit-for-review", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
