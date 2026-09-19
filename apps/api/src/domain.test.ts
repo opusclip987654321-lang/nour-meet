@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canUseTicket, hasCapacity, paymentDeadline, paymentLockExpiry, refundEligibility, interviewRetryDate, currentYearMonth } from "./domain.js";
+import { canUseTicket, hasCapacity, paymentDeadline, paymentLockExpiry, refundEligibility, interviewRetryDate, currentYearMonth, resolvePriceCents, eventsOverlap } from "./domain.js";
 import { eventRequiresScreening, suggestedFlowForCategory } from "@nour/shared";
 
 describe("règles métier Nūr Meet", () => {
@@ -56,5 +56,32 @@ describe("règles métier Nūr Meet", () => {
     expect(currentYearMonth(new Date("2026-09-19T23:00:00Z"))).toBe("2026-09");
     expect(currentYearMonth(new Date("2026-01-01T00:00:00Z"))).toBe("2026-01");
     expect(currentYearMonth(new Date("2026-12-31T23:59:59Z"))).toBe("2026-12");
+  });
+
+  it("ignore tout tarif différencié tant que la tarification homme/femme est désactivée (§6)", () => {
+    const event = { priceCents: 2500, priceTiers: [{ category: "HOMME" as const, amountCents: 3000 }, { category: "FEMME" as const, amountCents: 2000 }] };
+    expect(resolvePriceCents(event, "FEMME", false)).toBe(2500);
+    expect(resolvePriceCents(event, "HOMME", false)).toBe(2500);
+    expect(resolvePriceCents(event, null, false)).toBe(2500);
+  });
+
+  it("applique le tarif de la catégorie une fois la tarification homme/femme activée", () => {
+    const event = { priceCents: 2500, priceTiers: [{ category: "HOMME" as const, amountCents: 3000 }, { category: "FEMME" as const, amountCents: 2000 }] };
+    expect(resolvePriceCents(event, "FEMME", true)).toBe(2000);
+    expect(resolvePriceCents(event, "HOMME", true)).toBe(3000);
+    // Catégorie sans tarif défini, ou non renseignée : retombe sur le tarif unique.
+    expect(resolvePriceCents({ priceCents: 2500 }, "FEMME", true)).toBe(2500);
+    expect(resolvePriceCents(event, null, true)).toBe(2500);
+  });
+
+  it("détecte un chevauchement horaire par intersection stricte, jamais deux créneaux simplement contigus (§11)", () => {
+    const a = { startsAt: new Date("2026-10-01T19:00:00Z"), endsAt: new Date("2026-10-01T22:00:00Z") };
+    const overlapping = { startsAt: new Date("2026-10-01T21:00:00Z"), endsAt: new Date("2026-10-01T23:00:00Z") };
+    const contiguous = { startsAt: new Date("2026-10-01T22:00:00Z"), endsAt: new Date("2026-10-02T00:00:00Z") };
+    const separate = { startsAt: new Date("2026-10-02T10:00:00Z"), endsAt: new Date("2026-10-02T12:00:00Z") };
+    expect(eventsOverlap(a, overlapping)).toBe(true);
+    expect(eventsOverlap(overlapping, a)).toBe(true);
+    expect(eventsOverlap(a, contiguous)).toBe(false);
+    expect(eventsOverlap(a, separate)).toBe(false);
   });
 });

@@ -14,7 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES, EVENT_ZONES, regionOfZone, eventRequiresScreening, suggestedFlowForCategory } from "@nour/shared";
 import { env } from "./env.js";
-import { paymentDeadline, paymentLockExpiry, interviewRetryDate, refundEligibility, currentYearMonth } from "./domain.js";
+import { paymentDeadline, paymentLockExpiry, interviewRetryDate, refundEligibility, currentYearMonth, resolvePriceCents, eventsOverlap } from "./domain.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { createSmsVerificationProvider } from "./sms-verification.js";
 import { createEmailProvider } from "./email-provider.js";
@@ -157,11 +157,6 @@ const executeRefund = async (
 type ClaimableApplication = { id: string; userId: string; quotaCategory: QuotaCategory | null };
 type ClaimResult = { ok: true; reservation: Awaited<ReturnType<typeof prisma.reservation.upsert>> } | { ok: false; reason: "NO_CATEGORY" | "FULL" | "OVERLAP" };
 
-// Chevauchement horaire entre deux événements (§11), calculé côté serveur à partir de startsAt/
-// endsAt exclusivement : deux créneaux contigus (l'un finit quand l'autre commence) ne se chevauchent
-// pas, seule une intersection stricte des intervalles compte.
-const eventsOverlap = (a: { startsAt: Date; endsAt: Date }, b: { startsAt: Date; endsAt: Date }) => a.startsAt < b.endsAt && b.startsAt < a.endsAt;
-
 // Attribue une place de manière atomique (créneau à quota ou capacité globale) et pose une réservation
 // dont la durée de vie est TOUJOURS fournie par l'appelant : un verrou court (§5) pendant une tentative
 // de paiement directe, une fenêtre plus longue (mais toujours sans risque de survente, la place étant
@@ -289,15 +284,6 @@ const assertEventAccess = async (request: FastifyRequest, eventId: string) => {
 const ownRestaurant = (token: TokenUser) => token.role === UserRole.ORGANIZER ? prisma.restaurant.findUniqueOrThrow({ where: { ownerId: token.sub } }) : Promise.resolve(null);
 const profileAge = (birthDate?: Date | null) => birthDate ? Math.floor((Date.now() - birthDate.getTime()) / 31_557_600_000) : null;
 const defaultCategoryImage = (category: string) => EVENT_CATEGORIES.find(c => c.name === category)?.defaultImage ?? EVENT_CATEGORIES[0].defaultImage;
-// La tarification différenciée homme/femme n'est pas validée juridiquement (§6) : tant que
-// ENABLE_GENDER_PRICING est désactivé (valeur par défaut), un PriceTier existant reste en base
-// (configurable par l'admin en avance) mais n'a AUCUN effet sur le montant réellement facturé —
-// seul event.priceCents s'applique, pour tout le monde, sans exception.
-const resolvePriceCents = (event: { priceCents: number; priceTiers?: { category: QuotaCategory; amountCents: number }[] }, quotaCategory: QuotaCategory | null) => {
-  if (!getSetting("ENABLE_GENDER_PRICING")) return event.priceCents;
-  const tier = quotaCategory ? event.priceTiers?.find(t => t.category === quotaCategory) : undefined;
-  return tier ? tier.amountCents : event.priceCents;
-};
 // Fenêtre d'offre de liste d'attente (voir AppSetting WAITLIST_OFFER_WINDOW_HOURS) : la durée
 // exacte est configurable, jamais supposée fixe dans le message envoyé au participant.
 const formatPaymentDeadline = (expiresAt: Date) => `jusqu’au ${expiresAt.toLocaleString("fr-FR")}`;
@@ -523,7 +509,7 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
     }
   });
   await audit(userId, "CREATE_APPLICATION", "Application", application.id);
-  await notify(userId, "Inscription enregistrée", `Vous pouvez maintenant régler votre billet pour « ${event.title} » (${(resolvePriceCents(event, quotaCategory) / 100).toFixed(2)} €). La place n’est confirmée qu’une fois le paiement réussi.`);
+  await notify(userId, "Inscription enregistrée", `Vous pouvez maintenant régler votre billet pour « ${event.title} » (${(resolvePriceCents(event, quotaCategory, getSetting("ENABLE_GENDER_PRICING")) / 100).toFixed(2)} €). La place n’est confirmée qu’une fois le paiement réussi.`);
   return reply.code(201).send({ application });
 });
 
@@ -691,7 +677,7 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
   // Le tarif est résolu (unique ou différencié selon la catégorie) puis figé dans le paiement au
   // moment de sa création : une modification ultérieure du tarif de l'événement ne s'applique
   // jamais rétroactivement à cette vente.
-  const amountCents = resolvePriceCents(event, reservation.quotaCategory);
+  const amountCents = resolvePriceCents(event, reservation.quotaCategory, getSetting("ENABLE_GENDER_PRICING"));
 
   let clientSecret: string | null = null;
   if (payment?.providerRef) {

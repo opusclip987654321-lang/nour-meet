@@ -38,3 +38,21 @@ export function refundEligibility(eventStartsAt: Date, now = new Date()) {
   const hoursUntilEvent = (eventStartsAt.getTime() - now.getTime()) / (60 * 60_000);
   return { eligible: hoursUntilEvent > 24, hoursUntilEvent };
 }
+
+// Tarification différenciée homme/femme (§6) : non validée juridiquement, donc désactivée par
+// défaut. `genderPricingEnabled` est passé explicitement par l'appelant (jamais lu ici depuis
+// AppSetting) pour que cette règle reste une fonction pure, testable sans dépendre de l'état
+// mutable du cache de settings.
+export type PriceTier = { category: "HOMME" | "FEMME"; amountCents: number };
+export function resolvePriceCents(event: { priceCents: number; priceTiers?: PriceTier[] }, quotaCategory: "HOMME" | "FEMME" | null, genderPricingEnabled: boolean) {
+  if (!genderPricingEnabled) return event.priceCents;
+  const tier = quotaCategory ? event.priceTiers?.find(t => t.category === quotaCategory) : undefined;
+  return tier ? tier.amountCents : event.priceCents;
+}
+
+// Chevauchement horaire entre deux événements (§11) : intersection stricte des intervalles
+// [startsAt, endsAt) — deux créneaux contigus (l'un finit quand l'autre commence) ne se
+// chevauchent pas.
+export function eventsOverlap(a: { startsAt: Date; endsAt: Date }, b: { startsAt: Date; endsAt: Date }) {
+  return a.startsAt < b.endsAt && b.startsAt < a.endsAt;
+}
