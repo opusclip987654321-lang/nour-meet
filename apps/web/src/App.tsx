@@ -874,7 +874,7 @@ function AdminEventPhotos() {
       {pricingFor===ev.id?<div className="event-edit-form">
         <div className="time-row"><label><input type="radio" checked={pricingForm.mode==="flat"} onChange={()=>setPricingForm({...pricingForm,mode:"flat"})}/> Tarif unique</label><label><input type="radio" checked={pricingForm.mode==="differentiated"} onChange={()=>setPricingForm({...pricingForm,mode:"differentiated"})}/> Tarif différencié homme/femme</label></div>
         {pricingForm.mode==="flat"?<label>Prix (centimes)<input type="number" min={0} value={pricingForm.amountCents} onChange={e=>setPricingForm({...pricingForm,amountCents:Number(e.target.value)})}/></label>
-        :<><div className="time-row"><label>Hommes (centimes)<input type="number" min={0} value={pricingForm.homme} onChange={e=>setPricingForm({...pricingForm,homme:Number(e.target.value)})}/></label><label>Femmes (centimes)<input type="number" min={0} value={pricingForm.femme} onChange={e=>setPricingForm({...pricingForm,femme:Number(e.target.value)})}/></label></div><p className="fine left">La conformité juridique d’un tarif différencié selon le sexe doit être vérifiée avant toute mise en production.</p></>}
+        :<><div className="time-row"><label>Hommes (centimes)<input type="number" min={0} value={pricingForm.homme} onChange={e=>setPricingForm({...pricingForm,homme:Number(e.target.value)})}/></label><label>Femmes (centimes)<input type="number" min={0} value={pricingForm.femme} onChange={e=>setPricingForm({...pricingForm,femme:Number(e.target.value)})}/></label></div><p className="fine left">La conformité juridique d’un tarif différencié selon le sexe doit être vérifiée avant toute mise en production. Tant que « Tarification homme/femme » reste désactivée dans Réglages, ces montants sont enregistrés mais n’ont aucun effet : tout le monde paie le tarif unique.</p></>}
         <div className="decision-buttons"><button className="button small" disabled={actingOn===ev.id} onClick={()=>savePricing(ev.id)}>Enregistrer les tarifs</button><button className="button small secondary" onClick={()=>setPricingFor(null)}>Annuler</button></div>
       </div>:<button className="button small secondary" onClick={()=>openPricing(ev)}>{ev.priceTiers?.length?"Modifier les tarifs":"Définir un tarif différencié"}</button>}
 
@@ -973,12 +973,13 @@ function AdminFinance() {
     {summary&&<div className="stat-grid">
       {summary.nourOwnRevenueCents!=null&&<Stat label="CA propre Nūr (événements en direct)" value={money(summary.nourOwnRevenueCents)}/>}
       {summary.subscriptionMonthlyRevenueCents!=null&&<Stat label="Abonnements restaurateurs (mensuel)" value={`${money(summary.subscriptionMonthlyRevenueCents)} · ${summary.activeSubscriptionsCount} actifs`}/>}
-      <Stat label="Volume brut billets restaurateurs" value={money(summary.grossCents)}/>
+      <Stat label="Volume brut billets restaurateurs" value={money(summary.grossTicketVolumeCents)}/>
       <Stat label="Commission Nour (héritée 30/70)" value={money(summary.commissionCents)}/>
-      <Stat label="Dû au(x) restaurant(s)" value={money(summary.restaurantDueCents)}/>
-      <Stat label="Déjà reversé" value={money(summary.paidOutCents)}/>
-      <Stat label="Remboursé" value={money(summary.refundedCents)}/>
+      <Stat label="Dû au(x) restaurant(s) (modèle 30/70)" value={money(summary.restaurantDueCents)}/>
+      <Stat label="Déjà reversé (modèle 30/70)" value={money(summary.paidOutCents)}/>
+      <Stat label="Remboursé (modèle 30/70)" value={money(summary.refundedCents)}/>
     </div>}
+    {summary&&!summary.commissionLedgerEnabled&&<p className="fine left">Le registre commission 30/70 est désactivé depuis le passage à l’abonnement mensuel : « Commission », « Dû » et « Déjà reversé » ne couvrent que les ventes historiques sous l’ancien modèle, pas les événements récents sous abonnement. Le volume brut reste, lui, toujours à jour.</p>}
     {entries.length===0?<div className="empty"><span>◇</span><h2>Aucune vente pour le moment</h2></div>:<div className="panel table">
       <div className="table-row head"><span>Événement</span><span>Brut</span><span>Commission</span><span>Dû restaurant</span><span>Statut</span></div>
       {entries.map(e=><div key={e.id} className="table-row"><span><b>{e.event.title}</b>{user?.role==="ADMIN"&&<small>{e.restaurant.name}</small>}</span><span>{money(e.grossAmountCents)}</span><span>{money(e.commissionAmountCents)} ({e.commissionRate}%)</span><span>{money(e.restaurantDueCents)}{e.refundedAmountCents>0&&<small className="fine"> · remboursé</small>}</span><span>{e.paidOutAt?<small className="fine">Reversé le {new Date(e.paidOutAt).toLocaleDateString("fr-FR")}</small>:user?.role==="ADMIN"?<button className="button small" disabled={busy===e.id} onClick={()=>markPaid(e.id)}>Marquer comme reversé</button>:<small className="fine">{e.readyToPayOut?"Prêt à reverser":"En attente"}</small>}</span></div>)}

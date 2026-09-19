@@ -174,11 +174,11 @@ describe("atomicité des quotas sous concurrence réelle", () => {
   });
 });
 
-describe("tarification différenciée résolue correctement au paiement", () => {
-  it("facture le tarif de la catégorie du participant, pas le tarif de base", async () => {
+describe("tarification différenciée homme/femme protégée par ENABLE_GENDER_PRICING (§6)", () => {
+  it("ignore les PriceTier et facture le tarif unique tant que le drapeau est désactivé (comportement par défaut)", async () => {
     const event = await prisma.event.create({ data: {
-      slug: `test-tarifs-${Date.now()}`, title: "Test tarifs", category: "Networking",
-      description: "Événement de test pour vérifier la résolution des tarifs différenciés.",
+      slug: `test-tarifs-off-${Date.now()}`, title: "Test tarifs désactivés", category: "Networking",
+      description: "Événement de test pour vérifier que la tarification différenciée reste inactive par défaut.",
       startsAt: new Date(Date.now() + 30 * 86_400_000), endsAt: new Date(Date.now() + 30 * 86_400_000 + 3_600_000),
       district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2500,
       status: "PUBLISHED",
@@ -186,10 +186,40 @@ describe("tarification différenciée résolue correctement au paiement", () => 
     } });
     createdEventIds.push(event.id);
 
-    const femme = await tracked("PrixFemme", "FEMME");
+    const publicEvent = await api<{ priceTiers: unknown[] }>(`/events/${event.slug}`);
+    expect(publicEvent.body.priceTiers).toEqual([]);
+
+    const femme = await tracked("PrixFemmeOff", "FEMME");
     const applyRes = await applyToEvent(event.id, femme.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
     const intent = await api<{ amountCents: number }>(`/applications/${applyRes.body.application.id}/payment-intent`, { method: "POST" }, femme.token);
-    expect(intent.body.amountCents).toBe(2000);
+    expect(intent.body.amountCents).toBe(2500);
+  });
+
+  it("facture le tarif de la catégorie du participant une fois le drapeau explicitement activé par un admin", async () => {
+    const admin = await adminToken();
+    const event = await prisma.event.create({ data: {
+      slug: `test-tarifs-on-${Date.now()}`, title: "Test tarifs activés", category: "Networking",
+      description: "Événement de test pour vérifier la résolution des tarifs différenciés une fois activés.",
+      startsAt: new Date(Date.now() + 30 * 86_400_000), endsAt: new Date(Date.now() + 30 * 86_400_000 + 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2500,
+      status: "PUBLISHED",
+      priceTiers: { create: [{ category: "HOMME", amountCents: 3000 }, { category: "FEMME", amountCents: 2000 }] }
+    } });
+    createdEventIds.push(event.id);
+
+    await api("/admin/settings/ENABLE_GENDER_PRICING", { method: "PATCH", body: JSON.stringify({ value: true }) }, admin);
+    try {
+      const publicEvent = await api<{ priceTiers: unknown[] }>(`/events/${event.slug}`);
+      expect(publicEvent.body.priceTiers).toHaveLength(2);
+
+      const femme = await tracked("PrixFemmeOn", "FEMME");
+      const applyRes = await applyToEvent(event.id, femme.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+      const intent = await api<{ amountCents: number }>(`/applications/${applyRes.body.application.id}/payment-intent`, { method: "POST" }, femme.token);
+      expect(intent.body.amountCents).toBe(2000);
+    } finally {
+      // Restaure la valeur par défaut : ne doit jamais rester activé au-delà de ce test.
+      await api("/admin/settings/ENABLE_GENDER_PRICING", { method: "PATCH", body: JSON.stringify({ value: false }) }, admin);
+    }
   });
 });
 
@@ -269,6 +299,42 @@ describe("restaurateur limité à son quota mensuel d'événements publiables", 
 
     const usage = await prisma.restaurantMonthlyUsage.findFirstOrThrow({ where: { restaurantId: organizer.restaurantId } });
     expect(usage.eventsPublished).toBe(2);
+  });
+});
+
+describe("volume brut billets restaurateurs à jour même sans registre commission (§14)", () => {
+  it("reflète une vente sous abonnement dans grossTicketVolumeCents, indépendamment d’ENABLE_COMMISSION_LEDGER", async () => {
+    const admin = await adminToken();
+    // ENABLE_COMMISSION_LEDGER=false est la valeur par défaut depuis le Lot 2 : aucune LedgerEntry
+    // n'est créée pour cette vente, ce qui est exactement le cas que ce test protège.
+    const ledgerEnabled = (await api<{ value: boolean }>("/admin/settings/ENABLE_COMMISSION_LEDGER", { method: "PATCH", body: JSON.stringify({ value: false }) }, admin)).body.value;
+    expect(ledgerEnabled).toBe(false);
+
+    const organizer = await newOrganizer("FinanceVolumeTest");
+    createdUserIds.push(organizer.userId);
+    const { body: event } = await api<{ id: string; slug: string }>("/admin/events", { method: "POST", body: JSON.stringify({
+      title: "Test volume brut", slug: `finance-volume-test-${Date.now()}`, category: "Networking", description: "Événement de test pour le volume brut restaurateur.",
+      startsAt: new Date(Date.now() + 20 * 86_400_000).toISOString(), endsAt: new Date(Date.now() + 20 * 86_400_000 + 3_600_000).toISOString(),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 4200
+    }) }, organizer.token);
+    createdEventIds.push(event.id);
+    await api(`/admin/events/${event.id}/submit-for-review`, { method: "POST" }, organizer.token);
+    await api(`/admin/events/${event.id}/review-decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
+
+    const buyer = await directParticipant("FinanceVolumeBuyer");
+    createdUserIds.push(buyer.userId);
+    const applyRes = await applyToEvent(event.id, buyer.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    await payAndConfirm(applyRes.body.application.id, buyer.token);
+
+    const ledgerEntry = await prisma.ledgerEntry.findFirst({ where: { eventId: event.id } });
+    expect(ledgerEntry).toBeNull();
+
+    const before = (await api<{ grossTicketVolumeCents: number; commissionLedgerEnabled: boolean }>("/admin/finance/summary", {}, admin)).body;
+    expect(before.commissionLedgerEnabled).toBe(false);
+    expect(before.grossTicketVolumeCents).toBeGreaterThanOrEqual(4200);
+
+    const restaurantScoped = (await api<{ grossTicketVolumeCents: number }>("/admin/finance/summary", {}, organizer.token)).body;
+    expect(restaurantScoped.grossTicketVolumeCents).toBe(4200);
   });
 });
 

@@ -248,9 +248,12 @@ const assertEventAccess = async (request: FastifyRequest, eventId: string) => {
 const ownRestaurant = (token: TokenUser) => token.role === UserRole.ORGANIZER ? prisma.restaurant.findUniqueOrThrow({ where: { ownerId: token.sub } }) : Promise.resolve(null);
 const profileAge = (birthDate?: Date | null) => birthDate ? Math.floor((Date.now() - birthDate.getTime()) / 31_557_600_000) : null;
 const defaultCategoryImage = (category: string) => EVENT_CATEGORIES.find(c => c.name === category)?.defaultImage ?? EVENT_CATEGORIES[0].defaultImage;
-// Un événement sans tarif différencié pour la catégorie du participant garde le tarif unique
-// (event.priceCents). La différenciation homme/femme reste donc toujours facultative.
+// La tarification différenciée homme/femme n'est pas validée juridiquement (§6) : tant que
+// ENABLE_GENDER_PRICING est désactivé (valeur par défaut), un PriceTier existant reste en base
+// (configurable par l'admin en avance) mais n'a AUCUN effet sur le montant réellement facturé —
+// seul event.priceCents s'applique, pour tout le monde, sans exception.
 const resolvePriceCents = (event: { priceCents: number; priceTiers?: { category: QuotaCategory; amountCents: number }[] }, quotaCategory: QuotaCategory | null) => {
+  if (!getSetting("ENABLE_GENDER_PRICING")) return event.priceCents;
   const tier = quotaCategory ? event.priceTiers?.find(t => t.category === quotaCategory) : undefined;
   return tier ? tier.amountCents : event.priceCents;
 };
@@ -266,7 +269,9 @@ const publicEvent = (event: any, revealAddress = false) => ({
   perks: { drink: event.includesDrink, starter: event.includesStarter, main: event.includesMain, dessert: event.includesDessert, description: event.perksDescription ?? null },
   minAge: event.minAge ?? null, maxAge: event.maxAge ?? null,
   capacity: event.capacity, confirmedCount: event._count?.reservations ?? 0, priceCents: event.priceCents, status: event.status,
-  priceTiers: (event.priceTiers ?? []).map((t: any) => ({ category: t.category, amountCents: t.amountCents })),
+  // Jamais exposés publiquement tant que ENABLE_GENDER_PRICING est désactivé (§6) : sinon le web
+  // afficherait un tarif différencié que resolvePriceCents n'appliquerait pas réellement au paiement.
+  priceTiers: getSetting("ENABLE_GENDER_PRICING") ? (event.priceTiers ?? []).map((t: any) => ({ category: t.category, amountCents: t.amountCents })) : [],
   proposedStartsAt: event.proposedStartsAt ?? null, proposedEndsAt: event.proposedEndsAt ?? null,
   organizer: event.controllerRestaurant ? { id: event.controllerRestaurant.id, name: event.controllerRestaurant.name } : { id: null, name: "Nūr Meet" },
   venue: event.venueRestaurant ? { id: event.venueRestaurant.id, name: event.venueRestaurant.name } : null,
@@ -414,7 +419,8 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   const quotas = await prisma.eventQuota.findMany({ where: { eventId: id } });
   // La catégorie est nécessaire pour les quotas (speed dating) ET pour résoudre un tarif différencié
   // éventuel (networking inclus) — sans jamais transformer ce tarif en quota implicite pour autant.
-  const needsCategory = quotas.length > 0 || event.priceTiers.length > 0;
+  // Un tarif différencié configuré mais inactif (ENABLE_GENDER_PRICING=false, §6) ne doit rien exiger.
+  const needsCategory = quotas.length > 0 || (getSetting("ENABLE_GENDER_PRICING") && event.priceTiers.length > 0);
   let quotaCategory: QuotaCategory | null = null;
   if (needsCategory) {
     if (!profile.quotaCategory) return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement" });
@@ -771,7 +777,7 @@ app.post("/alternative-offers/:id/respond", { preHandler: auth }, async (request
   const profile = await prisma.profile.findUniqueOrThrow({ where: { userId } });
   const quotas = await prisma.eventQuota.findMany({ where: { eventId: offer.alternativeEventId } });
   const priceTiers = await prisma.priceTier.findMany({ where: { eventId: offer.alternativeEventId } });
-  const needsCategory = quotas.length > 0 || priceTiers.length > 0;
+  const needsCategory = quotas.length > 0 || (getSetting("ENABLE_GENDER_PRICING") && priceTiers.length > 0);
   const quotaCategory = needsCategory ? profile.quotaCategory : null;
   if (needsCategory && !quotaCategory) return reply.code(409).send({ error: "Complétez votre catégorie dans votre profil avant d’accepter" });
   // N'attribue jamais de place ici (§5) : accepter ne fait qu'autoriser à payer, exactement comme
@@ -1253,19 +1259,31 @@ app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN, UserRole.O
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
   const where = restaurant ? { restaurantId: restaurant.id } : undefined;
-  const [gross, commission, due, paidOut, refunded] = await Promise.all([
+  // grossTicketVolumeCents vient directement de Payment, indépendamment de LedgerEntry : depuis le
+  // passage à l'abonnement (§8.2, Lot 2), ENABLE_COMMISSION_LEDGER est désactivé par défaut et plus
+  // aucune LedgerEntry n'est créée pour les nouvelles ventes restaurateur. gross/commission/due/
+  // paidOut ci-dessous restent donc corrects pour l'historique sous l'ancien modèle 30/70, mais
+  // resteraient figés à zéro pour toute vente récente si on s'y fiait seul — d'où ce calcul séparé,
+  // toujours à jour, qui ne mélange jamais le CA propre de Nour avec l'argent encaissé pour un tiers.
+  const [gross, commission, due, paidOut, refunded, grossTicketVolume] = await Promise.all([
     prisma.ledgerEntry.aggregate({ where, _sum: { grossAmountCents: true } }),
     prisma.ledgerEntry.aggregate({ where, _sum: { commissionAmountCents: true } }),
     prisma.ledgerEntry.aggregate({ where, _sum: { restaurantDueCents: true } }),
     prisma.ledgerEntry.aggregate({ where: { ...where, paidOutAt: { not: null } }, _sum: { restaurantDueCents: true } }),
-    prisma.ledgerEntry.aggregate({ where, _sum: { refundedAmountCents: true } })
+    prisma.ledgerEntry.aggregate({ where, _sum: { refundedAmountCents: true } }),
+    prisma.payment.aggregate({
+      where: { status: PaymentStatus.SUCCEEDED, reservation: { event: { controllerRestaurantId: restaurant ? restaurant.id : { not: null } } } },
+      _sum: { amountCents: true }
+    })
   ]);
   const summary = {
     grossCents: gross._sum.grossAmountCents ?? 0,
     commissionCents: commission._sum.commissionAmountCents ?? 0,
     restaurantDueCents: due._sum.restaurantDueCents ?? 0,
     paidOutCents: paidOut._sum.restaurantDueCents ?? 0,
-    refundedCents: refunded._sum.refundedAmountCents ?? 0
+    refundedCents: refunded._sum.refundedAmountCents ?? 0,
+    grossTicketVolumeCents: grossTicketVolume._sum.amountCents ?? 0,
+    commissionLedgerEnabled: getSetting("ENABLE_COMMISSION_LEDGER")
   };
   if (restaurant) return summary;
   // Le reste n'a de sens qu'à l'échelle de la plateforme, jamais restreint à un seul restaurateur.
