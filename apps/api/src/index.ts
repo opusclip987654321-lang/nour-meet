@@ -231,6 +231,12 @@ const publicEvent = (event: any, revealAddress = false) => ({
 
 app.setErrorHandler((error, _request, reply) => {
   if (error instanceof ZodError) return reply.code(400).send({ error: "Données invalides", details: error.flatten() });
+  // Un findUniqueOrThrow/findFirstOrThrow qui échoue (ex. assertEventAccess sur l'événement d'un
+  // autre restaurateur) lève une erreur Prisma "P2025" sans statusCode : sans ce cas, elle finissait
+  // en 500 « Erreur interne », masquant une simple restriction d'accès légitime derrière une fausse
+  // panne serveur. 404 (sans confirmer si la ressource existe pour quelqu'un d'autre) est la réponse
+  // correcte, jamais journalisée comme une erreur serveur.
+  if ((error as { code?: string }).code === "P2025") return reply.code(404).send({ error: "Ressource introuvable" });
   const status = (error as any).statusCode ?? 500;
   if (status >= 500) app.log.error(error);
   return reply.code(status).send({ error: status >= 500 ? "Erreur interne" : (error as Error).message });

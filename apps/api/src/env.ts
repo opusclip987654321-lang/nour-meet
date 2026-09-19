@@ -35,6 +35,11 @@ const envSchema = z.object({
   if (value.NODE_ENV === "production" && (!value.STRIPE_SECRET_KEY || !value.STRIPE_WEBHOOK_SECRET)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["STRIPE_SECRET_KEY"], message: "STRIPE_SECRET_KEY et STRIPE_WEBHOOK_SECRET sont requis en production" });
   }
+  // La valeur par défaut est connue de quiconque lit ce fichier : un jeton signé avec elle en
+  // production permettrait de forger un accès administrateur. Un vrai secret doit être fourni.
+  if (value.NODE_ENV === "production" && value.JWT_SECRET === "local-development-secret") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["JWT_SECRET"], message: "JWT_SECRET doit être une vraie valeur secrète en production (la valeur par défaut est publique)" });
+  }
 });
 
 export const env = envSchema.parse(process.env);
