@@ -465,6 +465,72 @@ describe("restaurateur limité à son quota mensuel d'événements publiables", 
   });
 });
 
+describe("un restaurateur ne voit jamais les coordonnées complètes d’un participant (§8.3/§20)", () => {
+  it("renvoie le prénom mais jamais le téléphone ni l’e-mail à l’organisateur, contrairement à l’admin", async () => {
+    const organizer = await newOrganizer("PrivacyAttendeesTest");
+    createdUserIds.push(organizer.userId);
+    const admin = await adminToken();
+    const { body: event } = await api<{ id: string }>("/admin/events", { method: "POST", body: JSON.stringify({
+      title: "Test confidentialité participants", slug: `privacy-attendees-test-${Date.now()}`, category: "Networking", description: "Événement de test pour la confidentialité des coordonnées.",
+      startsAt: new Date(Date.now() + 20 * 86_400_000).toISOString(), endsAt: new Date(Date.now() + 20 * 86_400_000 + 3_600_000).toISOString(),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000
+    }) }, organizer.token);
+    createdEventIds.push(event.id);
+    await api(`/admin/events/${event.id}/submit-for-review`, { method: "POST" }, organizer.token);
+    await api(`/admin/events/${event.id}/review-decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
+
+    const participant = await directParticipant("PrivacyAttendee");
+    createdUserIds.push(participant.userId);
+    const applyRes = await applyToEvent(event.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    await payAndConfirm(applyRes.body.application.id, participant.token);
+
+    const asOrganizer = await api<any[]>(`/admin/events/${event.id}/reservations`, {}, organizer.token);
+    expect(asOrganizer.status).toBe(200);
+    expect(asOrganizer.body).toHaveLength(1);
+    expect(asOrganizer.body[0].user.displayName).toBe("PrivacyAttendee");
+    expect(asOrganizer.body[0].user.phone).toBeUndefined();
+    expect(asOrganizer.body[0].user.email).toBeUndefined();
+
+    const asAdmin = await api<any[]>(`/admin/events/${event.id}/reservations`, {}, admin);
+    expect(asAdmin.body[0].user.phone).toBeTruthy();
+  });
+});
+
+describe("filtres du tableau de bord admin : événement, type, statut, ville (§14)", () => {
+  it("isole les compteurs à l’événement, la catégorie ou la ville demandés", async () => {
+    const admin = await adminToken();
+    const marker = Date.now();
+    const speedEvent = await prisma.event.create({ data: {
+      slug: `test-dashfilter-speed-${marker}`, title: "Test filtre speed dating", category: "Speed dating", flow: "SCREENING",
+      description: "Événement de test pour les filtres du dashboard.",
+      startsAt: new Date(Date.now() + 20 * 86_400_000), endsAt: new Date(Date.now() + 20 * 86_400_000 + 3_600_000),
+      district: "Villeneuve-sur-Test", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000, status: "PUBLISHED"
+    } });
+    const networkingEvent = await prisma.event.create({ data: {
+      slug: `test-dashfilter-net-${marker}`, title: "Test filtre networking", category: "Networking",
+      description: "Événement de test pour les filtres du dashboard.",
+      startsAt: new Date(Date.now() + 21 * 86_400_000), endsAt: new Date(Date.now() + 21 * 86_400_000 + 3_600_000),
+      district: "Ailleurs-sur-Test", address: "2 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000, status: "PUBLISHED"
+    } });
+    createdEventIds.push(speedEvent.id, networkingEvent.id);
+
+    const byEvent = await api<{ events: number }>(`/admin/dashboard?eventId=${speedEvent.id}`, {}, admin);
+    expect(byEvent.body.events).toBe(1);
+
+    const byCategory = await api<{ events: number }>(`/admin/dashboard?category=${encodeURIComponent("Speed dating")}`, {}, admin);
+    expect(byCategory.body.events).toBeGreaterThanOrEqual(1);
+    const byCategoryNetworking = await api<{ events: number }>(`/admin/dashboard?category=Networking&eventId=${speedEvent.id}`, {}, admin);
+    // Combiner un filtre catégorie incompatible avec l'eventId choisi ne doit remonter aucun événement.
+    expect(byCategoryNetworking.body.events).toBe(0);
+
+    const byCity = await api<{ events: number }>(`/admin/dashboard?city=${encodeURIComponent("villeneuve-sur-test")}`, {}, admin);
+    expect(byCity.body.events).toBe(1);
+
+    const byStatus = await api<{ events: number }>(`/admin/dashboard?status=CANCELLED&eventId=${networkingEvent.id}`, {}, admin);
+    expect(byStatus.body.events).toBe(0);
+  });
+});
+
 describe("volume brut billets restaurateurs à jour même sans registre commission (§14)", () => {
   it("reflète une vente sous abonnement dans grossTicketVolumeCents, indépendamment d’ENABLE_COMMISSION_LEDGER", async () => {
     const admin = await adminToken();

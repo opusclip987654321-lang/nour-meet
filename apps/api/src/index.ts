@@ -1137,17 +1137,38 @@ app.post("/admin/reports/:id/decision", { preHandler: roles(UserRole.ADMIN, User
 app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
-  const query = z.object({ since: z.string().optional() }).parse(request.query);
+  // §14 : filtres par événement, type, date, statut, tranche d'âge et ville. La tranche d'âge est
+  // un agrégat compté côté serveur (nombre de candidatures dans la tranche), jamais une liste de
+  // profils individuels filtrables par âge — le seul usage "métier" que ce champ sert ici.
+  const query = z.object({
+    since: z.string().optional(), until: z.string().optional(), eventId: z.string().optional(),
+    category: z.string().optional(), status: z.nativeEnum(EventStatus).optional(), city: z.string().optional(),
+    minAge: z.coerce.number().int().min(0).optional(), maxAge: z.coerce.number().int().min(0).optional()
+  }).parse(request.query);
   const since = query.since ? new Date(query.since) : new Date(Date.now() - 30 * 86_400_000);
-  const eventScope = restaurant ? { controllerRestaurantId: restaurant.id } : undefined;
-  const applicationEventScope = restaurant ? { event: { controllerRestaurantId: restaurant.id } } : { eventId: { not: null } };
+  const until = query.until ? new Date(query.until) : undefined;
+  const createdRange = { gte: since, ...(until ? { lte: until } : {}) };
+  const eventScope = {
+    ...(restaurant ? { controllerRestaurantId: restaurant.id } : {}),
+    ...(query.eventId ? { id: query.eventId } : {}),
+    ...(query.category ? { category: query.category } : {}),
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.city ? { district: { contains: query.city, mode: Prisma.QueryMode.insensitive } } : {})
+  };
+  // Bornes de date de naissance dérivées de la tranche d'âge demandée : un âge minimum correspond à
+  // une date de naissance plus ancienne (borne haute), et inversement pour l'âge maximum.
+  const birthDateRange = (query.minAge != null || query.maxAge != null) ? {
+    ...(query.minAge != null ? { lte: new Date(Date.now() - query.minAge * 31_557_600_000) } : {}),
+    ...(query.maxAge != null ? { gte: new Date(Date.now() - (query.maxAge + 1) * 31_557_600_000) } : {})
+  } : undefined;
+  const applicationEventScope = restaurant || Object.keys(eventScope).length > 0 ? { event: eventScope } : { eventId: { not: null } };
   const [events, upcomingEvents, applications, payments, ticketsSold, waitlisted] = await Promise.all([
     prisma.event.count({ where: eventScope }),
     prisma.event.count({ where: { ...eventScope, status: EventStatus.PUBLISHED, startsAt: { gt: new Date() } } }),
-    prisma.application.count({ where: { ...applicationEventScope, createdAt: { gte: since } } }),
-    prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED, ...(restaurant ? { reservation: { event: { controllerRestaurantId: restaurant.id } } } : {}), paidAt: { gte: since } }, _sum: { amountCents: true } }),
-    prisma.ticket.count({ where: { status: { not: "CANCELLED" }, reservation: { event: eventScope, createdAt: { gte: since } } } }),
-    prisma.waitlistEntry.count({ where: restaurant ? { event: { controllerRestaurantId: restaurant.id } } : undefined })
+    prisma.application.count({ where: { ...applicationEventScope, createdAt: createdRange, ...(birthDateRange ? { user: { profile: { birthDate: birthDateRange } } } : {}) } }),
+    prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED, reservation: { event: eventScope }, paidAt: createdRange }, _sum: { amountCents: true } }),
+    prisma.ticket.count({ where: { status: { not: "CANCELLED" }, reservation: { event: eventScope, createdAt: createdRange } } }),
+    prisma.waitlistEntry.count({ where: { event: eventScope } })
   ]);
   const remainingSpots = await prisma.event.aggregate({ where: { ...eventScope, status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] } }, _sum: { capacity: true } });
   const confirmedReservations = await prisma.reservation.count({ where: { confirmedAt: { not: null }, cancelledAt: null, event: eventScope } });
@@ -1171,16 +1192,22 @@ app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZ
   const upcomingInterviews = restaurant ? null : await prisma.screeningCall.count({ where: { eventId: null, startsAt: { gt: new Date() }, completedAt: null } });
   const pendingRestaurantApplications = restaurant ? null : await prisma.restaurant.count({ where: { status: "PENDING" } });
   const subscriptionsByStatus = restaurant ? null : await prisma.restaurantSubscription.groupBy({ by: ["status"], _count: true });
-  const pendingPayments = restaurant ? null : await prisma.payment.count({ where: { status: PaymentStatus.PENDING, createdAt: { gte: since } } });
-  const failedPayments = restaurant ? null : await prisma.payment.count({ where: { status: PaymentStatus.FAILED, createdAt: { gte: since } } });
+  const pendingPayments = restaurant ? null : await prisma.payment.count({ where: { status: PaymentStatus.PENDING, createdAt: createdRange } });
+  const failedPayments = restaurant ? null : await prisma.payment.count({ where: { status: PaymentStatus.FAILED, createdAt: createdRange } });
   const shareClicks = restaurant ? null : await prisma.shareLink.aggregate({ _sum: { clicks: true } });
+  // §14 : le total de clics seul ne dit rien de l'efficacité du partage — inscriptions et ventes
+  // réellement attribuées (déjà calculées par événement dans /admin/events/:id/shares), agrégées
+  // ici à l'échelle de la plateforme.
+  const shareAttributedApplications = restaurant ? null : await prisma.application.count({ where: { attributedShareLinkId: { not: null }, createdAt: createdRange } });
+  const shareAttributedPurchases = restaurant ? null : await prisma.application.count({ where: { attributedShareLinkId: { not: null }, createdAt: createdRange, reservation: { payment: { status: PaymentStatus.SUCCEEDED } } } });
   return {
     events, upcomingEvents, applications, acceptanceRate, ticketsSold,
     remainingSpots: (remainingSpots._sum.capacity ?? 0) - confirmedReservations,
     waitlisted, revenueCents: payments._sum.amountCents ?? 0,
     openReports, pendingInterviews, upcomingInterviews, pendingRestaurantApplications,
     subscriptionsByStatus: subscriptionsByStatus?.map(s => ({ status: s.status, count: s._count })) ?? null,
-    pendingPayments, failedPayments, shareClicks: shareClicks?._sum.clicks ?? null
+    pendingPayments, failedPayments, shareClicks: shareClicks?._sum.clicks ?? null,
+    shareAttributedApplications, shareAttributedPurchases
   };
 });
 // Entretiens globaux : uniquement le super-admin, jamais un restaurateur (voir cahier des charges §6).
@@ -1251,10 +1278,16 @@ app.post("/admin/events/:id/quotas", { preHandler: roles(UserRole.ADMIN, UserRol
   await audit(currentId(request), "SET_EVENT_QUOTAS", "Event", id, input);
   return prisma.eventQuota.findMany({ where: { eventId: id } });
 });
+// §8.3/§20 : un restaurateur ne voit jamais les coordonnées complètes (téléphone, e-mail) d'un
+// participant, seulement le prénom/pseudonyme (displayName) et les informations logistiques
+// nécessaires à l'organisation — jamais les réponses de questionnaire, jamais exposées ici de
+// toute façon. Le super-admin, lui, garde l'accès complet (contact direct en cas de litige).
 app.get("/admin/events/:id/reservations", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  await assertEventAccess(request, id);
-  return prisma.reservation.findMany({ where: { eventId: id }, include: { user: true, payment: true, ticket: true }, orderBy: { createdAt: "desc" } });
+  const event = await assertEventAccess(request, id);
+  const token = request.user as TokenUser;
+  const isAdmin = token.role === UserRole.ADMIN;
+  return prisma.reservation.findMany({ where: { eventId: event.id }, include: { user: { select: isAdmin ? { id: true, displayName: true, phone: true, email: true } : { id: true, displayName: true } }, payment: true, ticket: true }, orderBy: { createdAt: "desc" } });
 });
 // Annulation d'un événement (§7 organisateur, §10 minimum non atteint) : remboursement intégral
 // automatique de tous les billets concernés, jamais "à traiter manuellement" — l'événement
