@@ -120,7 +120,7 @@ function Concept() {
   useEffect(()=>{api<{url:string;thumbnail:string;subtitles:string}>("/concept-video").then(setVideo).catch(()=>{})},[]);
   return <Layout><section className="page"><span className="eyebrow">LE CONCEPT</span><h1>Comment fonctionne Nūr Meet.</h1>
     {video?.url?<video controls poster={video.thumbnail||undefined} className="concept-video"><source src={video.url}/>{video.subtitles&&<track kind="subtitles" src={video.subtitles} srcLang="fr" label="Français" default/>}Votre navigateur ne prend pas en charge la vidéo — voir le résumé écrit ci-dessous.</video>
-    :<div className="concept-video-placeholder"><span>▶</span><p>La vidéo de présentation (60 à 90 secondes) sera bientôt disponible ici. En attendant, voici comment tout fonctionne :</p></div>}
+    :<div className="concept-video-placeholder" style={{backgroundImage:`linear-gradient(180deg,#0b0b0cb0,#0b0b0ce6),url(${imgUrl("/static/defaults/speed-dating.jpg")})`}}><span>▶</span><p>La vidéo de présentation (60 à 90 secondes) sera bientôt disponible ici. En attendant, voici comment tout fonctionne :</p></div>}
     <div className="feature-grid" style={{marginTop:40}}>
       <div><b>01</b><h3>Speed dating, avec sélection</h3><p>Un questionnaire privé, un entretien téléphonique et une décision de notre équipe avant toute inscription : un cadre sérieux, pensé pour de vraies rencontres.</p></div>
       <div><b>02</b><h3>Networking, en accès direct</h3><p>Un questionnaire professionnel non bloquant, puis une inscription immédiate : idéal pour élargir son réseau sans étape supplémentaire.</p></div>

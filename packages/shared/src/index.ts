@@ -6,9 +6,12 @@
 export interface EventCategoryDef { name: string; defaultImage: string; color: string }
 // Catégories disponibles au lancement. Pour en ajouter une nouvelle : ajouter une entrée ici
 // (aucune migration de base de données n'est nécessaire, "category" est un simple champ texte).
+// Visuels génériques (banque d'images libres de droits, licence Unsplash) en attendant que chaque
+// restaurateur ajoute ses propres photos via la galerie d'événement — jamais présentés comme des
+// photos réelles d'un lieu ou d'un participant Nūr Meet, seulement une ambiance de catégorie.
 export const EVENT_CATEGORIES: EventCategoryDef[] = [
-  { name: "Speed dating", defaultImage: "/static/defaults/speed-dating.svg", color: "#cba969" },
-  { name: "Networking", defaultImage: "/static/defaults/networking.svg", color: "#b97a52" }
+  { name: "Speed dating", defaultImage: "/static/defaults/speed-dating.jpg", color: "#cba969" },
+  { name: "Networking", defaultImage: "/static/defaults/networking.jpg", color: "#b97a52" }
 ];
 export const EVENT_CATEGORY_NAMES = EVENT_CATEGORIES.map(c => c.name);
 
