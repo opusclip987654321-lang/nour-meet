@@ -1,7 +1,7 @@
 import { StatusBar } from "expo-status-bar";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { api, getToken, setToken } from "./src/api";
 import { SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening, EVENT_CATEGORIES } from "@nour/shared";
 
@@ -10,7 +10,7 @@ import { SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening, EVEN
 const categoryColor = (category: string) => EVENT_CATEGORIES.find(c => c.name === category)?.color ?? "#cba969";
 
 const C={bg:"#0B0B0C",panel:"#171718",line:"#34322E",gold:"#C9A765",cream:"#F6F0E5",muted:"#918C82",green:"#62D89A",red:"#F0747C"};
-type Tab="home"|"events"|"scan"|"messages"|"profile";
+type Tab="home"|"events"|"scan"|"messages"|"profile"|"concept";
 const money=(n:number)=>`${(n/100).toFixed(2).replace(".",",")} €`;
 const when=(v:string)=>new Intl.DateTimeFormat("fr-FR",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}).format(new Date(v));
 
@@ -30,14 +30,32 @@ function EventCard({event,onPress}:{event:any,onPress:()=>void}){return <Pressab
 
 function Home({user,setTab}:{user:any,setTab:(t:Tab)=>void}){
   const [events,setEvents]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]);useEffect(()=>{api<any[]>("/events").then(setEvents);api<any[]>("/me/tickets").then(setTickets)},[]);
-  return <ScrollView contentContainerStyle={s.content}><View style={s.hello}><View><Text style={s.eyebrow}>BONJOUR {user.displayName.toUpperCase()}</Text><Text style={s.homeTitle}>Votre prochaine{`\n`}rencontre commence ici.</Text></View><Avatar name={user.displayName}/></View>{tickets[0]&&<Pressable style={s.ticketMini} onPress={()=>setTab("profile")}><View><Text style={s.eyebrow}>{when(tickets[0].reservation.event.startsAt).toUpperCase()}</Text><Text style={s.ticketTitle}>{tickets[0].reservation.event.title}</Text><Text style={{color:C.green,fontWeight:"700"}}>Billet confirmé</Text></View><Image source={{uri:tickets[0].qrDataUrl}} style={s.miniQr}/></Pressable>}<ScreenTitle title="À découvrir" action={<Pressable onPress={()=>setTab("events")}><Text style={s.link}>Voir tout</Text></Pressable>}/>{events.slice(0,2).map(e=><EventCard event={e} onPress={()=>setTab("events")} key={e.id}/>)}<ScreenTitle title="Pour vous"/><View style={s.chips}><Text style={s.chipGold}>Rencontres</Text><Text style={s.chip}>Networking</Text><Text style={s.chip}>Culture</Text></View></ScrollView>
+  return <ScrollView contentContainerStyle={s.content}><View style={s.hello}><View><Text style={s.eyebrow}>BONJOUR {user.displayName.toUpperCase()}</Text><Text style={s.homeTitle}>Votre prochaine{`\n`}rencontre commence ici.</Text></View><Avatar name={user.displayName}/></View>{tickets[0]&&<Pressable style={s.ticketMini} onPress={()=>setTab("profile")}><View><Text style={s.eyebrow}>{when(tickets[0].reservation.event.startsAt).toUpperCase()}</Text><Text style={s.ticketTitle}>{tickets[0].reservation.event.title}</Text><Text style={{color:C.green,fontWeight:"700"}}>Billet confirmé</Text></View><Image source={{uri:tickets[0].qrDataUrl}} style={s.miniQr}/></Pressable>}<ScreenTitle title="À découvrir" action={<Pressable onPress={()=>setTab("events")}><Text style={s.link}>Voir tout</Text></Pressable>}/>{events.slice(0,2).map(e=><EventCard event={e} onPress={()=>setTab("events")} key={e.id}/>)}<ScreenTitle title="Pour vous"/><View style={s.chips}><Text style={s.chipGold}>Rencontres</Text><Text style={s.chip}>Networking</Text><Text style={s.chip}>Culture</Text></View><Pressable onPress={()=>setTab("concept")}><Text style={s.link}>Le concept →</Text></Pressable></ScrollView>
+}
+
+// §16 : résumé écrit toujours disponible sans lancer de vidéo (la vidéo elle-même n'est pas
+// intégrée sur mobile — pas de lecteur natif ajouté pour l'instant, contrairement au web).
+function Concept({setTab}:{setTab:(t:Tab)=>void}){
+  return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>setTab("home")}><Text style={s.back}>‹ Retour</Text></Pressable><ScreenTitle eyebrow="LE CONCEPT" title="Comment fonctionne Nūr Meet."/>
+    {[
+      ["01","Speed dating, avec sélection","Un questionnaire privé, un entretien téléphonique et une décision de notre équipe avant toute inscription : un cadre sérieux, pensé pour de vraies rencontres."],
+      ["02","Networking, en accès direct","Un questionnaire professionnel non bloquant, puis une inscription immédiate : idéal pour élargir son réseau sans étape supplémentaire."],
+      ["03","Des profils sérieux, un cadre respectueux","Chaque participant complète un profil et s’engage à respecter la charte de confidentialité et de respect mutuel de la communauté."],
+      ["04","Paiement et billet","La place n’est acquise qu’après paiement confirmé ; un billet avec QR code personnel est alors délivré pour l’entrée."],
+      ["05","Déroulement de la soirée","Accueil personnalisé, animation légère, temps libres, et la possibilité d’échanger un contact avec les personnes rencontrées."]
+    ].map(([n,title,body])=><View key={n} style={{marginTop:20}}><Text style={s.eyebrow}>{n}</Text><Text style={s.sectionTitle}>{title}</Text><Text style={s.paragraph}>{body}</Text></View>)}
+  </ScrollView>;
 }
 
 function Events(){
-  const [events,setEvents]=useState<any[]>([]),[selected,setSelected]=useState<any>(null),[message,setMessage]=useState(""),[showForm,setShowForm]=useState(false),[answers,setAnswers]=useState<Record<string,string>>({}),[submitting,setSubmitting]=useState(false);
+  const [events,setEvents]=useState<any[]>([]),[selected,setSelected]=useState<any>(null),[application,setApplication]=useState<any>(null),[message,setMessage]=useState(""),[showForm,setShowForm]=useState(false),[answers,setAnswers]=useState<Record<string,string>>({}),[submitting,setSubmitting]=useState(false);
   useEffect(()=>{api<any[]>("/events").then(setEvents)},[]);
+  const loadApplication=(eventId:string)=>api<any>(`/events/${eventId}/my-application`).then(setApplication).catch(()=>setApplication(null));
+  const openEvent=(e:any)=>{setSelected(e);setMessage("");setShowForm(false);setAnswers({});loadApplication(e.id)};
   const requiresScreening=selected?eventRequiresScreening(selected):false;
   const questions=requiresScreening?SCREENING_QUESTIONS:NETWORKING_QUESTIONS;
+  const full=selected?selected.confirmedCount>=selected.capacity:false;
+  const canCancel=application&&!["REFUSED","CANCELLED"].includes(application.status);
   // La candidature ne garantit jamais de place (elle enregistre le questionnaire et autorise
   // seulement à tenter le paiement) : le paiement par carte se termine depuis le site pour
   // l'instant, l'application mobile n'intègre pas encore le module de paiement Stripe.
@@ -45,17 +63,44 @@ function Events(){
     setSubmitting(true);
     try{
       const body=requiresScreening?{screeningAnswers:answers}:{networkingAnswers:answers};
-      await api(`/events/${selected.id}/apply`,{method:"POST",body:JSON.stringify(body)});
+      const result=await api<any>(`/events/${selected.id}/apply`,{method:"POST",body:JSON.stringify(body)});
+      setApplication(result.application);
       setMessage("Candidature envoyée. Finalisez le paiement par carte depuis le site nour-meet dans votre espace personnel.");
       setShowForm(false);
     }catch(e){setMessage((e as Error).message)}
     finally{setSubmitting(false)}
   };
-  if(selected)return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>{setSelected(null);setMessage("");setShowForm(false);setAnswers({})}}><Text style={s.back}>‹ Retour</Text></Pressable><View style={s.detailArt}><Text style={[s.eyebrow,{color:categoryColor(selected.category)}]}>{selected.category.toUpperCase()}</Text><Text style={s.detailTitle}>{selected.title}</Text></View><View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View><Text style={s.sectionTitle}>Rencontrez autrement</Text><Text style={s.paragraph}>{selected.description}</Text>{message?<Notice text={message} error={!message.includes("envoyée")}/>:null}
-    {showForm?<View>{questions.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={answers[q.key]??""} onChangeText={v=>setAnswers({...answers,[q.key]:v})}/></View>)}<GoldButton title={submitting?"Envoi…":"Envoyer ma candidature"} onPress={apply} disabled={submitting}/></View>
+  const cancel=async()=>{
+    setSubmitting(true);
+    try{
+      const result=await api<{refunded:boolean;refundedAmountCents:number|null;eligible:boolean|null}>(`/me/applications/${application.id}/cancel`,{method:"POST"});
+      setMessage(result.refunded?`Candidature annulée. ${money(result.refundedAmountCents!)} remboursés.`:"Candidature annulée.");
+      await loadApplication(selected.id);
+    }catch(e){setMessage((e as Error).message)}
+    finally{setSubmitting(false)}
+  };
+  const joinWaitlist=async()=>{
+    setSubmitting(true);
+    try{await api(`/events/${selected.id}/waitlist`,{method:"POST"});setMessage("Vous êtes inscrit(e) sur la liste d’attente.")}
+    catch(e){setMessage((e as Error).message)}
+    finally{setSubmitting(false)}
+  };
+  const share=async()=>{
+    try{
+      const link=await api<{url:string}>(`/events/${selected.id}/share-link`,{method:"POST"});
+      await Share.share({message:`Je vais à « ${selected.title} », viens avec moi : ${link.url}`});
+    }catch(e){setMessage((e as Error).message)}
+  };
+  if(selected)return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>{setSelected(null);setApplication(null)}}><Text style={s.back}>‹ Retour</Text></Pressable><View style={s.detailArt}><Text style={[s.eyebrow,{color:categoryColor(selected.category)}]}>{selected.category.toUpperCase()}</Text><Text style={s.detailTitle}>{selected.title}</Text></View><View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View><Text style={s.sectionTitle}>Rencontrez autrement</Text><Text style={s.paragraph}>{selected.description}</Text><GoldButton title="J’y vais, viens avec moi" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
+    {application?<View>
+      {canCancel?<GoldButton title={submitting?"…":"Annuler mon inscription"} secondary onPress={cancel} disabled={submitting}/>
+      :<Text style={s.meta}>Statut : {application.status}</Text>}
+    </View>
+    :showForm?<View>{questions.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={answers[q.key]??""} onChangeText={v=>setAnswers({...answers,[q.key]:v})}/></View>)}<GoldButton title={submitting?"Envoi…":"Envoyer ma candidature"} onPress={apply} disabled={submitting}/></View>
+    :full?<View style={s.bookingBar}><Text style={s.meta}>Cet événement est complet</Text><GoldButton title={submitting?"…":"Rejoindre la liste d’attente"} onPress={joinWaitlist} disabled={submitting}/></View>
     :<View style={s.bookingBar}><View><Text style={s.meta}>À partir de</Text><Text style={s.bookingPrice}>{money(selected.priceCents)}</Text></View><GoldButton title={requiresScreening?"Candidater":"S’inscrire"} onPress={()=>setShowForm(true)}/></View>}
   </ScrollView>;
-  return <ScrollView contentContainerStyle={s.content}><ScreenTitle eyebrow="CALENDRIER" title="Événements"/><TextInput style={s.search} placeholder="Rechercher" placeholderTextColor="#777"/>{events.map(e=><EventCard key={e.id} event={e} onPress={()=>setSelected(e)}/>)}</ScrollView>
+  return <ScrollView contentContainerStyle={s.content}><ScreenTitle eyebrow="CALENDRIER" title="Événements"/><TextInput style={s.search} placeholder="Rechercher" placeholderTextColor="#777"/>{events.map(e=><EventCard key={e.id} event={e} onPress={()=>openEvent(e)}/>)}</ScrollView>
 }
 
 function Scanner(){
@@ -83,7 +128,7 @@ function TabBar({tab,setTab}:{tab:Tab,setTab:(t:Tab)=>void}){const tabs:[Tab,str
 export default function App(){
   const [loading,setLoading]=useState(true),[user,setUser]=useState<any>(null),[tab,setTab]=useState<Tab>("home");const load=async()=>{setLoading(true);try{if(await getToken())setUser(await api("/me"));else setUser(null)}catch{await setToken(null);setUser(null)}finally{setLoading(false)}};useEffect(()=>{load()},[]);
   if(loading)return <SafeAreaView style={[s.safe,s.center]}><ActivityIndicator color={C.gold}/></SafeAreaView>;if(!user)return <Login onLogin={load}/>;
-  return <SafeAreaView style={s.safe}><StatusBar style="light"/><View style={s.app}>{tab==="home"&&<Home user={user} setTab={setTab}/>} {tab==="events"&&<Events/>}{tab==="scan"&&<Scanner/>}{tab==="messages"&&<Messages user={user}/>} {tab==="profile"&&<Profile user={user} onLogout={async()=>{await setToken(null);setUser(null)}}/>}</View><TabBar tab={tab} setTab={setTab}/></SafeAreaView>
+  return <SafeAreaView style={s.safe}><StatusBar style="light"/><View style={s.app}>{tab==="home"&&<Home user={user} setTab={setTab}/>} {tab==="events"&&<Events/>}{tab==="concept"&&<Concept setTab={setTab}/>}{tab==="scan"&&<Scanner/>}{tab==="messages"&&<Messages user={user}/>} {tab==="profile"&&<Profile user={user} onLogout={async()=>{await setToken(null);setUser(null)}}/>}</View><TabBar tab={tab} setTab={setTab}/></SafeAreaView>
 }
 
 const s=StyleSheet.create({
