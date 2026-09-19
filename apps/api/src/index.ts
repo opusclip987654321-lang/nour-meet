@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES, QUOTA_ELIGIBLE_CATEGORY, EVENT_ZONES } from "@nour/shared";
+import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES, QUOTA_ELIGIBLE_CATEGORY, EVENT_ZONES, regionOfZone } from "@nour/shared";
 import { env } from "./env.js";
 import { paymentDeadline, interviewRetryDate } from "./domain.js";
 import { normalizePhoneNumber } from "./phone.js";
@@ -135,19 +135,43 @@ const offerNextWaitlistEntry = async (eventId: string, category: QuotaCategory |
   await notify(entry.userId, "Une place s’est libérée !", `Une place pour « ${event.title} » vous est proposée. Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet, sans quoi elle sera proposée au participant suivant.`);
 };
 
-// Propose un événement alternatif (même catégorie + même zone géographique + même organisateur)
-// lorsqu'un participant ne peut pas obtenir de place. Un restaurateur ne propose jamais l'événement
-// d'un concurrent, et Nour ne propose que ses propres événements : l'alternative doit avoir le même
-// controllerRestaurantId (y compris null, qui désigne les événements organisés directement par Nour).
-// Ne crée jamais deux propositions actives pour le même événement d'origine.
+// Une place existe réellement pour cette catégorie (ou en capacité globale si l'événement n'a pas
+// de quotas) : condition nécessaire avant de proposer un événement alternatif, pour que la personne
+// ne se retrouve pas de nouveau sur liste d'attente en l'acceptant.
+const hasAvailableSpace = async (event: { id: string; capacity: number }, quotaCategory: QuotaCategory | null) => {
+  const quotas = await prisma.eventQuota.findMany({ where: { eventId: event.id } });
+  if (quotas.length > 0) {
+    if (!quotaCategory) return false;
+    const tier = quotas.find(q => q.category === quotaCategory);
+    return !!tier && tier.heldCount < tier.capacity;
+  }
+  const occupied = await prisma.reservation.count({ where: { eventId: event.id, cancelledAt: null } });
+  return occupied < event.capacity;
+};
+// Propose automatiquement un événement alternatif lorsqu'un participant ne peut pas obtenir de
+// place, selon trois critères : même thème (catégorie), même région géographique (ex. Île-de-France
+// — pas la zone précise, pour élargir les possibilités), et une place réellement disponible pour sa
+// catégorie (sinon il se retrouverait aussitôt de nouveau sur liste d'attente). Un restaurateur ne
+// propose jamais l'événement d'un concurrent, et Nour ne propose que ses propres événements :
+// l'alternative doit avoir le même controllerRestaurantId (y compris null pour les événements
+// organisés directement par Nour). Ne crée jamais deux propositions actives pour le même événement
+// d'origine. Entièrement automatique : aucune proposition manuelle pour l'instant.
 const createAlternativeOfferIfPossible = async (userId: string, originalEvent: { id: string; category: string; zone: string | null; controllerRestaurantId: string | null }) => {
   if (!originalEvent.zone) return null;
   const existingPending = await prisma.alternativeOffer.findFirst({ where: { userId, originalEventId: originalEvent.id, status: AlternativeOfferStatus.PENDING } });
   if (existingPending) return null;
-  const alternative = await prisma.event.findFirst({
-    where: { id: { not: originalEvent.id }, category: originalEvent.category, zone: originalEvent.zone, controllerRestaurantId: originalEvent.controllerRestaurantId, status: EventStatus.PUBLISHED, startsAt: { gt: new Date() }, applications: { none: { userId } } },
-    orderBy: { startsAt: "asc" }
+  const region = regionOfZone(originalEvent.zone);
+  const zonesInRegion = EVENT_ZONES.filter(z => regionOfZone(z) === region);
+  const profile = await prisma.profile.findUnique({ where: { userId } });
+  const candidates = await prisma.event.findMany({
+    where: { id: { not: originalEvent.id }, category: originalEvent.category, zone: { in: zonesInRegion }, controllerRestaurantId: originalEvent.controllerRestaurantId, status: EventStatus.PUBLISHED, startsAt: { gt: new Date() }, applications: { none: { userId } } },
+    orderBy: { startsAt: "asc" },
+    take: 10
   });
+  let alternative: (typeof candidates)[number] | undefined;
+  for (const candidate of candidates) {
+    if (await hasAvailableSpace(candidate, profile?.quotaCategory ?? null)) { alternative = candidate; break; }
+  }
   if (!alternative) return null;
   const offer = await prisma.alternativeOffer.create({ data: { userId, originalEventId: originalEvent.id, alternativeEventId: alternative.id, respondsBy: paymentDeadline() } });
   await notify(userId, "Un événement similaire pourrait vous intéresser", `« ${alternative.title} » (${alternative.district}, ${new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" }).format(alternative.startsAt)}) a des places disponibles.`);

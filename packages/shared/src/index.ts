@@ -11,8 +11,16 @@ export const EVENT_CATEGORY_NAMES = EVENT_CATEGORIES.map(c => c.name);
 // Limité au speed dating pour l'instant ; à étendre ici si besoin plus tard, sans migration.
 export const QUOTA_ELIGIBLE_CATEGORY = "Speed dating";
 
-// Zones géographiques utilisées pour proposer des événements alternatifs (même catégorie + même zone).
-export const EVENT_ZONES = ["Paris intra-muros", "La Défense", "Île-de-France (banlieue)"];
+// Zones géographiques ; chacune appartient à une région. Les propositions d'événements alternatifs
+// comparent la RÉGION (ex. Île-de-France), pas la zone précise : un participant complet à Paris
+// intra-muros peut se voir proposer un événement à La Défense, tant que la région correspond.
+export const EVENT_ZONE_REGIONS: Record<string, string> = {
+  "Paris intra-muros": "Île-de-France",
+  "La Défense": "Île-de-France",
+  "Île-de-France (banlieue)": "Île-de-France"
+};
+export const EVENT_ZONES = Object.keys(EVENT_ZONE_REGIONS);
+export const regionOfZone = (zone: string | null | undefined) => zone ? EVENT_ZONE_REGIONS[zone] ?? zone : null;
 
 export type UserRole = "PARTICIPANT" | "ORGANIZER" | "MODERATOR" | "RECEPTION" | "ADMIN";
 export type EventStatus = "DRAFT" | "PENDING_REVIEW" | "PUBLISHED" | "FULL" | "CANCELLED" | "COMPLETED";
