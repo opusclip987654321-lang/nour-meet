@@ -450,7 +450,10 @@ app.post("/events/:id/share-link", { preHandler: auth }, async (request) => {
   });
   return { code: link.code, url: `${env.WEB_ORIGIN}/events/${event.slug}?ref=${link.code}` };
 });
-app.post("/share-links/:code/click", async (request, reply) => {
+// §19/§20 : point public sans authentification, donc directement exposé à un abus par bot pour
+// gonfler artificiellement des statistiques de partage — limité par IP comme les autres routes
+// publiques sensibles (OTP, génération IA), jamais laissé illimité.
+app.post("/share-links/:code/click", { config: { rateLimit: { max: 30, timeWindow: "10 minutes" } } }, async (request, reply) => {
   const { code } = z.object({ code: z.string() }).parse(request.params);
   const updated = await prisma.shareLink.updateMany({ where: { code }, data: { clicks: { increment: 1 } } });
   if (updated.count === 0) return reply.code(404).send({ error: "Lien de partage introuvable" });
@@ -908,7 +911,9 @@ app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
   const usage = await prisma.restaurantMonthlyUsage.findUnique({ where: { restaurantId_yearMonth: { restaurantId: restaurant.id, yearMonth: currentYearMonth() } } });
   return { ...restaurant, currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
 });
-app.post("/restaurants/apply", { preHandler: auth }, async (request, reply) => {
+// §19/§20 : formulaire explicitement cité comme devant être protégé contre un abus automatisé,
+// au même titre que l'authentification et la génération IA.
+app.post("/restaurants/apply", { preHandler: auth, config: { rateLimit: { max: 5, timeWindow: "10 minutes" } } }, async (request, reply) => {
   // Le SIRET est saisi par le demandeur mais n'est pas vérifié auprès d'un registre officiel : ce
   // n'est qu'une déclaration, à ne jamais présenter comme une vérification légale effectuée par Nour.
   const input = z.object({
