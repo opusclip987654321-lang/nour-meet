@@ -115,3 +115,11 @@ button,.button,.link-button,.event-card,.feature-grid>div,.testimonial-card,.sta
 .auth-visual{background-size:cover;background-position:center}
 .auth-visual:after{content:none}
 .auth-visual blockquote{text-shadow:0 2px 12px #000a}
+/* --- Passe UX : messagerie --- */
+.messages>aside button{transition:background-color .18s ease}
+.messages>aside button:hover:not(.active){background:#ffffff08}
+.chat-input input{transition:box-shadow .18s ease}
+.chat-input input:focus{outline:none;box-shadow:0 0 0 3px #cba96925}
+.chat-input button{transition:filter .18s ease,box-shadow .18s ease;cursor:pointer}
+.chat-input button:hover{filter:brightness(1.1);box-shadow:0 8px 20px -10px #cba96990}
+@media (prefers-reduced-motion: no-preference){.bubble{animation:fadeUp .25s ease both}}
