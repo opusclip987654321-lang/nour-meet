@@ -400,6 +400,7 @@ function AdminNav(){
     {manages&&<NavLink to="/admin/events/new">Créer une soirée</NavLink>}
     {manages&&<NavLink to="/admin/events">Mes événements</NavLink>}
     {manages&&<NavLink to="/admin/attendees">Participants</NavLink>}
+    {manages&&<NavLink to="/admin/finance">Finances</NavLink>}
     {manages&&<NavLink to="/admin/staff">Personnel d’accueil</NavLink>}
     <NavLink to="/admin/scanner">Scanner les billets</NavLink>
     {role==="ADMIN"&&<NavLink to="/admin/restaurants">Demandes restaurateurs</NavLink>}
@@ -420,6 +421,8 @@ function AdminCreateEvent() {
   const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].name,description:"",startsAt:"",endsAt:"",district:"",address:"",zone:EVENT_ZONES[0],capacity:20,priceCents:3000,includesDrink:false,includesStarter:false,includesMain:false,includesDessert:false,perksDescription:""});
   const [submitting,setSubmitting]=useState(false);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const [commissionRate,setCommissionRate]=useState<number|null>(null);
+  useEffect(()=>{if(user?.role==="ORGANIZER")api<any>("/restaurants/me").then(r=>setCommissionRate(r.commissionRate)).catch(()=>{})},[user?.role]);
   const slugify=(t:string)=>t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
 
   const submit=async(e:FormEvent)=>{
@@ -432,7 +435,9 @@ function AdminCreateEvent() {
     finally{setSubmitting(false)}
   };
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ADMINISTRATION</span><h1>Créer une soirée</h1><p className="fine left">{user?.role==="ORGANIZER"?"Votre soirée démarre en brouillon : ajoutez ensuite vos photos puis soumettez-la à validation.":"Vous publiez directement vos propres événements."}</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ADMINISTRATION</span><h1>Créer une soirée</h1><p className="fine left">{user?.role==="ORGANIZER"?"Votre soirée démarre en brouillon : ajoutez ensuite vos photos puis soumettez-la à validation.":"Vous publiez directement vos propres événements."}</p>
+    {user?.role==="ORGANIZER"&&<Notice kind="info">Nour prélève {commissionRate??30}% du prix des billets. Vous recevez {100-(commissionRate??30)}% des ventes éligibles après l’événement. Les frais Stripe sont pris en charge par Nour.</Notice>}
+    {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <form className="panel form-grid" onSubmit={submit}>
       <label>Titre<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value,slug:form.slug?form.slug:slugify(e.target.value)})}/></label>
       <label>Identifiant (slug)<input required pattern="[a-z0-9-]+" value={form.slug} onChange={e=>setForm({...form,slug:e.target.value})}/></label>
@@ -636,6 +641,8 @@ function AdminRestaurants() {
   const [actingOn,setActingOn]=useState<string|null>(null);
   const [reasonFor,setReasonFor]=useState<string|null>(null);
   const [reason,setReason]=useState("");
+  const [rateFor,setRateFor]=useState<string|null>(null);
+  const [rate,setRate]=useState(30);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const load=()=>api<any[]>(`/admin/restaurants?status=${filter}`).then(setItems);
   useEffect(()=>{load()},[filter]);
@@ -646,13 +653,50 @@ function AdminRestaurants() {
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setActingOn(null)}
   };
+  const saveRate=async(id:string)=>{
+    setActingOn(id);setNotice(null);
+    try{await api(`/admin/restaurants/${id}/commission-rate`,{method:"POST",body:JSON.stringify({commissionRate:rate})});setNotice({kind:"success",text:"Taux de commission mis à jour."});setRateFor(null);await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setActingOn(null)}
+  };
 
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Demandes restaurateurs</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="filters"><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="PENDING">En attente</option><option value="APPROVED">Approuvés</option><option value="REJECTED">Refusés</option><option value="SUSPENDED">Suspendus</option></select></div>
-    {items.length===0?<div className="empty"><span>◇</span><h2>Aucune demande</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request"><div><h3>{r.name}</h3><p>{r.owner.displayName} · {r.owner.phone}</p><p className="fine left">Responsable : {r.managerName??"—"} · SIRET {r.siret??"—"}</p>{r.district&&<p className="fine left">{r.address}, {r.district}</p>}{r.description&&<p className="fine left">{r.description}</p>}<small>{RESTAURANT_STATUS_LABEL[r.status]}</small></div>{r.status==="PENDING"&&<div className="decision-buttons">
+    {items.length===0?<div className="empty"><span>◇</span><h2>Aucune demande</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request"><div><h3>{r.name}</h3><p>{r.owner.displayName} · {r.owner.phone}</p><p className="fine left">Responsable : {r.managerName??"—"} · SIRET {r.siret??"—"}</p>{r.district&&<p className="fine left">{r.address}, {r.district}</p>}{r.description&&<p className="fine left">{r.description}</p>}<small>{RESTAURANT_STATUS_LABEL[r.status]}</small>{r.status==="APPROVED"&&(rateFor===r.id?<div className="time-row"><input type="number" min={0} max={100} value={rate} onChange={e=>setRate(Number(e.target.value))}/><button className="button small" disabled={actingOn===r.id} onClick={()=>saveRate(r.id)}>Enregistrer</button></div>:<p className="fine left">Commission Nour : {r.commissionRate}% <button type="button" className="link-button" onClick={()=>{setRate(r.commissionRate);setRateFor(r.id)}}>modifier</button></p>)}</div>{r.status==="PENDING"&&<div className="decision-buttons">
       <button className="button" disabled={actingOn===r.id} onClick={()=>decide(r.id,true)}>Accepter</button>
       {reasonFor===r.id?<div className="reject-note"><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motif (optionnel)"/><button className="button danger" disabled={actingOn===r.id} onClick={()=>decide(r.id,false,reason)}>Confirmer le refus</button></div>:<button className="button danger" onClick={()=>setReasonFor(r.id)}>Refuser</button>}
     </div>}</article>)}</div>}
+  </div></section></Layout>;
+}
+
+function AdminFinance() {
+  const {user}=useAuth();
+  const [entries,setEntries]=useState<any[]>([]);
+  const [summary,setSummary]=useState<any>(null);
+  const [busy,setBusy]=useState<string|null>(null);
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const load=()=>Promise.all([api<any[]>("/admin/finance/ledger"),api<any>("/admin/finance/summary")]).then(([l,s])=>{setEntries(l);setSummary(s)});
+  useEffect(()=>{load()},[]);
+
+  const markPaid=async(id:string)=>{
+    setBusy(id);setNotice(null);
+    try{await api(`/admin/finance/ledger/${id}/mark-paid`,{method:"POST",body:JSON.stringify({})});setNotice({kind:"success",text:"Marqué comme reversé."});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">{user?.role==="ADMIN"?"SUPER-ADMINISTRATION":"ESPACE RESTAURATEUR"}</span><h1>Finances</h1><p className="fine left">Aucun virement n’est jamais déclenché automatiquement par la plateforme : « Marquer comme reversé » n’est qu’un registre, à cocher après un virement fait vous-même.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    {summary&&<div className="stat-grid">
+      <Stat label="Encaissé" value={money(summary.grossCents)}/>
+      <Stat label="Commission Nour" value={money(summary.commissionCents)}/>
+      <Stat label="Dû au(x) restaurant(s)" value={money(summary.restaurantDueCents)}/>
+      <Stat label="Déjà reversé" value={money(summary.paidOutCents)}/>
+      <Stat label="Remboursé" value={money(summary.refundedCents)}/>
+    </div>}
+    {entries.length===0?<div className="empty"><span>◇</span><h2>Aucune vente pour le moment</h2></div>:<div className="panel table">
+      <div className="table-row head"><span>Événement</span><span>Brut</span><span>Commission</span><span>Dû restaurant</span><span>Statut</span></div>
+      {entries.map(e=><div key={e.id} className="table-row"><span><b>{e.event.title}</b>{user?.role==="ADMIN"&&<small>{e.restaurant.name}</small>}</span><span>{money(e.grossAmountCents)}</span><span>{money(e.commissionAmountCents)} ({e.commissionRate}%)</span><span>{money(e.restaurantDueCents)}{e.refundedAmountCents>0&&<small className="fine"> · remboursé</small>}</span><span>{e.paidOutAt?<small className="fine">Reversé le {new Date(e.paidOutAt).toLocaleDateString("fr-FR")}</small>:user?.role==="ADMIN"?<button className="button small" disabled={busy===e.id} onClick={()=>markPaid(e.id)}>Marquer comme reversé</button>:<small className="fine">{e.readyToPayOut?"Prêt à reverser":"En attente"}</small>}</span></div>)}
+    </div>}
   </div></section></Layout>;
 }
 
@@ -713,18 +757,30 @@ function AdminAttendees() {
   const [eventId,setEventId]=useState("");
   const [reservations,setReservations]=useState<any[]>([]);
   const [loading,setLoading]=useState(false);
+  const [requestingFor,setRequestingFor]=useState<string|null>(null);
+  const [reason,setReason]=useState("");
+  const [busy,setBusy]=useState<string|null>(null);
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
 
   useEffect(()=>{api<any[]>("/admin/events").then(evts=>{setEvents(evts);if(evts[0])setEventId(evts[0].id)})},[]);
-  useEffect(()=>{
+  const load=()=>{
     if(!eventId)return;
     setLoading(true);
     api<any[]>(`/admin/events/${eventId}/reservations`).then(setReservations).catch(()=>setReservations([])).finally(()=>setLoading(false));
-  },[eventId]);
+  };
+  useEffect(()=>{load()},[eventId]);
+
+  const requestRefund=async(paymentId:string)=>{
+    setBusy(paymentId);setNotice(null);
+    try{await api(`/admin/payments/${paymentId}/refund-request`,{method:"POST",body:JSON.stringify({reason})});setNotice({kind:"success",text:"Demande envoyée au super-admin."});setRequestingFor(null);setReason("");await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
 
   const STATUS_LABEL:Record<string,string>={PENDING:"En attente",SUCCEEDED:"Payé",FAILED:"Échoué",REFUNDED:"Remboursé"};
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ADMINISTRATION</span><h1>Participants</h1><p className="fine">Informations nécessaires à l’organisation de votre événement uniquement.</p>
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ADMINISTRATION</span><h1>Participants</h1><p className="fine">Informations nécessaires à l’organisation de votre événement uniquement.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="filters"><select value={eventId} onChange={e=>setEventId(e.target.value)}>{events.map(ev=><option key={ev.id} value={ev.id}>{ev.title}</option>)}</select></div>
-    {loading?<Loading/>:reservations.length===0?<div className="empty"><span>◇</span><h2>Aucun participant pour le moment</h2></div>:<div className="panel table"><div className="table-row head"><span>Participant</span><span>Catégorie</span><span>Paiement</span><span>Billet</span></div>{reservations.map(r=><div key={r.id} className="table-row"><span><b>{r.user.displayName}</b><small>{r.user.phone}</small></span><span>{r.quotaCategory??"—"}</span><span>{r.payment?STATUS_LABEL[r.payment.status]??r.payment.status:"—"}</span><span>{r.ticket?.status==="USED"?"Utilisé":r.ticket?.status==="VALID"?"Valide":r.cancelledAt?"Annulé":"En attente"}</span></div>)}</div>}
+    {loading?<Loading/>:reservations.length===0?<div className="empty"><span>◇</span><h2>Aucun participant pour le moment</h2></div>:<div className="panel table"><div className="table-row head"><span>Participant</span><span>Catégorie</span><span>Paiement</span><span>Billet</span></div>{reservations.map(r=><div key={r.id} className="table-row"><span><b>{r.user.displayName}</b><small>{r.user.phone}</small></span><span>{r.quotaCategory??"—"}</span><span>{r.payment?STATUS_LABEL[r.payment.status]??r.payment.status:"—"}{r.payment?.status==="SUCCEEDED"&&!r.payment.refundRequestedAt&&(requestingFor===r.payment.id?<div className="reject-note"><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motif du remboursement"/><button className="button small danger" disabled={busy===r.payment.id||!reason} onClick={()=>requestRefund(r.payment.id)}>Envoyer la demande</button></div>:<button type="button" className="button small secondary" onClick={()=>setRequestingFor(r.payment.id)}>Demander un remboursement</button>)}{r.payment?.refundRequestedAt&&<small className="fine">Remboursement demandé</small>}</span><span>{r.ticket?.status==="USED"?"Utilisé":r.ticket?.status==="VALID"?"Valide":r.cancelledAt?"Annulé":"En attente"}</span></div>)}</div>}
   </div></section></Layout>;
 }
 
@@ -800,4 +856,4 @@ function Scanner() {
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ACCUEIL</span><h1>Scanner un billet</h1><div className="scanner-layout"><form className="scanner panel" onSubmit={scan}><div className="scan-frame"><i/><span>QR</span></div><label>Code du billet<input value={code} onChange={e=>setCode(e.target.value)}/></label><button className="button full">Vérifier et valider l’entrée</button></form><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b>✓</b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b>×</b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Scannez ou saisissez le code.</p></>}</aside></div></div></section></Layout>;
 }
 
-export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}
+export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}

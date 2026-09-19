@@ -490,6 +490,24 @@ await app.register(async (webhooks) => {
           if (outcome === "CONFIRMED") {
             await notify(reservation.userId, "Paiement confirmé", `Votre billet pour ${reservation.event.title} est disponible.`);
             await audit(reservation.userId, "PAYMENT_SUCCEEDED", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });
+            // Comptabilité 30/70 : uniquement pour les événements qu'un restaurant organise
+            // commercialement (jamais pour un événement Nour où ce restaurant n'est que le lieu).
+            // Le taux et les frais Stripe réels sont figés au moment de la vente.
+            if (reservation.event.controllerRestaurantId) {
+              const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id: reservation.event.controllerRestaurantId } });
+              const grossAmountCents = reservation.payment!.amountCents;
+              const commissionRate = restaurant.commissionRate;
+              const commissionAmountCents = Math.round((grossAmountCents * commissionRate) / 100);
+              const restaurantDueCents = grossAmountCents - commissionAmountCents;
+              let stripeFeeCents: number | null = null;
+              try {
+                const full = await stripe.paymentIntents.retrieve(intent.id, { expand: ["latest_charge.balance_transaction"] });
+                const charge = full.latest_charge as Stripe.Charge | null;
+                const balanceTransaction = charge?.balance_transaction as Stripe.BalanceTransaction | null;
+                if (balanceTransaction && typeof balanceTransaction === "object") stripeFeeCents = balanceTransaction.fee;
+              } catch (err) { app.log.warn({ err }, "Impossible de récupérer les frais Stripe réels pour cette vente"); }
+              await prisma.ledgerEntry.create({ data: { paymentId: reservation.payment!.id, eventId: reservation.eventId, restaurantId: restaurant.id, grossAmountCents, commissionRate, commissionAmountCents, restaurantDueCents, stripeFeeCents } });
+            }
           } else if (outcome === "LATE_AFTER_RELEASE") {
             await notify(reservation.userId, "Paiement reçu après expiration", "Votre place n’était plus disponible au moment où votre paiement a été confirmé. Le remboursement sera traité manuellement par notre équipe.");
             const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
@@ -805,14 +823,96 @@ app.post("/admin/events/:id/cancel", { preHandler: roles(UserRole.ADMIN, UserRol
 app.post("/admin/payments/:id/refund", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   if (!stripe) return reply.code(503).send({ error: "Stripe n’est pas configuré sur ce serveur" });
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const payment = await prisma.payment.findUniqueOrThrow({ where: { id }, include: { reservation: { include: { user: true, event: true } } } });
+  const payment = await prisma.payment.findUniqueOrThrow({ where: { id }, include: { reservation: { include: { user: true, event: true } }, ledgerEntry: true } });
   if (payment.status !== PaymentStatus.SUCCEEDED) return reply.code(409).send({ error: "Seul un paiement réussi peut être remboursé" });
   if (!payment.providerRef) return reply.code(409).send({ error: "Aucune référence de paiement Stripe associée" });
   await stripe.refunds.create({ payment_intent: payment.providerRef });
   await prisma.payment.update({ where: { id }, data: { status: PaymentStatus.REFUNDED, refundedAt: new Date() } });
+  // La somme due au restaurant n'est jamais récupérée automatiquement si elle a déjà été marquée
+  // reversée : ce cas reste à traiter manuellement (voir cahier des charges §10), simplement signalé
+  // clairement ici plutôt que d'inventer une procédure de recouvrement automatique.
+  let alreadyPaidOutWarning = false;
+  if (payment.ledgerEntry) {
+    await prisma.ledgerEntry.update({ where: { id: payment.ledgerEntry.id }, data: { refundedAmountCents: payment.ledgerEntry.grossAmountCents } });
+    alreadyPaidOutWarning = !!payment.ledgerEntry.paidOutAt;
+    if (alreadyPaidOutWarning) {
+      const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+      await Promise.all(admins.map(a => notify(a.id, "Remboursement après reversement déjà marqué", `Le paiement remboursé pour « ${payment.reservation.event.title} » avait déjà été marqué comme reversé au restaurant : à régulariser manuellement.`)));
+    }
+  }
   await notify(payment.reservation.userId, "Remboursement effectué", `Votre paiement pour « ${payment.reservation.event.title} » a été remboursé.`);
-  await audit(currentId(request), "REFUND_PAYMENT", "Payment", id);
-  return { refunded: true };
+  await audit(currentId(request), "REFUND_PAYMENT", "Payment", id, { alreadyPaidOutWarning });
+  return { refunded: true, alreadyPaidOutWarning };
+});
+// Le restaurateur peut demander un remboursement AVEC MOTIF, jamais l'exécuter lui-même : cette
+// route ne fait qu'enregistrer la demande et notifier le super-admin, qui décide via l'endpoint
+// ci-dessus.
+app.post("/admin/payments/:id/refund-request", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { reason } = z.object({ reason: z.string().min(3).max(1000) }).parse(request.body);
+  const payment = await prisma.payment.findUniqueOrThrow({ where: { id }, include: { reservation: { include: { event: true } } } });
+  const token = request.user as TokenUser;
+  if (token.role === UserRole.ORGANIZER) {
+    const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: token.sub } });
+    if (payment.reservation.event.controllerRestaurantId !== restaurant.id) throw httpError(403, "Ce paiement appartient à un autre restaurateur");
+  }
+  if (payment.status !== PaymentStatus.SUCCEEDED) return reply.code(409).send({ error: "Seul un paiement réussi peut faire l’objet d’une demande de remboursement" });
+  const updated = await prisma.payment.update({ where: { id }, data: { refundRequestedAt: new Date(), refundRequestedBy: currentId(request), refundRequestReason: reason } });
+  const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+  await Promise.all(admins.map(a => notify(a.id, "Demande de remboursement", `Une demande de remboursement a été faite pour « ${payment.reservation.event.title} » : ${reason}`)));
+  await audit(currentId(request), "REQUEST_REFUND", "Payment", id, { reason });
+  return updated;
+});
+// Grand livre 30/70 : le restaurateur ne voit que ses propres ventes, le super-admin voit tout.
+// "Prêt à reverser" n'est qu'une indication (7 jours après la fin de l'événement, pour laisser le
+// temps à une éventuelle contestation) — jamais un blocage : "Marquer comme reversé" reste possible
+// à tout moment, à la seule discrétion du super-admin.
+const PAYOUT_COOLDOWN_MS = 7 * 24 * 60 * 60_000;
+app.get("/admin/finance/ledger", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const token = request.user as TokenUser;
+  const restaurant = await ownRestaurant(token);
+  const entries = await prisma.ledgerEntry.findMany({
+    where: restaurant ? { restaurantId: restaurant.id } : undefined,
+    include: { event: true, restaurant: true, payment: { include: { reservation: { include: { user: true } } } } },
+    orderBy: { createdAt: "desc" }
+  });
+  const now = new Date();
+  return entries.map(e => ({ ...e, readyToPayOut: !e.paidOutAt && now.getTime() - e.event.endsAt.getTime() >= PAYOUT_COOLDOWN_MS }));
+});
+app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const token = request.user as TokenUser;
+  const restaurant = await ownRestaurant(token);
+  const where = restaurant ? { restaurantId: restaurant.id } : undefined;
+  const [gross, commission, due, paidOut, refunded] = await Promise.all([
+    prisma.ledgerEntry.aggregate({ where, _sum: { grossAmountCents: true } }),
+    prisma.ledgerEntry.aggregate({ where, _sum: { commissionAmountCents: true } }),
+    prisma.ledgerEntry.aggregate({ where, _sum: { restaurantDueCents: true } }),
+    prisma.ledgerEntry.aggregate({ where: { ...where, paidOutAt: { not: null } }, _sum: { restaurantDueCents: true } }),
+    prisma.ledgerEntry.aggregate({ where, _sum: { refundedAmountCents: true } })
+  ]);
+  return {
+    grossCents: gross._sum.grossAmountCents ?? 0,
+    commissionCents: commission._sum.commissionAmountCents ?? 0,
+    restaurantDueCents: due._sum.restaurantDueCents ?? 0,
+    paidOutCents: paidOut._sum.restaurantDueCents ?? 0,
+    refundedCents: refunded._sum.refundedAmountCents ?? 0
+  };
+});
+app.post("/admin/finance/ledger/:id/mark-paid", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { note } = z.object({ note: z.string().max(500).optional() }).parse(request.body);
+  const entry = await prisma.ledgerEntry.findUniqueOrThrow({ where: { id } });
+  if (entry.paidOutAt) return reply.code(409).send({ error: "Déjà marqué comme reversé" });
+  const updated = await prisma.ledgerEntry.update({ where: { id }, data: { paidOutAt: new Date(), paidOutBy: currentId(request), payoutNote: note } });
+  await audit(currentId(request), "MARK_LEDGER_PAID_OUT", "LedgerEntry", id, { note });
+  return updated;
+});
+app.post("/admin/restaurants/:id/commission-rate", { preHandler: roles(UserRole.ADMIN) }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { commissionRate } = z.object({ commissionRate: z.number().int().min(0).max(100) }).parse(request.body);
+  const updated = await prisma.restaurant.update({ where: { id }, data: { commissionRate } });
+  await audit(currentId(request), "SET_COMMISSION_RATE", "Restaurant", id, { commissionRate });
+  return updated;
 });
 app.post("/admin/waitlist/:id/promote", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -1048,6 +1148,26 @@ const releaseExpiredReservations = async () => {
   await prisma.alternativeOffer.updateMany({ where: { status: AlternativeOfferStatus.PENDING, respondsBy: { lt: new Date() } }, data: { status: AlternativeOfferStatus.EXPIRED } });
 };
 setInterval(() => { releaseExpiredReservations().catch(err => app.log.error(err)); }, 60_000);
+
+// Le frais Stripe réel n'est pas toujours disponible au moment exact du webhook de paiement réussi
+// (la transaction de solde peut être calculée quelques secondes après) : on le complète ici en
+// deuxième passage, sans jamais bloquer la création de la ligne comptable elle-même.
+const backfillStripeFees = async () => {
+  if (!stripe) return;
+  const pending = await prisma.ledgerEntry.findMany({ where: { stripeFeeCents: null }, include: { payment: true }, take: 20 });
+  for (const entry of pending) {
+    if (!entry.payment.providerRef) continue;
+    try {
+      const full = await stripe.paymentIntents.retrieve(entry.payment.providerRef, { expand: ["latest_charge.balance_transaction"] });
+      const charge = full.latest_charge as Stripe.Charge | null;
+      const balanceTransaction = charge?.balance_transaction as Stripe.BalanceTransaction | null;
+      if (balanceTransaction && typeof balanceTransaction === "object") {
+        await prisma.ledgerEntry.update({ where: { id: entry.id }, data: { stripeFeeCents: balanceTransaction.fee } });
+      }
+    } catch (err) { app.log.warn({ err }, "Nouvelle tentative de récupération des frais Stripe échouée"); }
+  }
+};
+setInterval(() => { backfillStripeFees().catch(err => app.log.error(err)); }, 60_000);
 
 const close = async () => { await prisma.$disconnect(); await app.close(); };
 process.on("SIGINT", close); process.on("SIGTERM", close);

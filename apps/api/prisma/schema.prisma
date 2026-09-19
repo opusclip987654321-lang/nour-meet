@@ -139,7 +139,11 @@ model Restaurant {
   district         String?
   address          String?
   phone            String?
-  commissionRate   Int              @default(15)
+  // Part de Nour en % sur les ventes des événements que ce restaurant organise commercialement
+  // (30 par défaut = règle 30/70). Modifiable uniquement par le super-admin, jamais par le
+  // restaurateur. Sans effet sur les événements organisés par Nour où ce restaurant n'est que le
+  // lieu d'accueil (accord commercial distinct, non automatique).
+  commissionRate   Int              @default(30)
   status           RestaurantStatus @default(PENDING)
   submittedAt      DateTime         @default(now())
   verifiedAt       DateTime?
@@ -147,6 +151,7 @@ model Restaurant {
   rejectionReason  String?
   controlledEvents Event[]          @relation("Controller")
   hostedEvents     Event[]          @relation("Venue")
+  ledgerEntries    LedgerEntry[]
   @@map("Organizer")
 }
 
@@ -191,6 +196,7 @@ model Event {
   quotas                  EventQuota[]
   priceTiers              PriceTier[]
   photos                  EventPhoto[]
+  ledgerEntries           LedgerEntry[]
   originalOffers          AlternativeOffer[] @relation("OriginalEvent")
   alternativeOffers       AlternativeOffer[] @relation("AlternativeEvent")
   createdAt               DateTime    @default(now())
@@ -296,7 +302,39 @@ model Payment {
   providerRef   String?
   paidAt        DateTime?
   refundedAt    DateTime?
+  // Le restaurateur peut DEMANDER un remboursement avec un motif ; seul le super-admin peut
+  // l'exécuter (POST /admin/payments/:id/refund). Une demande n'exécute jamais rien seule.
+  refundRequestedAt     DateTime?
+  refundRequestedBy     String?
+  refundRequestReason   String?
+  ledgerEntry   LedgerEntry?
   createdAt     DateTime      @default(now())
+}
+
+// Comptabilité 30/70 : une ligne par vente réussie sur un événement organisé commercialement par un
+// restaurant (jamais pour les événements organisés par Nour où le restaurant n'est que le lieu).
+// Le taux et les montants sont figés au moment de la vente (snapshot), indépendants d'un changement
+// ultérieur du taux du restaurant. Aucun virement réel n'est jamais déclenché par la plateforme :
+// "Marquer comme reversé" n'est qu'un registre manuel que seul le super-admin peut cocher, à
+// n'importe quel moment de son choix — jamais automatiquement, jamais par le restaurateur.
+model LedgerEntry {
+  id                    String     @id @default(cuid())
+  paymentId             String     @unique
+  payment               Payment    @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  eventId               String
+  event                 Event      @relation(fields: [eventId], references: [id])
+  restaurantId          String
+  restaurant            Restaurant @relation(fields: [restaurantId], references: [id])
+  grossAmountCents      Int
+  commissionRate        Int
+  commissionAmountCents Int
+  restaurantDueCents    Int
+  stripeFeeCents        Int?
+  refundedAmountCents   Int        @default(0)
+  paidOutAt             DateTime?
+  paidOutBy             String?
+  payoutNote            String?
+  createdAt             DateTime   @default(now())
 }
 
 model Ticket {
