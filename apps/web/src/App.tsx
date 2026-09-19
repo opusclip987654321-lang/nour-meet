@@ -148,7 +148,7 @@ function ApplicationStatusPanel({ application, event, onPaid }: { application: a
   if (application.status === "CANCELLED") return <Notice kind="error">Cette candidature a été annulée.</Notice>;
   if (application.status === "CONFIRMED") return <Notice kind="success">Votre place est confirmée. Retrouvez votre billet dans votre espace personnel.</Notice>;
   if (application.status === "PAYMENT_PENDING" && application.reservation) return <div className="payment-block">
-    <Notice kind="success">Candidature acceptée ! Finalisez votre place avant le {dateTime(application.reservation.expiresAt)}.</Notice>
+    <Notice kind="success">Inscription confirmée ! Vous avez 24 heures pour régler votre billet, avant le {dateTime(application.reservation.expiresAt)}.</Notice>
     <button className="button full" onClick={() => setShowPayment(true)}>Payer par carte · {money(event.priceCents)}</button>
     {showPayment && <PaymentModal reservationId={application.reservation.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }}/>}
   </div>;
@@ -193,7 +193,7 @@ function EventDetail() {
       const result=await api<any>(`/events/${event.id}/apply`,{method:"POST"});
       setApplication(result.application);
       if(result.waitlisted){setWaitlistEntry(result.waitlistEntry);setNotice({kind:"info",text:"Cet événement est complet pour votre catégorie : vous avez été placé(e) sur liste d’attente."})}
-      else setNotice({kind:"success",text:"Inscription confirmée : réglez votre billet avant l’expiration du délai."});
+      else setNotice({kind:"success",text:"Inscription confirmée : vous avez 24 heures pour régler votre billet."});
     }
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}

@@ -132,7 +132,7 @@ const offerNextWaitlistEntry = async (eventId: string, category: QuotaCategory |
   if (!result.ok) return;
   await prisma.waitlistEntry.update({ where: { id: entry.id }, data: { offeredAt: new Date(), expiresAt: result.reservation.expiresAt } });
   const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
-  await notify(entry.userId, "Une place s’est libérée !", `Une place pour « ${event.title} » vous est proposée. Vous avez jusqu’au ${result.reservation.expiresAt.toLocaleString("fr-FR")} pour régler votre billet, sans quoi elle sera proposée au participant suivant.`);
+  await notify(entry.userId, "Une place s’est libérée !", `Une place pour « ${event.title} » vous est proposée. Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet, sans quoi elle sera proposée au participant suivant.`);
 };
 
 // Propose un événement alternatif (même catégorie + même zone géographique + même organisateur)
@@ -169,6 +169,10 @@ const resolvePriceCents = (event: { priceCents: number; priceTiers?: { category:
   const tier = quotaCategory ? event.priceTiers?.find(t => t.category === quotaCategory) : undefined;
   return tier ? tier.amountCents : event.priceCents;
 };
+// Le délai de paiement est fixé à 24h pour tous les événements (choix explicite du super-admin :
+// un participant est déjà validé au téléphone avant de pouvoir s'inscrire, 24h suffit et évite de
+// bloquer une place trop longtemps). La date précise est toujours indiquée en plus, sans calcul à faire.
+const formatPaymentDeadline = (expiresAt: Date) => `24 heures (jusqu’au ${expiresAt.toLocaleString("fr-FR")})`;
 const publicEvent = (event: any, revealAddress = false) => ({
   id: event.id, slug: event.slug, title: event.title, category: event.category, description: event.description,
   startsAt: event.startsAt, endsAt: event.endsAt, district: event.district, address: revealAddress ? event.address : null,
@@ -277,7 +281,7 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   await audit(userId, "CREATE_APPLICATION", "Application", application.id);
   const result = await claimReservation(id, application);
   if (result.ok) {
-    await notify(userId, "Inscription confirmée", `Vous avez jusqu’au ${result.reservation.expiresAt.toLocaleString("fr-FR")} pour régler votre billet de ${(resolvePriceCents(event, quotaCategory) / 100).toFixed(2)} €.`);
+    await notify(userId, "Inscription confirmée", `Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet de ${(resolvePriceCents(event, quotaCategory) / 100).toFixed(2)} €.`);
     return reply.code(201).send({ application: { ...application, status: ApplicationStatus.PAYMENT_PENDING }, reservation: result.reservation });
   }
   if (result.reason === "NO_CATEGORY") return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement" });
@@ -445,18 +449,28 @@ await app.register(async (webhooks) => {
       const reservation = reservationId ? await prisma.reservation.findUnique({ where: { id: reservationId }, include: { payment: true, event: true } }) : null;
       if (reservation && reservation.payment?.providerRef === intent.id && reservation.payment.status !== PaymentStatus.SUCCEEDED) {
         if (event.type === "payment_intent.succeeded") {
-          const confirmed = await prisma.$transaction(async (tx) => {
-            const updated = await tx.payment.updateMany({ where: { reservationId, status: { not: PaymentStatus.SUCCEEDED } }, data: { status: PaymentStatus.SUCCEEDED, paidAt: new Date() } });
-            if (updated.count !== 1) return false;
+          // Course entre le paiement et l'expiration de la réservation : si la place a déjà été
+          // libérée (et potentiellement réattribuée à quelqu'un d'autre) avant que ce paiement
+          // n'arrive, on n'émet JAMAIS de billet pour éviter toute survente. L'argent reste capturé
+          // (paiement marqué réussi) mais le remboursement reste manuel, comme pour toute annulation.
+          const outcome = await prisma.$transaction(async (tx) => {
+            const paidUpdate = await tx.payment.updateMany({ where: { reservationId, status: { not: PaymentStatus.SUCCEEDED } }, data: { status: PaymentStatus.SUCCEEDED, paidAt: new Date() } });
+            if (paidUpdate.count !== 1) return "ALREADY_HANDLED" as const;
+            const reservationUpdate = await tx.reservation.updateMany({ where: { id: reservationId, cancelledAt: null }, data: { confirmedAt: new Date() } });
+            if (reservationUpdate.count !== 1) return "LATE_AFTER_RELEASE" as const;
             const ticketCode = `NOUR-${randomUUID().toUpperCase()}`;
             await tx.ticket.upsert({ where: { reservationId }, update: {}, create: { reservationId, code: ticketCode } });
-            await tx.reservation.update({ where: { id: reservationId }, data: { confirmedAt: new Date() } });
             await tx.application.update({ where: { id: reservation.applicationId }, data: { status: ApplicationStatus.CONFIRMED } });
-            return true;
+            return "CONFIRMED" as const;
           });
-          if (confirmed) {
+          if (outcome === "CONFIRMED") {
             await notify(reservation.userId, "Paiement confirmé", `Votre billet pour ${reservation.event.title} est disponible.`);
             await audit(reservation.userId, "PAYMENT_SUCCEEDED", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });
+          } else if (outcome === "LATE_AFTER_RELEASE") {
+            await notify(reservation.userId, "Paiement reçu après expiration", "Votre place n’était plus disponible au moment où votre paiement a été confirmé. Le remboursement sera traité manuellement par notre équipe.");
+            const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+            await Promise.all(admins.map(a => notify(a.id, "Paiement tardif après libération de place", `Un paiement a été confirmé pour « ${reservation.event.title} » après l’expiration de la réservation : remboursement à traiter manuellement.`)));
+            await audit(reservation.userId, "PAYMENT_SUCCEEDED_AFTER_RELEASE", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });
           }
         } else {
           await prisma.payment.updateMany({ where: { reservationId, status: { not: PaymentStatus.SUCCEEDED } }, data: { status: PaymentStatus.FAILED } });
@@ -558,7 +572,7 @@ app.post("/alternative-offers/:id/respond", { preHandler: auth }, async (request
   const result = await claimReservation(offer.alternativeEventId, application);
   if (!result.ok) return reply.code(409).send({ error: "Cette place n’est plus disponible." });
   const updated = await prisma.alternativeOffer.update({ where: { id }, data: { status: AlternativeOfferStatus.ACCEPTED, respondedAt: new Date(), reservationId: result.reservation.id } });
-  await notify(userId, "Place réservée", `Vous avez jusqu’au ${result.reservation.expiresAt.toLocaleString("fr-FR")} pour régler votre billet pour « ${offer.alternativeEvent.title} ».`);
+  await notify(userId, "Place réservée", `Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet pour « ${offer.alternativeEvent.title} ».`);
   await audit(userId, "ACCEPT_ALTERNATIVE_OFFER", "AlternativeOffer", id);
   return updated;
 });
@@ -782,7 +796,7 @@ app.post("/admin/waitlist/:id/promote", { preHandler: roles(UserRole.ADMIN) }, a
   const result = await claimReservation(entry.eventId, entry.application);
   if (!result.ok) return reply.code(409).send({ error: result.reason === "FULL" ? "Plus aucune place disponible pour cette catégorie" : "Catégorie de quota manquante pour ce participant" });
   await prisma.waitlistEntry.update({ where: { id }, data: { offeredAt: new Date(), expiresAt: result.reservation.expiresAt } });
-  await notify(entry.userId, "Une place vous a été attribuée", `Vous avez jusqu’au ${result.reservation.expiresAt.toLocaleString("fr-FR")} pour régler votre billet.`);
+  await notify(entry.userId, "Une place vous a été attribuée", `Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet.`);
   await audit(currentId(request), "ADMIN_PROMOTE_WAITLIST", "WaitlistEntry", id);
   return result.reservation;
 });
