@@ -82,6 +82,15 @@ enum AlternativeOfferStatus {
   EXPIRED
 }
 
+// Détermine le parcours d'inscription d'un événement de façon explicite et centralisée (voir
+// eventRequiresScreening dans packages/shared), jamais par comparaison de la catégorie affichée
+// (texte libre, configurable) : SCREENING exige le profil validé et un questionnaire privé avant
+// paiement ; DIRECT autorise le paiement immédiat après un questionnaire non bloquant.
+enum EventFlow {
+  SCREENING
+  DIRECT
+}
+
 model User {
   id               String           @id @default(cuid())
   phone            String           @unique
@@ -164,6 +173,7 @@ model Event {
   venueRestaurant         Restaurant? @relation("Venue", fields: [venueRestaurantId], references: [id])
   title                   String
   category                String
+  flow                    EventFlow   @default(DIRECT)
   imageUrl                String?
   description             String
   startsAt                DateTime
@@ -253,9 +263,44 @@ model Application {
   call        ScreeningCall?
   reservation Reservation?
   waitlistEntry WaitlistEntry?
+  screeningAnswer   ScreeningAnswer?
+  networkingAnswer  NetworkingAnswer?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
   @@unique([eventId, userId])
+}
+
+// Questionnaire speed dating (7 questions, §4.1 du cahier des charges) : privé, jamais accessible
+// à un restaurateur ni exposé sur une route publique. Sert à préparer l'entretien, décider de
+// l'acceptation et organiser les profils — jamais à bloquer le paiement une fois le profil validé.
+model ScreeningAnswer {
+  id                  String      @id @default(cuid())
+  applicationId       String      @unique
+  application         Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  motivation          String
+  relationshipGoal    String
+  personality         String
+  desiredQualities    String
+  ageRangeSought       String
+  valuesAndLifestyle  String
+  noteForOrganizer    String?
+  createdAt           DateTime    @default(now())
+}
+
+// Questionnaire networking (7 questions, §4.2) : ne bloque jamais l'achat, sert uniquement à mieux
+// organiser la soirée et à informer l'organisateur (jamais les réponses privées d'un speed dating).
+model NetworkingAnswer {
+  id               String      @id @default(cuid())
+  applicationId    String      @unique
+  application      Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  sector           String
+  currentRole      String
+  experienceLevel  String
+  goal             String
+  soughtProfiles   String
+  contribution     String
+  topics           String
+  createdAt        DateTime    @default(now())
 }
 
 // Agenda central : un créneau sans eventId appartient à l'agenda global des entretiens de
@@ -302,6 +347,11 @@ model Payment {
   providerRef   String?
   paidAt        DateTime?
   refundedAt    DateTime?
+  refundedAmountCents   Int?
+  // Motif renseigné uniquement quand un remboursement est accordé HORS politique (annulation à 24h
+  // ou moins de l'événement, §7) : c'est alors une exception admin, jamais un remboursement de plein
+  // droit ; obligatoire dans ce cas précis, absent pour un remboursement automatique conforme.
+  refundExceptionReason String?
   // Le restaurateur peut DEMANDER un remboursement avec un motif ; seul le super-admin peut
   // l'exécuter (POST /admin/payments/:id/refund). Une demande n'exécute jamais rien seule.
   refundRequestedAt     DateTime?

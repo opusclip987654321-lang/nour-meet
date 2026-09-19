@@ -3,6 +3,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { api, getToken, setToken } from "./src/api";
+import { SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening } from "@nour/shared";
 
 const C={bg:"#0B0B0C",panel:"#171718",line:"#34322E",gold:"#C9A765",cream:"#F6F0E5",muted:"#918C82",green:"#62D89A",red:"#F0747C"};
 type Tab="home"|"events"|"scan"|"messages"|"profile";
@@ -29,9 +30,27 @@ function Home({user,setTab}:{user:any,setTab:(t:Tab)=>void}){
 }
 
 function Events(){
-  const [events,setEvents]=useState<any[]>([]),[selected,setSelected]=useState<any>(null),[message,setMessage]=useState("");useEffect(()=>{api<any[]>("/events").then(setEvents)},[]);
-  const apply=async()=>{try{await api(`/events/${selected.id}/apply`,{method:"POST",body:JSON.stringify({motivation:"Je souhaite participer à cette rencontre dans un cadre respectueux et faire connaissance avec de nouvelles personnes."})});setMessage("Candidature envoyée. Réservez ensuite votre entretien sur le site.")}catch(e){setMessage((e as Error).message)}};
-  if(selected)return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>{setSelected(null);setMessage("")}}><Text style={s.back}>‹ Retour</Text></Pressable><View style={s.detailArt}><Text style={s.eyebrow}>{selected.category.toUpperCase()}</Text><Text style={s.detailTitle}>{selected.title}</Text></View><View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View><Text style={s.sectionTitle}>Rencontrez autrement</Text><Text style={s.paragraph}>{selected.description}</Text>{message?<Notice text={message} error={!message.includes("envoyée")}/>:null}<View style={s.bookingBar}><View><Text style={s.meta}>À partir de</Text><Text style={s.bookingPrice}>{money(selected.priceCents)}</Text></View><GoldButton title="Candidater" onPress={apply}/></View></ScrollView>;
+  const [events,setEvents]=useState<any[]>([]),[selected,setSelected]=useState<any>(null),[message,setMessage]=useState(""),[showForm,setShowForm]=useState(false),[answers,setAnswers]=useState<Record<string,string>>({}),[submitting,setSubmitting]=useState(false);
+  useEffect(()=>{api<any[]>("/events").then(setEvents)},[]);
+  const requiresScreening=selected?eventRequiresScreening(selected):false;
+  const questions=requiresScreening?SCREENING_QUESTIONS:NETWORKING_QUESTIONS;
+  // La candidature ne garantit jamais de place (elle enregistre le questionnaire et autorise
+  // seulement à tenter le paiement) : le paiement par carte se termine depuis le site pour
+  // l'instant, l'application mobile n'intègre pas encore le module de paiement Stripe.
+  const apply=async()=>{
+    setSubmitting(true);
+    try{
+      const body=requiresScreening?{screeningAnswers:answers}:{networkingAnswers:answers};
+      await api(`/events/${selected.id}/apply`,{method:"POST",body:JSON.stringify(body)});
+      setMessage("Candidature envoyée. Finalisez le paiement par carte depuis le site nour-meet dans votre espace personnel.");
+      setShowForm(false);
+    }catch(e){setMessage((e as Error).message)}
+    finally{setSubmitting(false)}
+  };
+  if(selected)return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>{setSelected(null);setMessage("");setShowForm(false);setAnswers({})}}><Text style={s.back}>‹ Retour</Text></Pressable><View style={s.detailArt}><Text style={s.eyebrow}>{selected.category.toUpperCase()}</Text><Text style={s.detailTitle}>{selected.title}</Text></View><View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View><Text style={s.sectionTitle}>Rencontrez autrement</Text><Text style={s.paragraph}>{selected.description}</Text>{message?<Notice text={message} error={!message.includes("envoyée")}/>:null}
+    {showForm?<View>{questions.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={answers[q.key]??""} onChangeText={v=>setAnswers({...answers,[q.key]:v})}/></View>)}<GoldButton title={submitting?"Envoi…":"Envoyer ma candidature"} onPress={apply} disabled={submitting}/></View>
+    :<View style={s.bookingBar}><View><Text style={s.meta}>À partir de</Text><Text style={s.bookingPrice}>{money(selected.priceCents)}</Text></View><GoldButton title={requiresScreening?"Candidater":"S’inscrire"} onPress={()=>setShowForm(true)}/></View>}
+  </ScrollView>;
   return <ScrollView contentContainerStyle={s.content}><ScreenTitle eyebrow="CALENDRIER" title="Événements"/><TextInput style={s.search} placeholder="Rechercher" placeholderTextColor="#777"/>{events.map(e=><EventCard key={e.id} event={e} onPress={()=>setSelected(e)}/>)}</ScrollView>
 }
 

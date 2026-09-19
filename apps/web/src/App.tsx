@@ -3,8 +3,8 @@ import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "
 import jsQR from "jsqr";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
-import { EVENT_CATEGORIES, EVENT_ZONES } from "@nour/shared";
-import type { PublicEvent, SessionUser } from "@nour/shared";
+import { EVENT_CATEGORIES, EVENT_ZONES, SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening } from "@nour/shared";
+import type { PublicEvent, SessionUser, ScreeningAnswers, NetworkingAnswers } from "@nour/shared";
 import { API_URL, api, getToken, setToken } from "./api";
 
 const imgUrl = (src: string) => src.startsWith("http") ? src : `${API_URL}${src}`;
@@ -104,16 +104,19 @@ function PaymentForm({ amountCents, onSuccess, onCancel }: { amountCents: number
   </form>;
 }
 
-function PaymentModal({ reservationId, eventId, amountCents, onClose, onConfirmed }: { reservationId: string; eventId: string; amountCents: number; onClose: () => void; onConfirmed: () => void }) {
+function PaymentModal({ applicationId, eventId, amountCents, onClose, onConfirmed, onWaitlisted }: { applicationId: string; eventId: string; amountCents: number; onClose: () => void; onConfirmed: () => void; onWaitlisted: () => void }) {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [phase, setPhase] = useState<"loading" | "ready" | "confirming" | "success" | "timeout">("loading");
 
   useEffect(() => {
-    api<{ clientSecret: string }>(`/reservations/${reservationId}/payment-intent`, { method: "POST" })
+    // Ne garantit jamais une place avant cet appel précis (§5) : c'est ici, et seulement ici, qu'un
+    // verrou technique court est posé — si la place vient d'être prise entre l'inscription et cet
+    // instant, la personne rejoint automatiquement la liste d'attente plutôt que d'échouer sans suite.
+    api<{ clientSecret: string }>(`/applications/${applicationId}/payment-intent`, { method: "POST" })
       .then(r => { setClientSecret(r.clientSecret); setPhase("ready"); })
-      .catch(err => setError((err as Error).message));
-  }, [reservationId]);
+      .catch((err: any) => { if (err?.waitlisted) { onWaitlisted(); onClose(); } else setError((err as Error).message); });
+  }, [applicationId]);
 
   const handleSuccess = async () => {
     setPhase("confirming");
@@ -143,18 +146,36 @@ function PaymentModal({ reservationId, eventId, amountCents, onClose, onConfirme
   </div>;
 }
 
-function ApplicationStatusPanel({ application, event, onPaid }: { application: any; event: PublicEvent; onPaid: () => void }) {
+function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { application: any; event: PublicEvent; onPaid: () => void; onWaitlisted: () => void }) {
   const [showPayment, setShowPayment] = useState(false);
   if (application.status === "REFUSED") return <Notice kind="error">Votre candidature n’a pas été retenue pour cet événement.</Notice>;
   if (application.status === "CANCELLED") return <Notice kind="error">Cette candidature a été annulée.</Notice>;
   if (application.status === "CONFIRMED") return <Notice kind="success">Votre place est confirmée. Retrouvez votre billet dans votre espace personnel.</Notice>;
-  if (application.status === "PAYMENT_PENDING" && application.reservation) return <div className="payment-block">
-    <Notice kind="success">Inscription confirmée ! Vous avez 24 heures pour régler votre billet, avant le {dateTime(application.reservation.expiresAt)}.</Notice>
+  // La candidature autorise à tenter le paiement, elle ne garantit jamais de place à elle seule
+  // (§5) : le clic sur "Payer" est ce qui pose réellement le verrou, via PaymentModal.
+  if (application.status === "PAYMENT_PENDING") return <div className="payment-block">
+    <Notice kind="success">{application.reservation ? `Votre place est retenue quelques minutes (jusqu’au ${dateTime(application.reservation.expiresAt)}) : finalisez votre paiement.` : "Vous pouvez régler votre billet dès maintenant."}</Notice>
     <button className="button full" onClick={() => setShowPayment(true)}>Payer par carte · {money(event.priceCents)}</button>
-    {showPayment && <PaymentModal reservationId={application.reservation.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }}/>}
+    {showPayment && <PaymentModal applicationId={application.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }} onWaitlisted={onWaitlisted}/>}
   </div>;
   if (application.call) return <div className="call-scheduled"><span className="eyebrow">ENTRETIEN PROGRAMMÉ</span><strong>{dateTime(application.call.startsAt)}</strong><p>L’organisateur vous appellera à cette heure, puis vous serez informé(e) de sa décision.</p></div>;
   return null;
+}
+
+// Questionnaire obligatoire avant toute candidature (§4.1/§4.2) : 7 questions selon le parcours de
+// l'événement, jamais une comparaison de catégorie (voir eventRequiresScreening). Les réponses
+// speed dating sont privées ; les réponses networking ne bloquent jamais l'achat.
+function QuestionnaireForm({ requiresScreening, submitting, onSubmit }: { requiresScreening: boolean; submitting: boolean; onSubmit: (answers: Record<string, string>) => void }) {
+  const questions = requiresScreening ? SCREENING_QUESTIONS : NETWORKING_QUESTIONS;
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const submit = (e: FormEvent) => { e.preventDefault(); onSubmit(answers); };
+  return <form className="questionnaire" onSubmit={submit}>
+    <p className="fine">{requiresScreening ? "Vos réponses sont privées : elles servent uniquement à préparer votre entretien et la décision d’acceptation." : "Vos réponses ne bloquent jamais l’achat : elles aident seulement à mieux organiser la soirée."}</p>
+    {questions.map(q => <label key={q.key}>{q.label}{q.key === "noteForOrganizer" && <span className="fine"> (facultatif)</span>}
+      <textarea required={q.key !== "noteForOrganizer"} value={answers[q.key] ?? ""} onChange={e => setAnswers({ ...answers, [q.key]: e.target.value })}/>
+    </label>)}
+    <button className="button full" disabled={submitting}>{submitting ? "Envoi…" : "Envoyer ma candidature"}</button>
+  </form>;
 }
 
 function EventDetail() {
@@ -166,6 +187,7 @@ function EventDetail() {
   const [waitlistEntry,setWaitlistEntry]=useState<any>(null);
   const [altOffer,setAltOffer]=useState<any>(null);
   const [busy,setBusy]=useState(false);
+  const [showQuestionnaire,setShowQuestionnaire]=useState(false);
 
   useEffect(()=>{api<PublicEvent>(`/events/${id}`).then(setEvent)},[id]);
 
@@ -180,6 +202,7 @@ function EventDetail() {
 
   if(!event)return <Layout><Loading/></Layout>;
 
+  const requiresScreening = eventRequiresScreening(event);
   const profileValidated = !!user?.profile?.validatedAt;
   const myQuota = event.quotas.length>0 ? event.quotas.find(q=>q.category===user?.profile?.quotaCategory) ?? null : null;
   const categoryUnknown = event.quotas.length>0 && !user?.profile?.quotaCategory;
@@ -187,14 +210,17 @@ function EventDetail() {
   const canCancel = application && !["REFUSED","CANCELLED"].includes(application.status);
 
   const refreshApplication=()=>api<any>(`/events/${event.id}/my-application`).then(setApplication).catch(()=>{});
+  const markWaitlisted=()=>{api<any>(`/events/${event.id}/waitlist/me`).then(setWaitlistEntry).catch(()=>{});setNotice({kind:"info",text:"Cet événement est complet pour votre catégorie : vous avez été placé(e) sur liste d’attente."})};
 
-  const apply=async()=>{
+  // La candidature ne garantit jamais de place (§5) : elle enregistre le questionnaire et autorise
+  // seulement à tenter le paiement ensuite (voir ApplicationStatusPanel → PaymentModal).
+  const apply=async(answers:Record<string,string>)=>{
     setBusy(true);setNotice(null);
     try{
-      const result=await api<any>(`/events/${event.id}/apply`,{method:"POST"});
-      setApplication(result.application);
-      if(result.waitlisted){setWaitlistEntry(result.waitlistEntry);setNotice({kind:"info",text:"Cet événement est complet pour votre catégorie : vous avez été placé(e) sur liste d’attente."})}
-      else setNotice({kind:"success",text:"Inscription confirmée : vous avez 24 heures pour régler votre billet."});
+      const body=requiresScreening?{screeningAnswers:answers}:{networkingAnswers:answers};
+      const result=await api<any>(`/events/${event.id}/apply`,{method:"POST",body:JSON.stringify(body)});
+      setApplication(result.application);setShowQuestionnaire(false);
+      setNotice({kind:"success",text:"Candidature envoyée : vous pouvez maintenant régler votre billet."});
     }
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}
@@ -211,10 +237,19 @@ function EventDetail() {
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}
   };
+  // Écran de confirmation clair sur le montant remboursé (§7), jamais un simple "annulé" muet :
+  // le calcul (plus de 24h → intégral, 24h ou moins → aucun remboursement de plein droit) est
+  // renvoyé par le serveur, jamais recalculé ou supposé côté interface.
   const cancelApplication=async()=>{
     if(!application)return;
     setBusy(true);setNotice(null);
-    try{await api(`/me/applications/${application.id}/cancel`,{method:"POST"});setNotice({kind:"success",text:"Votre candidature a été annulée."});await refreshApplication();setWaitlistEntry(null)}
+    try{
+      const result=await api<{refunded:boolean;refundedAmountCents:number|null;eligible:boolean|null}>(`/me/applications/${application.id}/cancel`,{method:"POST"});
+      const text=result.refunded?`Candidature annulée. ${money(result.refundedAmountCents!)} ont été remboursés intégralement.`
+        :result.eligible===false?"Candidature annulée. Conformément à notre politique, aucun remboursement n’est possible pour une annulation à 24 heures ou moins de l’événement."
+        :"Votre candidature a été annulée.";
+      setNotice({kind:"success",text});await refreshApplication();setWaitlistEntry(null);
+    }
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}
   };
@@ -232,15 +267,16 @@ function EventDetail() {
     {!user?<Link className="button full" to="/login">Se connecter pour vous inscrire</Link>
     :loadingApplication?<div className="calendar-state"><div className="spinner small"/><span>Chargement…</span></div>
     :application?<>
-      <ApplicationStatusPanel application={application} event={event} onPaid={refreshApplication}/>
+      <ApplicationStatusPanel application={application} event={event} onPaid={refreshApplication} onWaitlisted={markWaitlisted}/>
       {waitlistEntry?<div className="waitlist-status"><span className="eyebrow">LISTE D’ATTENTE</span><p>Position {waitlistEntry.rank??waitlistEntry.position}{waitlistEntry.offeredAt?" — une place vous a été proposée, consultez votre espace personnel":""}</p><button className="button secondary small" disabled={busy} onClick={leaveWaitlist}>Quitter la liste d’attente</button></div>
       :(categoryUnknown?<Notice kind="error">Complétez votre catégorie dans votre profil pour rejoindre la liste d’attente.</Notice>:(bucketFull&&canCancel&&<button className="button secondary full" disabled={busy} onClick={joinWaitlist}>Rejoindre la liste d’attente</button>))}
       {canCancel&&<button className="button danger full" disabled={busy} onClick={cancelApplication}>Annuler mon inscription</button>}
     </>
-    :!profileValidated?<Notice kind="error">Votre profil doit d’abord être validé lors d’un entretien avec Nour Meet avant de vous inscrire à un événement. <Link to="/dashboard">Demander mon entretien →</Link></Notice>
+    :requiresScreening&&!profileValidated?<Notice kind="error">Votre profil doit d’abord être validé lors d’un entretien avec Nour Meet avant de vous inscrire à un speed dating. <Link to="/dashboard">Demander mon entretien →</Link></Notice>
     :categoryUnknown?<Notice kind="error">Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement.</Notice>
-    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même vous inscrire : une liste d’attente et une éventuelle proposition alternative vous seront proposées.</Notice>}<button className="button full" disabled={busy} onClick={apply}>{busy?"Inscription…":"S’inscrire"}</button></>}
-    <p className="fine">Le paiement est proposé immédiatement après l’inscription.</p></aside></section></Layout>;
+    :showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>
+    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même candidater : une liste d’attente et une éventuelle proposition alternative vous seront proposées au moment de payer.</Notice>}<button className="button full" onClick={()=>setShowQuestionnaire(true)}>{requiresScreening?"Candidater":"S’inscrire"}</button></>}
+    <p className="fine">Le paiement est proposé immédiatement après le questionnaire ; la place n’est acquise qu’une fois le paiement confirmé.</p></aside></section></Layout>;
 }
 
 // Comptes de test créés par prisma/seed.ts (voir ce fichier pour le détail de chaque état) : ces
@@ -382,12 +418,18 @@ function GlobalInterviewPanel() {
 }
 
 function Dashboard() {
-  const {user,refresh}=useAuth(); const [apps,setApps]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]),[offers,setOffers]=useState<any[]>([]),[tab,setTab]=useState("reservations"),[payingFor,setPayingFor]=useState<{reservationId:string;eventId:string;amountCents:number}|null>(null),[busyId,setBusyId]=useState<string|null>(null),[message,setMessage]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const {user,refresh}=useAuth(); const [apps,setApps]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]),[offers,setOffers]=useState<any[]>([]),[tab,setTab]=useState("reservations"),[payingFor,setPayingFor]=useState<{applicationId:string;eventId:string;amountCents:number}|null>(null),[busyId,setBusyId]=useState<string|null>(null),[message,setMessage]=useState<{kind:"error"|"success";text:string}|null>(null);
   const load=()=>Promise.all([api<any[]>("/me/applications"),api<any[]>("/me/tickets"),api<any[]>("/notifications"),api<any[]>("/me/alternative-offers")]).then(([a,t,n,o])=>{setApps(a);setTickets(t);setNotifications(n);setOffers(o)}); useEffect(()=>{load()},[]);
   const pendingOffers=offers.filter(o=>o.status==="PENDING");
   const cancelApplication=async(appId:string)=>{
     setBusyId(appId);setMessage(null);
-    try{await api(`/me/applications/${appId}/cancel`,{method:"POST"});setMessage({kind:"success",text:"Candidature annulée."});await load()}
+    try{
+      const result=await api<{refunded:boolean;refundedAmountCents:number|null;eligible:boolean|null}>(`/me/applications/${appId}/cancel`,{method:"POST"});
+      const text=result.refunded?`Candidature annulée. ${money(result.refundedAmountCents!)} ont été remboursés intégralement.`
+        :result.eligible===false?"Candidature annulée. Conformément à notre politique, aucun remboursement n’est possible pour une annulation à 24 heures ou moins de l’événement."
+        :"Candidature annulée.";
+      setMessage({kind:"success",text});await load();
+    }
     catch(err){setMessage({kind:"error",text:(err as Error).message})}
     finally{setBusyId(null)}
   };
@@ -400,8 +442,8 @@ function Dashboard() {
   const eventApps=apps.filter(a=>a.eventId);
   const tabs=[["interview",user?.profile?.validatedAt?"Entretien ✓":"Entretien"],["reservations","Réservations"],["tickets","Billets"],["alternatives",`Propositions${pendingOffers.length?` (${pendingOffers.length})`:""}`],["profile","Profil"],["notifications","Notifications"],["contacts","Contacts et messages"],...(user?.role==="PARTICIPANT"?[["restaurant","Devenir restaurateur"]]:[])];
   const titles:Record<string,string>={interview:"Entretien de validation",reservations:"Mes événements",tickets:"Mes billets",alternatives:"Propositions alternatives",profile:"Mon profil",notifications:"Notifications",contacts:"Contacts et messages",restaurant:"Devenir restaurateur"};
-  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><div className="avatar large">{user?.displayName?.slice(0,2).toUpperCase()}</div><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><span>◇</span><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=><article className="reservation" key={a.id}><div className="date-box"><strong>{new Date(a.event.startsAt).getDate()}</strong><span>{new Date(a.event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</span></div><div><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&a.reservation&&<button className="button" onClick={()=>setPayingFor({reservationId:a.reservation.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler</button>}</div></article>)}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><span className="eyebrow">{new Date(t.reservation.event.startsAt).toLocaleDateString("fr-FR")}</span><h2>{t.reservation.event.title}</h2><p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="alternatives"&&<div className="stack">{offers.length===0?<div className="empty small"><span>◇</span><p>Aucune proposition pour le moment.</p></div>:offers.map(o=><article key={o.id} className="alt-offer"><span className="eyebrow">{o.status==="PENDING"?"EN ATTENTE DE VOTRE RÉPONSE":o.status==="ACCEPTED"?"ACCEPTÉE":o.status==="DECLINED"?"REFUSÉE":"EXPIRÉE"}</span><h3>{o.alternativeEvent.title}</h3><p>À la place de « {o.originalEvent.title} »</p><p>{dateTime(o.alternativeEvent.startsAt)} · {o.alternativeEvent.district}</p><p><b>{money(o.alternativeEvent.priceCents)}</b></p>{o.status==="PENDING"&&<div className="decision-buttons"><button className="button" disabled={busyId===o.id} onClick={()=>respondOffer(o.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===o.id} onClick={()=>respondOffer(o.id,false)}>Refuser</button></div>}</article>)}</div>}{tab==="profile"&&<ProfileEditor onSaved={refresh}/>} {tab==="notifications"&&<div className="stack">{notifications.map(n=><article className="notification" key={n.id}><i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div></article>)}</div>}{tab==="contacts"&&<Messages/>}{tab==="restaurant"&&<RestaurantApplication/>}</div></section>
-  {payingFor&&<PaymentModal reservationId={payingFor.reservationId} eventId={payingFor.eventId} amountCents={payingFor.amountCents} onClose={()=>setPayingFor(null)} onConfirmed={()=>{setPayingFor(null);load()}}/>}
+  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><div className="avatar large">{user?.displayName?.slice(0,2).toUpperCase()}</div><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><span>◇</span><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=><article className="reservation" key={a.id}><div className="date-box"><strong>{new Date(a.event.startsAt).getDate()}</strong><span>{new Date(a.event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</span></div><div><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler</button>}</div></article>)}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><span className="eyebrow">{new Date(t.reservation.event.startsAt).toLocaleDateString("fr-FR")}</span><h2>{t.reservation.event.title}</h2><p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="alternatives"&&<div className="stack">{offers.length===0?<div className="empty small"><span>◇</span><p>Aucune proposition pour le moment.</p></div>:offers.map(o=><article key={o.id} className="alt-offer"><span className="eyebrow">{o.status==="PENDING"?"EN ATTENTE DE VOTRE RÉPONSE":o.status==="ACCEPTED"?"ACCEPTÉE":o.status==="DECLINED"?"REFUSÉE":"EXPIRÉE"}</span><h3>{o.alternativeEvent.title}</h3><p>À la place de « {o.originalEvent.title} »</p><p>{dateTime(o.alternativeEvent.startsAt)} · {o.alternativeEvent.district}</p><p><b>{money(o.alternativeEvent.priceCents)}</b></p>{o.status==="PENDING"&&<div className="decision-buttons"><button className="button" disabled={busyId===o.id} onClick={()=>respondOffer(o.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===o.id} onClick={()=>respondOffer(o.id,false)}>Refuser</button></div>}</article>)}</div>}{tab==="profile"&&<ProfileEditor onSaved={refresh}/>} {tab==="notifications"&&<div className="stack">{notifications.map(n=><article className="notification" key={n.id}><i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div></article>)}</div>}{tab==="contacts"&&<Messages/>}{tab==="restaurant"&&<RestaurantApplication/>}</div></section>
+  {payingFor&&<PaymentModal applicationId={payingFor.applicationId} eventId={payingFor.eventId} amountCents={payingFor.amountCents} onClose={()=>setPayingFor(null)} onConfirmed={()=>{setPayingFor(null);load()}} onWaitlisted={()=>{setPayingFor(null);load()}}/>}
   </Layout>;
 }
 
@@ -451,7 +493,7 @@ function AdminGlobalInterviews() {
 function AdminCreateEvent() {
   const {user}=useAuth();
   const navigate=useNavigate();
-  const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].name,description:"",startsAt:"",endsAt:"",district:"",address:"",zone:EVENT_ZONES[0],capacity:20,priceCents:3000,includesDrink:false,includesStarter:false,includesMain:false,includesDessert:false,perksDescription:""});
+const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].name,flow:"" as ""|"SCREENING"|"DIRECT",description:"",startsAt:"",endsAt:"",district:"",address:"",zone:EVENT_ZONES[0],capacity:20,priceCents:3000,includesDrink:false,includesStarter:false,includesMain:false,includesDessert:false,perksDescription:""});
   const [submitting,setSubmitting]=useState(false);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [commissionRate,setCommissionRate]=useState<number|null>(null);
@@ -461,7 +503,7 @@ function AdminCreateEvent() {
   const submit=async(e:FormEvent)=>{
     e.preventDefault();setSubmitting(true);setNotice(null);
     try{
-      await api("/admin/events",{method:"POST",body:JSON.stringify({...form,startsAt:new Date(form.startsAt).toISOString(),endsAt:new Date(form.endsAt).toISOString()})});
+      await api("/admin/events",{method:"POST",body:JSON.stringify({...form,flow:form.flow||undefined,startsAt:new Date(form.startsAt).toISOString(),endsAt:new Date(form.endsAt).toISOString()})});
       setNotice({kind:"success",text:user?.role==="ORGANIZER"?"Brouillon créé. Ajoutez vos photos puis soumettez-le à validation.":"Événement créé."});
       setTimeout(()=>navigate("/admin/events"),1200);
     }catch(err){setNotice({kind:"error",text:(err as Error).message})}
@@ -475,6 +517,7 @@ function AdminCreateEvent() {
       <label>Titre<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value,slug:form.slug?form.slug:slugify(e.target.value)})}/></label>
       <label>Identifiant (slug)<input required pattern="[a-z0-9-]+" value={form.slug} onChange={e=>setForm({...form,slug:e.target.value})}/></label>
       <label>Catégorie<select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>{EVENT_CATEGORIES.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}</select></label>
+      {user?.role==="ADMIN"&&<label>Parcours d’inscription<select value={form.flow} onChange={e=>setForm({...form,flow:e.target.value as ""|"SCREENING"|"DIRECT"})}><option value="">Suggéré selon la catégorie</option><option value="SCREENING">Sélection (entretien requis)</option><option value="DIRECT">Accès direct (paiement immédiat)</option></select></label>}
       <label>Zone<select value={form.zone} onChange={e=>setForm({...form,zone:e.target.value})}>{EVENT_ZONES.map(z=><option key={z} value={z}>{z}</option>)}</select></label>
       <label className="wide">Description<textarea required minLength={20} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
       <div className="time-row"><label>Début<input required type="datetime-local" value={form.startsAt} onChange={e=>setForm({...form,startsAt:e.target.value})}/></label><label>Fin<input required type="datetime-local" value={form.endsAt} onChange={e=>setForm({...form,endsAt:e.target.value})}/></label></div>

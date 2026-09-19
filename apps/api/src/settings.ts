@@ -11,6 +11,16 @@ export const SETTINGS_SCHEMA = {
     default: 10,
     description: "Durée du verrou technique posé sur une place pendant une tentative de paiement, avant libération automatique."
   },
+  WAITLIST_OFFER_WINDOW_HOURS: {
+    schema: z.number().int().positive(),
+    default: 24,
+    description: "Délai laissé à la personne en tête de liste d'attente pour payer une place qui vient de se libérer, avant qu'elle ne soit proposée à la suivante. Distinct du verrou de paiement : la place lui est exclusivement réservée, il n'y a donc pas de risque de double vente à protéger."
+  },
+  ALTERNATIVE_OFFER_RESPONSE_HOURS: {
+    schema: z.number().int().positive(),
+    default: 24,
+    description: "Délai laissé pour répondre à une proposition d'événement alternatif avant qu'elle n'expire."
+  },
   RESTAURANT_MONTHLY_EVENT_QUOTA: {
     schema: z.number().int().positive(),
     default: 2,

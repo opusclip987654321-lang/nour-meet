@@ -12,13 +12,13 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES, QUOTA_ELIGIBLE_CATEGORY, EVENT_ZONES, regionOfZone } from "@nour/shared";
+import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES, EVENT_ZONES, regionOfZone, eventRequiresScreening, suggestedFlowForCategory } from "@nour/shared";
 import { env } from "./env.js";
-import { paymentDeadline, interviewRetryDate } from "./domain.js";
+import { paymentDeadline, paymentLockExpiry, interviewRetryDate, refundEligibility } from "./domain.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { createSmsVerificationProvider } from "./sms-verification.js";
 import { createEmailProvider } from "./email-provider.js";
-import { loadSettings, updateSetting, listSettingsForAdmin, SETTINGS_SCHEMA } from "./settings.js";
+import { loadSettings, updateSetting, getSetting, listSettingsForAdmin, SETTINGS_SCHEMA } from "./settings.js";
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const uploadsDir = path.join(publicDir, "uploads", "events");
@@ -90,14 +90,48 @@ const notify = async (userId: string, title: string, body: string) => {
     }
   }
 };
+// Exécute un remboursement réel (Stripe en mode test) de façon idempotente et journalisée, partagé
+// entre l'annulation automatique (§7, plus de 24h avant l'événement) et l'exception admin motivée
+// (24h ou moins). Ne marque JAMAIS REFUNDED si l'appel Stripe échoue : le paiement reste SUCCEEDED
+// et les administrateurs sont notifiés pour un traitement manuel plutôt que de mentir sur l'état.
+const executeRefund = async (
+  payment: { id: string; status: PaymentStatus; providerRef: string | null; amountCents: number; ledgerEntry: { id: string; grossAmountCents: number; paidOutAt: Date | null } | null },
+  event: { title: string },
+  opts: { exceptionReason?: string } = {}
+): Promise<boolean> => {
+  if (payment.status !== PaymentStatus.SUCCEEDED) return false;
+  if (stripe && payment.providerRef) {
+    try {
+      await stripe.refunds.create({ payment_intent: payment.providerRef });
+    } catch (err) {
+      app.log.error({ err }, "Échec de l’appel de remboursement Stripe");
+      const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+      await Promise.all(admins.map(a => notify(a.id, "Échec d’un remboursement Stripe", `Le remboursement pour « ${event.title} » a échoué côté prestataire : à traiter manuellement.`)));
+      return false;
+    }
+  }
+  await prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.REFUNDED, refundedAt: new Date(), refundedAmountCents: payment.amountCents, refundExceptionReason: opts.exceptionReason ?? null } });
+  if (payment.ledgerEntry) {
+    await prisma.ledgerEntry.update({ where: { id: payment.ledgerEntry.id }, data: { refundedAmountCents: payment.ledgerEntry.grossAmountCents } });
+    if (payment.ledgerEntry.paidOutAt) {
+      const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+      await Promise.all(admins.map(a => notify(a.id, "Remboursement après reversement déjà marqué", `Le paiement remboursé pour « ${event.title} » avait déjà été marqué comme reversé au restaurant : à régulariser manuellement.`)));
+    }
+  }
+  return true;
+};
+
 type ClaimableApplication = { id: string; userId: string; quotaCategory: QuotaCategory | null };
 type ClaimResult = { ok: true; reservation: Awaited<ReturnType<typeof prisma.reservation.upsert>> } | { ok: false; reason: "NO_CATEGORY" | "FULL" };
 
 // Attribue une place de manière atomique (créneau à quota ou capacité globale) et pose une réservation
-// temporaire. Pour les événements à quotas, l'atomicité vient de l'UPDATE conditionné sur heldCount < capacity
-// (comme pour les créneaux d'entretien). Pour la capacité globale (sans quota), on utilise une transaction
-// PostgreSQL sérialisable pour empêcher toute survente en cas de réservations simultanées.
-const claimReservation = async (eventId: string, application: ClaimableApplication): Promise<ClaimResult> => {
+// dont la durée de vie est TOUJOURS fournie par l'appelant : un verrou court (§5) pendant une tentative
+// de paiement directe, une fenêtre plus longue (mais toujours sans risque de survente, la place étant
+// déjà décomptée de façon atomique) pour une offre exclusive de liste d'attente. Pour les événements à
+// quotas, l'atomicité vient de l'UPDATE conditionné sur heldCount < capacity (comme pour les créneaux
+// d'entretien). Pour la capacité globale (sans quota), on utilise une transaction PostgreSQL sérialisable
+// pour empêcher toute survente en cas de réservations simultanées.
+const claimReservation = async (eventId: string, application: ClaimableApplication, expiresAt: Date): Promise<ClaimResult> => {
   const hasQuotas = (await prisma.eventQuota.count({ where: { eventId } })) > 0;
   const run = async (tx: Prisma.TransactionClient): Promise<ClaimResult> => {
     if (hasQuotas) {
@@ -113,8 +147,8 @@ const claimReservation = async (eventId: string, application: ClaimableApplicati
     }
     const reservation = await tx.reservation.upsert({
       where: { applicationId: application.id },
-      update: { expiresAt: paymentDeadline(), cancelledAt: null, quotaCategory: application.quotaCategory },
-      create: { eventId, userId: application.userId, applicationId: application.id, expiresAt: paymentDeadline(), quotaCategory: application.quotaCategory }
+      update: { expiresAt, cancelledAt: null, quotaCategory: application.quotaCategory },
+      create: { eventId, userId: application.userId, applicationId: application.id, expiresAt, quotaCategory: application.quotaCategory }
     });
     await tx.application.update({ where: { id: application.id }, data: { status: ApplicationStatus.PAYMENT_PENDING } });
     return { ok: true, reservation };
@@ -146,7 +180,10 @@ const offerNextWaitlistEntry = async (eventId: string, category: QuotaCategory |
   const hasQuotas = (await prisma.eventQuota.count({ where: { eventId } })) > 0;
   const entry = await prisma.waitlistEntry.findFirst({ where: { eventId, offeredAt: null, ...(hasQuotas ? { quotaCategory: category } : {}) }, orderBy: { createdAt: "asc" }, include: { application: true } });
   if (!entry) return;
-  const result = await claimReservation(eventId, entry.application);
+  // Fenêtre d'offre exclusive (pas un verrou de paiement : pas de risque de survente, la place est
+  // déjà décomptée de façon atomique pour cette seule personne) — délai généreux car il s'agit de
+  // laisser le temps de remarquer la notification, pas de protéger une vente simultanée.
+  const result = await claimReservation(eventId, entry.application, paymentDeadline(new Date(), getSetting("WAITLIST_OFFER_WINDOW_HOURS")));
   if (!result.ok) return;
   await prisma.waitlistEntry.update({ where: { id: entry.id }, data: { offeredAt: new Date(), expiresAt: result.reservation.expiresAt } });
   const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
@@ -191,7 +228,7 @@ const createAlternativeOfferIfPossible = async (userId: string, originalEvent: {
     if (await hasAvailableSpace(candidate, profile?.quotaCategory ?? null)) { alternative = candidate; break; }
   }
   if (!alternative) return null;
-  const offer = await prisma.alternativeOffer.create({ data: { userId, originalEventId: originalEvent.id, alternativeEventId: alternative.id, respondsBy: paymentDeadline() } });
+  const offer = await prisma.alternativeOffer.create({ data: { userId, originalEventId: originalEvent.id, alternativeEventId: alternative.id, respondsBy: paymentDeadline(new Date(), getSetting("ALTERNATIVE_OFFER_RESPONSE_HOURS")) } });
   await notify(userId, "Un événement similaire pourrait vous intéresser", `« ${alternative.title} » (${alternative.district}, ${new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" }).format(alternative.startsAt)}) a des places disponibles.`);
   return offer;
 };
@@ -211,12 +248,11 @@ const resolvePriceCents = (event: { priceCents: number; priceTiers?: { category:
   const tier = quotaCategory ? event.priceTiers?.find(t => t.category === quotaCategory) : undefined;
   return tier ? tier.amountCents : event.priceCents;
 };
-// Le délai de paiement est fixé à 24h pour tous les événements (choix explicite du super-admin :
-// un participant est déjà validé au téléphone avant de pouvoir s'inscrire, 24h suffit et évite de
-// bloquer une place trop longtemps). La date précise est toujours indiquée en plus, sans calcul à faire.
-const formatPaymentDeadline = (expiresAt: Date) => `24 heures (jusqu’au ${expiresAt.toLocaleString("fr-FR")})`;
+// Fenêtre d'offre de liste d'attente (voir AppSetting WAITLIST_OFFER_WINDOW_HOURS) : la durée
+// exacte est configurable, jamais supposée fixe dans le message envoyé au participant.
+const formatPaymentDeadline = (expiresAt: Date) => `jusqu’au ${expiresAt.toLocaleString("fr-FR")}`;
 const publicEvent = (event: any, revealAddress = false) => ({
-  id: event.id, slug: event.slug, title: event.title, category: event.category, description: event.description,
+  id: event.id, slug: event.slug, title: event.title, category: event.category, flow: event.flow, description: event.description,
   startsAt: event.startsAt, endsAt: event.endsAt, district: event.district, address: revealAddress ? event.address : null,
   zone: event.zone ?? null,
   imageUrl: event.imageUrl ?? defaultCategoryImage(event.category),
@@ -304,40 +340,66 @@ app.get("/events/:id/my-application", { preHandler: auth }, async (request, repl
   return application;
 });
 
-// Inscription directe : un profil déjà validé (entretien global réussi) s'inscrit à un événement
-// précis sans nouvel entretien ni décision manuelle — la place est immédiatement tentée (quota ou
-// capacité globale) ; si complet, la personne rejoint automatiquement la liste d'attente.
+const screeningAnswersSchema = z.object({
+  motivation: z.string().min(10).max(1000),
+  relationshipGoal: z.string().min(5).max(500),
+  personality: z.string().min(5).max(500),
+  desiredQualities: z.string().min(5).max(500),
+  ageRangeSought: z.string().min(2).max(200),
+  valuesAndLifestyle: z.string().min(5).max(500),
+  noteForOrganizer: z.string().max(500).optional()
+});
+const networkingAnswersSchema = z.object({
+  sector: z.string().min(2).max(200),
+  currentRole: z.string().min(2).max(200),
+  experienceLevel: z.string().min(1).max(200),
+  goal: z.string().min(2).max(300),
+  soughtProfiles: z.string().min(2).max(300),
+  contribution: z.string().min(2).max(300),
+  topics: z.string().min(2).max(300)
+});
+
+// Candidature : ne garantit jamais une place (§5 du cahier des charges). Selon le parcours de
+// l'événement (voir eventRequiresScreening, jamais une comparaison de catégorie) :
+// - SCREENING (speed dating) : exige un profil déjà validé par l'entretien global (une seule
+//   démarche par personne, décision antérieure du produit conservée telle quelle — voir le résumé
+//   de fin de lot) et un questionnaire privé (7 questions), jamais transmis au restaurateur.
+// - DIRECT (networking) : aucune validation de profil requise, questionnaire non bloquant.
+// Dans les deux cas, aucune place n'est retenue ici : la candidature autorise seulement à tenter le
+// paiement via POST /applications/:id/payment-intent, qui pose le verrou technique court.
 app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const userId = currentId(request);
+  const event = await prisma.event.findUniqueOrThrow({ where: { id }, include: { priceTiers: true } });
+  const requiresScreening = eventRequiresScreening(event);
   const profile = await prisma.profile.findUnique({ where: { userId } });
   if (!profile?.profileCompleted) return reply.code(409).send({ error: "Complétez votre profil avant de vous inscrire" });
-  if (!profile.validatedAt) return reply.code(409).send({ error: "Votre profil doit d’abord être validé lors d’un entretien avant de vous inscrire à un événement" });
+  if (requiresScreening && !profile.validatedAt) return reply.code(409).send({ error: "Votre profil doit d’abord être validé lors d’un entretien avant de vous inscrire à un événement de ce type" });
   const existing = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
   if (existing) return reply.code(409).send({ error: "Vous êtes déjà inscrit(e) à cet événement", application: existing });
-  const event = await prisma.event.findUniqueOrThrow({ where: { id }, include: { priceTiers: true } });
+  const input = requiresScreening
+    ? z.object({ screeningAnswers: screeningAnswersSchema }).parse(request.body)
+    : z.object({ networkingAnswers: networkingAnswersSchema }).parse(request.body);
   const quotas = await prisma.eventQuota.findMany({ where: { eventId: id } });
-  // La catégorie est nécessaire pour les quotas (Speed dating) ET pour résoudre un tarif différencié
-  // éventuel (Networking inclus) — sans jamais transformer ce tarif en quota implicite pour autant.
+  // La catégorie est nécessaire pour les quotas (speed dating) ET pour résoudre un tarif différencié
+  // éventuel (networking inclus) — sans jamais transformer ce tarif en quota implicite pour autant.
   const needsCategory = quotas.length > 0 || event.priceTiers.length > 0;
   let quotaCategory: QuotaCategory | null = null;
   if (needsCategory) {
     if (!profile.quotaCategory) return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement" });
     quotaCategory = profile.quotaCategory;
   }
-  const application = await prisma.application.create({ data: { eventId: id, userId, quotaCategory } });
+  const application = await prisma.application.create({
+    data: {
+      eventId: id, userId, quotaCategory, status: ApplicationStatus.PAYMENT_PENDING,
+      ...(requiresScreening
+        ? { screeningAnswer: { create: (input as { screeningAnswers: z.infer<typeof screeningAnswersSchema> }).screeningAnswers } }
+        : { networkingAnswer: { create: (input as { networkingAnswers: z.infer<typeof networkingAnswersSchema> }).networkingAnswers } })
+    }
+  });
   await audit(userId, "CREATE_APPLICATION", "Application", application.id);
-  const result = await claimReservation(id, application);
-  if (result.ok) {
-    await notify(userId, "Inscription confirmée", `Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet de ${(resolvePriceCents(event, quotaCategory) / 100).toFixed(2)} €.`);
-    return reply.code(201).send({ application: { ...application, status: ApplicationStatus.PAYMENT_PENDING }, reservation: result.reservation });
-  }
-  if (result.reason === "NO_CATEGORY") return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement" });
-  const waitlistEntry = await prisma.waitlistEntry.create({ data: { eventId: id, userId, applicationId: application.id, quotaCategory, position: (await prisma.waitlistEntry.count({ where: { eventId: id } })) + 1 } });
-  await notify(userId, "Liste d’attente", `« ${event.title} » est complet pour votre catégorie ; vous avez été placé(e) sur liste d’attente.`);
-  await createAlternativeOfferIfPossible(userId, event);
-  await audit(userId, "APPLICATION_WAITLISTED_FULL", "Application", application.id);
-  return reply.code(201).send({ application, waitlisted: true, waitlistEntry });
+  await notify(userId, "Inscription enregistrée", `Vous pouvez maintenant régler votre billet pour « ${event.title} » (${(resolvePriceCents(event, quotaCategory) / 100).toFixed(2)} €). La place n’est confirmée qu’une fois le paiement réussi.`);
+  return reply.code(201).send({ application });
 });
 
 // Entretien global de validation du profil : une seule démarche par personne (pas par événement).
@@ -393,10 +455,14 @@ app.post("/applications/:id/schedule", { preHandler: auth }, async (request, rep
 
 app.get("/me/applications", { preHandler: auth }, async (request) => prisma.application.findMany({ where: { userId: currentId(request) }, include: { event: true, call: true, reservation: { include: { payment: true, ticket: true } } }, orderBy: { createdAt: "desc" } }));
 
+// Politique d'annulation §7 : plus de 24h avant l'événement, remboursement intégral automatique,
+// calculé et exécuté ici même (jamais seulement affiché côté interface) ; 24h ou moins, aucun
+// remboursement de plein droit — seule une exception admin motivée (POST /admin/payments/:id/refund)
+// peut ensuite en accorder un.
 app.post("/me/applications/:id/cancel", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const userId = currentId(request);
-  const application = await prisma.application.findFirstOrThrow({ where: { id, userId }, include: { reservation: { include: { payment: true, ticket: true } } } });
+  const application = await prisma.application.findFirstOrThrow({ where: { id, userId }, include: { reservation: { include: { payment: { include: { ledgerEntry: true } }, ticket: true, event: true } } } });
   if ((application.status === ApplicationStatus.REFUSED) || (application.status === ApplicationStatus.CANCELLED)) return reply.code(409).send({ error: "Cette candidature est déjà close" });
   const activeReservation = application.reservation && !application.reservation.cancelledAt ? application.reservation : null;
   const hadSucceededPayment = activeReservation?.payment?.status === PaymentStatus.SUCCEEDED;
@@ -410,8 +476,25 @@ app.post("/me/applications/:id/cancel", { preHandler: auth }, async (request, re
   });
   if (activeReservation) await offerNextWaitlistEntry(activeReservation.eventId, activeReservation.quotaCategory);
   await audit(userId, "CANCEL_APPLICATION", "Application", id);
-  await notify(userId, "Candidature annulée", hadSucceededPayment ? "Votre annulation a été prise en compte. Le remboursement de votre billet sera examiné manuellement par notre équipe." : "Votre candidature a été annulée.");
-  return reply.code(204).send();
+  let refunded = false;
+  let refundedAmountCents: number | null = null;
+  let eligible: boolean | null = null;
+  if (hadSucceededPayment && activeReservation) {
+    eligible = refundEligibility(activeReservation.event.startsAt).eligible;
+    if (eligible) {
+      refunded = await executeRefund(activeReservation.payment!, activeReservation.event, {});
+      if (refunded) refundedAmountCents = activeReservation.payment!.amountCents;
+    }
+  }
+  const message = refunded
+    ? `Votre annulation a été prise en compte. ${(refundedAmountCents! / 100).toFixed(2)} € ont été remboursés intégralement.`
+    : eligible === false
+      ? "Votre annulation a été prise en compte. Conformément à notre politique, aucun remboursement n’est possible pour une annulation à 24 heures ou moins de l’événement."
+      : hadSucceededPayment
+        ? "Votre annulation a été prise en compte. Le remboursement sera examiné manuellement par notre équipe."
+        : "Votre candidature a été annulée.";
+  await notify(userId, "Candidature annulée", message);
+  return reply.send({ cancelled: true, refunded, refundedAmountCents, eligible });
 });
 
 app.post("/events/:id/waitlist", { preHandler: auth }, async (request, reply) => {
@@ -443,25 +526,48 @@ app.delete("/events/:id/waitlist", { preHandler: auth }, async (request, reply) 
   return reply.code(204).send();
 });
 
-app.post("/reservations/:id/payment-intent", { preHandler: auth }, async (request, reply) => {
+// Seul point d'entrée qui pose réellement une place : une candidature (PAYMENT_PENDING) ne garantit
+// rien avant cet appel (§5). Pose un verrou technique court (AppSetting PAYMENT_LOCK_MINUTES) au
+// moment même de la tentative de paiement — jamais avant — pour empêcher deux ventes de la dernière
+// place ; s'il en existe déjà un actif (ex. réessai après une carte refusée), il est simplement
+// réutilisé plutôt que d'en reposer un nouveau. Si la place n'est plus disponible, rejoint
+// automatiquement la liste d'attente, exactement comme le faisait autrefois la candidature elle-même.
+app.post("/applications/:id/payment-intent", { preHandler: auth }, async (request, reply) => {
   if (!stripe) return reply.code(503).send({ error: "Le paiement par carte n’est pas configuré sur ce serveur" });
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const userId = currentId(request);
-  const reservation = await prisma.reservation.findFirstOrThrow({ where: { id, userId }, include: { event: { include: { priceTiers: true } }, application: true, payment: true } });
-  if (reservation.application.status !== ApplicationStatus.PAYMENT_PENDING) return reply.code(409).send({ error: "Cette candidature n’est pas en attente de paiement" });
-  if (reservation.cancelledAt) return reply.code(409).send({ error: "Cette réservation est annulée" });
-  if (reservation.expiresAt < new Date()) return reply.code(409).send({ error: "Le délai de paiement est expiré" });
-  if (reservation.payment?.status === PaymentStatus.SUCCEEDED) return reply.code(409).send({ error: "Cette réservation est déjà payée" });
-  const confirmedCount = await prisma.reservation.count({ where: { eventId: reservation.eventId, confirmedAt: { not: null }, cancelledAt: null, id: { not: reservation.id } } });
-  if (confirmedCount >= reservation.event.capacity) return reply.code(409).send({ error: "L’événement est désormais complet" });
+  const application = await prisma.application.findFirstOrThrow({ where: { id, userId }, include: { event: { include: { priceTiers: true } }, reservation: true } });
+  if (application.status !== ApplicationStatus.PAYMENT_PENDING) return reply.code(409).send({ error: "Cette candidature n’est pas en attente de paiement" });
+  if (!application.eventId || !application.event) return reply.code(409).send({ error: "Cette candidature n’est liée à aucun événement" });
+  const event = application.event;
+
+  let reservation: Prisma.ReservationGetPayload<object> | null = application.reservation && !application.reservation.cancelledAt && application.reservation.expiresAt > new Date() ? application.reservation : null;
+  if (!reservation) {
+    const lockExpiresAt = paymentLockExpiry(new Date(), getSetting("PAYMENT_LOCK_MINUTES"));
+    const result = await claimReservation(application.eventId, application, lockExpiresAt);
+    if (!result.ok) {
+      if (result.reason === "NO_CATEGORY") return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de payer" });
+      let waitlistEntry = await prisma.waitlistEntry.findUnique({ where: { eventId_userId: { eventId: application.eventId, userId } } });
+      if (!waitlistEntry) {
+        waitlistEntry = await prisma.waitlistEntry.create({ data: { eventId: application.eventId, userId, applicationId: application.id, quotaCategory: application.quotaCategory, position: (await prisma.waitlistEntry.count({ where: { eventId: application.eventId } })) + 1 } });
+        await notify(userId, "Liste d’attente", `« ${event.title} » est complet pour votre catégorie ; vous avez été placé(e) sur liste d’attente.`);
+        await createAlternativeOfferIfPossible(userId, event);
+        await audit(userId, "APPLICATION_WAITLISTED_FULL", "Application", application.id);
+      }
+      return reply.code(409).send({ error: "Cet événement est désormais complet pour votre catégorie", waitlisted: true, waitlistEntry });
+    }
+    reservation = result.reservation;
+  }
+  const payment = await prisma.payment.findUnique({ where: { reservationId: reservation.id } });
+  if (payment?.status === PaymentStatus.SUCCEEDED) return reply.code(409).send({ error: "Cette réservation est déjà payée" });
   // Le tarif est résolu (unique ou différencié selon la catégorie) puis figé dans le paiement au
   // moment de sa création : une modification ultérieure du tarif de l'événement ne s'applique
   // jamais rétroactivement à cette vente.
-  const amountCents = resolvePriceCents(reservation.event, reservation.quotaCategory);
+  const amountCents = resolvePriceCents(event, reservation.quotaCategory);
 
   let clientSecret: string | null = null;
-  if (reservation.payment?.providerRef) {
-    const existing = await stripe.paymentIntents.retrieve(reservation.payment.providerRef);
+  if (payment?.providerRef) {
+    const existing = await stripe.paymentIntents.retrieve(payment.providerRef);
     if (["requires_payment_method", "requires_confirmation", "requires_action"].includes(existing.status)) clientSecret = existing.client_secret;
   }
   if (!clientSecret) {
@@ -469,7 +575,7 @@ app.post("/reservations/:id/payment-intent", { preHandler: auth }, async (reques
       amount: amountCents,
       currency: "eur",
       payment_method_types: ["card"],
-      metadata: { reservationId: reservation.id, applicationId: reservation.applicationId, userId }
+      metadata: { reservationId: reservation.id, applicationId: application.id, userId }
     });
     clientSecret = intent.client_secret;
     await prisma.payment.upsert({
@@ -478,7 +584,7 @@ app.post("/reservations/:id/payment-intent", { preHandler: auth }, async (reques
       create: { reservationId: reservation.id, provider: "stripe", providerRef: intent.id, amountCents, status: PaymentStatus.PENDING }
     });
   }
-  return { clientSecret, amountCents };
+  return { clientSecret, amountCents, expiresAt: reservation.expiresAt };
 });
 
 await app.register(async (webhooks) => {
@@ -633,14 +739,32 @@ app.post("/alternative-offers/:id/respond", { preHandler: auth }, async (request
   const needsCategory = quotas.length > 0 || priceTiers.length > 0;
   const quotaCategory = needsCategory ? profile.quotaCategory : null;
   if (needsCategory && !quotaCategory) return reply.code(409).send({ error: "Complétez votre catégorie dans votre profil avant d’accepter" });
+  // N'attribue jamais de place ici (§5) : accepter ne fait qu'autoriser à payer, exactement comme
+  // une candidature normale. Les réponses au questionnaire de la candidature d'origine (même type
+  // d'événement) sont reprises pour ne pas les redemander.
   let application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: offer.alternativeEventId, userId } } });
-  if (!application) application = await prisma.application.create({ data: { eventId: offer.alternativeEventId, userId, motivation: "Candidature via une proposition d’événement alternatif.", quotaCategory } });
-  const result = await claimReservation(offer.alternativeEventId, application);
-  if (!result.ok) return reply.code(409).send({ error: "Cette place n’est plus disponible." });
-  const updated = await prisma.alternativeOffer.update({ where: { id }, data: { status: AlternativeOfferStatus.ACCEPTED, respondedAt: new Date(), reservationId: result.reservation.id } });
-  await notify(userId, "Place réservée", `Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet pour « ${offer.alternativeEvent.title} ».`);
+  if (!application) {
+    const original = await prisma.application.findUnique({ where: { eventId_userId: { eventId: offer.originalEventId, userId } }, include: { screeningAnswer: true, networkingAnswer: true } });
+    const requiresScreening = eventRequiresScreening(offer.alternativeEvent);
+    application = await prisma.application.create({ data: {
+      eventId: offer.alternativeEventId, userId, quotaCategory, status: ApplicationStatus.PAYMENT_PENDING,
+      ...(requiresScreening && original?.screeningAnswer ? { screeningAnswer: { create: {
+        motivation: original.screeningAnswer.motivation, relationshipGoal: original.screeningAnswer.relationshipGoal, personality: original.screeningAnswer.personality,
+        desiredQualities: original.screeningAnswer.desiredQualities, ageRangeSought: original.screeningAnswer.ageRangeSought, valuesAndLifestyle: original.screeningAnswer.valuesAndLifestyle,
+        noteForOrganizer: original.screeningAnswer.noteForOrganizer
+      } } } : {}),
+      ...(!requiresScreening && original?.networkingAnswer ? { networkingAnswer: { create: {
+        sector: original.networkingAnswer.sector, currentRole: original.networkingAnswer.currentRole, experienceLevel: original.networkingAnswer.experienceLevel,
+        goal: original.networkingAnswer.goal, soughtProfiles: original.networkingAnswer.soughtProfiles, contribution: original.networkingAnswer.contribution, topics: original.networkingAnswer.topics
+      } } } : {})
+    } });
+  } else if (application.status !== ApplicationStatus.PAYMENT_PENDING) {
+    application = await prisma.application.update({ where: { id: application.id }, data: { status: ApplicationStatus.PAYMENT_PENDING } });
+  }
+  const updated = await prisma.alternativeOffer.update({ where: { id }, data: { status: AlternativeOfferStatus.ACCEPTED, respondedAt: new Date() } });
+  await notify(userId, "Événement alternatif accepté", `Vous pouvez maintenant régler votre billet pour « ${offer.alternativeEvent.title} ».`);
   await audit(userId, "ACCEPT_ALTERNATIVE_OFFER", "AlternativeOffer", id);
-  return updated;
+  return { ...updated, application };
 });
 
 app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
@@ -809,7 +933,7 @@ app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER)
 app.post("/admin/events/:id/quotas", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const event = await assertEventAccess(request, id);
-  if (event.category !== QUOTA_ELIGIBLE_CATEGORY) return reply.code(400).send({ error: `Les quotas ne sont disponibles que pour la catégorie « ${QUOTA_ELIGIBLE_CATEGORY} »` });
+  if (!eventRequiresScreening(event)) return reply.code(400).send({ error: "Les quotas ne sont disponibles que pour un événement à sélection (speed dating)" });
   const input = z.object({ homme: z.number().int().min(0), femme: z.number().int().min(0) }).parse(request.body);
   if (input.homme + input.femme > event.capacity) return reply.code(400).send({ error: "La somme des quotas dépasse la capacité totale de l’événement" });
   const existing = await prisma.eventQuota.findMany({ where: { eventId: id } });
@@ -827,46 +951,48 @@ app.get("/admin/events/:id/reservations", { preHandler: roles(UserRole.ADMIN, Us
   await assertEventAccess(request, id);
   return prisma.reservation.findMany({ where: { eventId: id }, include: { user: true, payment: true, ticket: true }, orderBy: { createdAt: "desc" } });
 });
+// Annulation par l'organisateur (§7) : remboursement intégral automatique de tous les billets
+// concernés, jamais "à traiter manuellement" — l'événement n'existant plus, les quotas tenus sont
+// aussi réinitialisés pour ne pas laisser de données de capacité incohérentes.
 app.post("/admin/events/:id/cancel", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const event = await assertEventAccess(request, id);
   if (event.status === EventStatus.CANCELLED) throw httpError(409, "Cet événement est déjà annulé");
-  const reservations = await prisma.reservation.findMany({ where: { eventId: id, cancelledAt: null }, include: { payment: true, user: true } });
+  const reservations = await prisma.reservation.findMany({ where: { eventId: id, cancelledAt: null }, include: { payment: { include: { ledgerEntry: true } }, user: true } });
   await prisma.$transaction(async (tx) => {
     await tx.event.update({ where: { id }, data: { status: EventStatus.CANCELLED } });
     await tx.application.updateMany({ where: { eventId: id, status: { notIn: [ApplicationStatus.REFUSED, ApplicationStatus.CANCELLED] } }, data: { status: ApplicationStatus.CANCELLED } });
     await tx.reservation.updateMany({ where: { eventId: id, cancelledAt: null }, data: { cancelledAt: new Date() } });
     await tx.ticket.updateMany({ where: { reservation: { eventId: id }, status: { not: TicketStatus.CANCELLED } }, data: { status: TicketStatus.CANCELLED } });
     await tx.waitlistEntry.deleteMany({ where: { eventId: id } });
+    await tx.eventQuota.updateMany({ where: { eventId: id }, data: { heldCount: 0 } });
   });
-  const paidCount = reservations.filter(r => r.payment?.status === PaymentStatus.SUCCEEDED).length;
-  await Promise.all(reservations.map(r => notify(r.userId, "Événement annulé", `« ${event.title} » a été annulé.${r.payment?.status === PaymentStatus.SUCCEEDED ? " Le remboursement de votre billet sera traité manuellement par notre équipe." : ""}`)));
-  await audit(currentId(request), "CANCEL_EVENT", "Event", id, { affectedReservations: reservations.length, paidToRefundManually: paidCount });
-  return { cancelled: true, paidReservationsToRefund: paidCount };
+  const paid = reservations.filter(r => r.payment?.status === PaymentStatus.SUCCEEDED);
+  const refundedIds = new Set<string>();
+  for (const r of paid) {
+    if (await executeRefund(r.payment!, event, {})) refundedIds.add(r.id);
+  }
+  await Promise.all(reservations.map(r => notify(r.userId, "Événement annulé", `« ${event.title} » a été annulé.${refundedIds.has(r.id) ? ` Vous avez été intégralement remboursé(e) (${(r.payment!.amountCents / 100).toFixed(2)} €).` : ""}`)));
+  await audit(currentId(request), "CANCEL_EVENT", "Event", id, { affectedReservations: reservations.length, refunded: refundedIds.size, refundFailed: paid.length - refundedIds.size });
+  return { cancelled: true, refundedCount: refundedIds.size, refundFailedCount: paid.length - refundedIds.size };
 });
+// Exception admin motivée (§7) : en dehors du délai de 24h, un motif est obligatoire — sinon le
+// remboursement relève du calcul automatique déjà exécuté à l'annulation, pas de cette route.
 app.post("/admin/payments/:id/refund", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   if (!stripe) return reply.code(503).send({ error: "Stripe n’est pas configuré sur ce serveur" });
   const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { reason } = z.object({ reason: z.string().min(3).max(1000).optional() }).parse(request.body ?? {});
   const payment = await prisma.payment.findUniqueOrThrow({ where: { id }, include: { reservation: { include: { user: true, event: true } }, ledgerEntry: true } });
   if (payment.status !== PaymentStatus.SUCCEEDED) return reply.code(409).send({ error: "Seul un paiement réussi peut être remboursé" });
   if (!payment.providerRef) return reply.code(409).send({ error: "Aucune référence de paiement Stripe associée" });
-  await stripe.refunds.create({ payment_intent: payment.providerRef });
-  await prisma.payment.update({ where: { id }, data: { status: PaymentStatus.REFUNDED, refundedAt: new Date() } });
-  // La somme due au restaurant n'est jamais récupérée automatiquement si elle a déjà été marquée
-  // reversée : ce cas reste à traiter manuellement (voir cahier des charges §10), simplement signalé
-  // clairement ici plutôt que d'inventer une procédure de recouvrement automatique.
-  let alreadyPaidOutWarning = false;
-  if (payment.ledgerEntry) {
-    await prisma.ledgerEntry.update({ where: { id: payment.ledgerEntry.id }, data: { refundedAmountCents: payment.ledgerEntry.grossAmountCents } });
-    alreadyPaidOutWarning = !!payment.ledgerEntry.paidOutAt;
-    if (alreadyPaidOutWarning) {
-      const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
-      await Promise.all(admins.map(a => notify(a.id, "Remboursement après reversement déjà marqué", `Le paiement remboursé pour « ${payment.reservation.event.title} » avait déjà été marqué comme reversé au restaurant : à régulariser manuellement.`)));
-    }
-  }
+  const { eligible } = refundEligibility(payment.reservation.event.startsAt);
+  if (!eligible && !reason) return reply.code(400).send({ error: "Motif obligatoire : cette annulation est à 24 heures ou moins de l’événement, il s’agit d’une exception à la politique de remboursement." });
+  const ok = await executeRefund(payment, payment.reservation.event, { exceptionReason: eligible ? undefined : reason });
+  if (!ok) return reply.code(502).send({ error: "Le remboursement a échoué côté prestataire ; les administrateurs ont été notifiés." });
+  const alreadyPaidOutWarning = !!payment.ledgerEntry?.paidOutAt;
   await notify(payment.reservation.userId, "Remboursement effectué", `Votre paiement pour « ${payment.reservation.event.title} » a été remboursé.`);
-  await audit(currentId(request), "REFUND_PAYMENT", "Payment", id, { alreadyPaidOutWarning });
-  return { refunded: true, alreadyPaidOutWarning };
+  await audit(currentId(request), "REFUND_PAYMENT", "Payment", id, { alreadyPaidOutWarning, exception: !eligible, reason });
+  return { refunded: true, alreadyPaidOutWarning, exception: !eligible };
 });
 // Le restaurateur peut demander un remboursement AVEC MOTIF, jamais l'exécuter lui-même : cette
 // route ne fait qu'enregistrer la demande et notifier le super-admin, qui décide via l'endpoint
@@ -941,7 +1067,7 @@ app.post("/admin/restaurants/:id/commission-rate", { preHandler: roles(UserRole.
 app.post("/admin/waitlist/:id/promote", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const entry = await prisma.waitlistEntry.findUniqueOrThrow({ where: { id }, include: { application: true } });
-  const result = await claimReservation(entry.eventId, entry.application);
+  const result = await claimReservation(entry.eventId, entry.application, paymentDeadline(new Date(), getSetting("WAITLIST_OFFER_WINDOW_HOURS")));
   if (!result.ok) return reply.code(409).send({ error: result.reason === "FULL" ? "Plus aucune place disponible pour cette catégorie" : "Catégorie de quota manquante pour ce participant" });
   await prisma.waitlistEntry.update({ where: { id }, data: { offeredAt: new Date(), expiresAt: result.reservation.expiresAt } });
   await notify(entry.userId, "Une place vous a été attribuée", `Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet.`);
@@ -984,7 +1110,7 @@ app.delete("/admin/interview-slots/:id", { preHandler: roles(UserRole.ADMIN) }, 
 });
 const perksInput = { includesDrink: z.boolean().default(false), includesStarter: z.boolean().default(false), includesMain: z.boolean().default(false), includesDessert: z.boolean().default(false), perksDescription: z.string().max(500).optional() };
 app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
-  const input = z.object({ venueRestaurantId: z.string().optional(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), zone: z.enum(EVENT_ZONES as [string, ...string[]]), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false), ...perksInput }).parse(request.body);
+  const input = z.object({ venueRestaurantId: z.string().optional(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), flow: z.enum(["SCREENING", "DIRECT"]).optional(), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), zone: z.enum(EVENT_ZONES as [string, ...string[]]), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false), ...perksInput }).parse(request.body);
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
   // Un restaurateur ne prépare jamais qu'un brouillon : seul le super-admin peut publier (POST /admin/events/:id/review-decision).
@@ -996,7 +1122,7 @@ app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER
     venueRestaurantId = venue.id;
   }
   const event = await prisma.event.create({ data: {
-    title: input.title, slug: input.slug, category: input.category, description: input.description,
+    title: input.title, slug: input.slug, category: input.category, flow: (token.role === UserRole.ADMIN ? input.flow : undefined) ?? suggestedFlowForCategory(input.category), description: input.description,
     startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), district: input.district, address: input.address, zone: input.zone,
     capacity: input.capacity, priceCents: input.priceCents,
     includesDrink: input.includesDrink, includesStarter: input.includesStarter, includesMain: input.includesMain, includesDessert: input.includesDessert, perksDescription: input.perksDescription,
@@ -1015,13 +1141,18 @@ app.patch("/admin/events/:id", { preHandler: roles(UserRole.ADMIN, UserRole.ORGA
   const input = z.object({
     title: z.string().min(3).optional(), description: z.string().min(20).optional(), district: z.string().optional(), address: z.string().optional(),
     capacity: z.number().int().min(5).max(500).optional(), priceCents: z.number().int().min(0).optional(),
-    startsAt: z.string().optional(), endsAt: z.string().optional(),
+    startsAt: z.string().optional(), endsAt: z.string().optional(), flow: z.enum(["SCREENING", "DIRECT"]).optional(),
     ...Object.fromEntries(Object.entries(perksInput).map(([k, v]) => [k, v.optional()]))
   }).parse(request.body);
   const activeReservations = await prisma.reservation.count({ where: { eventId: id, cancelledAt: null } });
   if (input.capacity !== undefined && input.capacity < activeReservations) return reply.code(400).send({ error: `Impossible de descendre sous ${activeReservations} places déjà payées ou bloquées` });
+  // Seul le super-admin décide du parcours (sélection ou accès direct) : jamais le restaurateur,
+  // qui ne définit que la logistique de sa soirée (voir §8.3 du cahier des charges).
+  const token = request.user as TokenUser;
+  if (input.flow !== undefined && token.role !== UserRole.ADMIN) return reply.code(403).send({ error: "Seul un administrateur peut changer le parcours d’un événement" });
   const data: Record<string, unknown> = { ...input };
   delete data.startsAt; delete data.endsAt;
+  if (token.role !== UserRole.ADMIN) delete data.flow;
   const dateChanged = (input.startsAt && new Date(input.startsAt).getTime() !== event.startsAt.getTime()) || (input.endsAt && new Date(input.endsAt).getTime() !== event.endsAt.getTime());
   if (dateChanged && activeReservations > 0) {
     data.proposedStartsAt = input.startsAt ? new Date(input.startsAt) : event.startsAt;
