@@ -128,7 +128,12 @@ const executeRefund = async (
 };
 
 type ClaimableApplication = { id: string; userId: string; quotaCategory: QuotaCategory | null };
-type ClaimResult = { ok: true; reservation: Awaited<ReturnType<typeof prisma.reservation.upsert>> } | { ok: false; reason: "NO_CATEGORY" | "FULL" };
+type ClaimResult = { ok: true; reservation: Awaited<ReturnType<typeof prisma.reservation.upsert>> } | { ok: false; reason: "NO_CATEGORY" | "FULL" | "OVERLAP" };
+
+// Chevauchement horaire entre deux événements (§11), calculé côté serveur à partir de startsAt/
+// endsAt exclusivement : deux créneaux contigus (l'un finit quand l'autre commence) ne se chevauchent
+// pas, seule une intersection stricte des intervalles compte.
+const eventsOverlap = (a: { startsAt: Date; endsAt: Date }, b: { startsAt: Date; endsAt: Date }) => a.startsAt < b.endsAt && b.startsAt < a.endsAt;
 
 // Attribue une place de manière atomique (créneau à quota ou capacité globale) et pose une réservation
 // dont la durée de vie est TOUJOURS fournie par l'appelant : un verrou court (§5) pendant une tentative
@@ -139,7 +144,13 @@ type ClaimResult = { ok: true; reservation: Awaited<ReturnType<typeof prisma.res
 // pour empêcher toute survente en cas de réservations simultanées.
 const claimReservation = async (eventId: string, application: ClaimableApplication, expiresAt: Date): Promise<ClaimResult> => {
   const hasQuotas = (await prisma.eventQuota.count({ where: { eventId } })) > 0;
+  const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
   const run = async (tx: Prisma.TransactionClient): Promise<ClaimResult> => {
+    // Chevauchement horaire (§11) : centralisé ici, car les trois chemins qui attribuent réellement
+    // une place (paiement direct, offre de liste d'attente, événement alternatif accepté) passent
+    // tous par cette fonction — jamais deux réservations actives sur des événements qui se chevauchent.
+    const overlapping = await tx.reservation.findFirst({ where: { userId: application.userId, cancelledAt: null, applicationId: { not: application.id }, event: { startsAt: { lt: event.endsAt }, endsAt: { gt: event.startsAt } } } });
+    if (overlapping) return { ok: false, reason: "OVERLAP" };
     if (hasQuotas) {
       if (!application.quotaCategory) return { ok: false, reason: "NO_CATEGORY" };
       const quota = await tx.eventQuota.findUnique({ where: { eventId_category: { eventId, category: application.quotaCategory } } });
@@ -147,7 +158,6 @@ const claimReservation = async (eventId: string, application: ClaimableApplicati
       const updated = await tx.eventQuota.updateMany({ where: { id: quota.id, heldCount: { lt: quota.capacity } }, data: { heldCount: { increment: 1 } } });
       if (updated.count !== 1) return { ok: false, reason: "FULL" };
     } else {
-      const event = await tx.event.findUniqueOrThrow({ where: { id: eventId } });
       const occupied = await tx.reservation.count({ where: { eventId, cancelledAt: null, applicationId: { not: application.id } } });
       if (occupied >= event.capacity) return { ok: false, reason: "FULL" };
     }
@@ -184,16 +194,20 @@ const releaseReservationSlot = async (tx: Prisma.TransactionClient, reservation:
 // différencié seul (sans quota) ne doit jamais créer de file d'attente séparée par catégorie.
 const offerNextWaitlistEntry = async (eventId: string, category: QuotaCategory | null) => {
   const hasQuotas = (await prisma.eventQuota.count({ where: { eventId } })) > 0;
-  const entry = await prisma.waitlistEntry.findFirst({ where: { eventId, offeredAt: null, ...(hasQuotas ? { quotaCategory: category } : {}) }, orderBy: { createdAt: "asc" }, include: { application: true } });
-  if (!entry) return;
-  // Fenêtre d'offre exclusive (pas un verrou de paiement : pas de risque de survente, la place est
-  // déjà décomptée de façon atomique pour cette seule personne) — délai généreux car il s'agit de
-  // laisser le temps de remarquer la notification, pas de protéger une vente simultanée.
-  const result = await claimReservation(eventId, entry.application, paymentDeadline(new Date(), getSetting("WAITLIST_OFFER_WINDOW_HOURS")));
-  if (!result.ok) return;
-  await prisma.waitlistEntry.update({ where: { id: entry.id }, data: { offeredAt: new Date(), expiresAt: result.reservation.expiresAt } });
-  const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
-  await notify(entry.userId, "Une place s’est libérée !", `Une place pour « ${event.title} » vous est proposée. Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet, sans quoi elle sera proposée au participant suivant.`);
+  const candidates = await prisma.waitlistEntry.findMany({ where: { eventId, offeredAt: null, ...(hasQuotas ? { quotaCategory: category } : {}) }, orderBy: { createdAt: "asc" }, include: { application: true } });
+  for (const entry of candidates) {
+    // Fenêtre d'offre exclusive (pas un verrou de paiement : pas de risque de survente, la place est
+    // déjà décomptée de façon atomique pour cette seule personne) — délai généreux car il s'agit de
+    // laisser le temps de remarquer la notification, pas de protéger une vente simultanée.
+    const result = await claimReservation(eventId, entry.application, paymentDeadline(new Date(), getSetting("WAITLIST_OFFER_WINDOW_HOURS")));
+    // Un chevauchement horaire (§11) avec une autre réservation active ne doit jamais bloquer toute la
+    // file : on passe au suivant plutôt que de laisser la place sans preneur indéfiniment.
+    if (!result.ok) continue;
+    await prisma.waitlistEntry.update({ where: { id: entry.id }, data: { offeredAt: new Date(), expiresAt: result.reservation.expiresAt } });
+    const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
+    await notify(entry.userId, "Une place s’est libérée !", `Une place pour « ${event.title} » vous est proposée. Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet, sans quoi elle sera proposée au participant suivant.`);
+    return;
+  }
 };
 
 // Une place existe réellement pour cette catégorie (ou en capacité globale si l'événement n'a pas
@@ -585,6 +599,9 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
     const result = await claimReservation(application.eventId, application, lockExpiresAt);
     if (!result.ok) {
       if (result.reason === "NO_CATEGORY") return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de payer" });
+      // Chevauchement horaire (§11) : rejeté franchement, jamais mis en liste d'attente pour un
+      // événement qu'il ne pourrait de toute façon pas honorer.
+      if (result.reason === "OVERLAP") return reply.code(409).send({ error: "Vous avez déjà une place réservée sur un événement qui chevauche cet horaire" });
       let waitlistEntry = await prisma.waitlistEntry.findUnique({ where: { eventId_userId: { eventId: application.eventId, userId } } });
       if (!waitlistEntry) {
         waitlistEntry = await prisma.waitlistEntry.create({ data: { eventId: application.eventId, userId, applicationId: application.id, quotaCategory: application.quotaCategory, position: (await prisma.waitlistEntry.count({ where: { eventId: application.eventId } })) + 1 } });
@@ -770,7 +787,7 @@ app.post("/alternative-offers/:id/respond", { preHandler: auth }, async (request
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const { accept } = z.object({ accept: z.boolean() }).parse(request.body);
   const userId = currentId(request);
-  const offer = await prisma.alternativeOffer.findFirstOrThrow({ where: { id, userId }, include: { alternativeEvent: true } });
+  const offer = await prisma.alternativeOffer.findFirstOrThrow({ where: { id, userId }, include: { alternativeEvent: true, originalEvent: true } });
   if (offer.status !== AlternativeOfferStatus.PENDING) return reply.code(409).send({ error: "Cette proposition a déjà été traitée" });
   if (offer.respondsBy < new Date()) { await prisma.alternativeOffer.update({ where: { id }, data: { status: AlternativeOfferStatus.EXPIRED } }); return reply.code(409).send({ error: "Cette proposition a expiré" }); }
   if (!accept) return prisma.alternativeOffer.update({ where: { id }, data: { status: AlternativeOfferStatus.DECLINED, respondedAt: new Date() } });
@@ -803,6 +820,13 @@ app.post("/alternative-offers/:id/respond", { preHandler: auth }, async (request
     application = await prisma.application.update({ where: { id: application.id }, data: { status: ApplicationStatus.PAYMENT_PENDING } });
   }
   const updated = await prisma.alternativeOffer.update({ where: { id }, data: { status: AlternativeOfferStatus.ACCEPTED, respondedAt: new Date() } });
+  // §11 : un horaire incompatible avec l'événement d'origine rend le maintien sur sa liste d'attente
+  // sans objet (impossible d'honorer les deux) — retrait automatique, jamais laissé à la charge du
+  // participant. Un horaire compatible (créneau différent) laisse volontairement l'inscription
+  // d'origine active : les deux événements restent honorables.
+  if (eventsOverlap(offer.originalEvent, offer.alternativeEvent)) {
+    await prisma.waitlistEntry.deleteMany({ where: { eventId: offer.originalEventId, userId } });
+  }
   await notify(userId, "Événement alternatif accepté", `Vous pouvez maintenant régler votre billet pour « ${offer.alternativeEvent.title} ».`);
   await audit(userId, "ACCEPT_ALTERNATIVE_OFFER", "AlternativeOffer", id);
   return { ...updated, application };
@@ -1318,7 +1342,10 @@ app.post("/admin/waitlist/:id/promote", { preHandler: roles(UserRole.ADMIN) }, a
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const entry = await prisma.waitlistEntry.findUniqueOrThrow({ where: { id }, include: { application: true } });
   const result = await claimReservation(entry.eventId, entry.application, paymentDeadline(new Date(), getSetting("WAITLIST_OFFER_WINDOW_HOURS")));
-  if (!result.ok) return reply.code(409).send({ error: result.reason === "FULL" ? "Plus aucune place disponible pour cette catégorie" : "Catégorie de quota manquante pour ce participant" });
+  if (!result.ok) {
+    const messages: Record<typeof result.reason, string> = { FULL: "Plus aucune place disponible pour cette catégorie", NO_CATEGORY: "Catégorie de quota manquante pour ce participant", OVERLAP: "Ce participant a déjà une réservation active sur un événement qui chevauche cet horaire" };
+    return reply.code(409).send({ error: messages[result.reason] });
+  }
   await prisma.waitlistEntry.update({ where: { id }, data: { offeredAt: new Date(), expiresAt: result.reservation.expiresAt } });
   await notify(entry.userId, "Une place vous a été attribuée", `Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet.`);
   await audit(currentId(request), "ADMIN_PROMOTE_WAITLIST", "WaitlistEntry", id);

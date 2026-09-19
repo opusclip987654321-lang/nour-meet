@@ -257,6 +257,110 @@ describe("aucune survente si un paiement Stripe arrive après libération de la 
   }, 20_000);
 });
 
+describe("chevauchement horaire interdit entre deux réservations actives (§11)", () => {
+  it("refuse une place sur un événement qui chevauche une réservation déjà active, mais accepte un créneau contigu", async () => {
+    // Fenêtres éloignées de toute autre date utilisée par les autres tests pour rester déterministe.
+    const base = Date.now() + 200 * 86_400_000;
+    const overlapping = await prisma.event.create({ data: {
+      slug: `test-overlap-a-${Date.now()}`, title: "Test chevauchement A", category: "Networking",
+      description: "Événement de test pour le chevauchement horaire.",
+      startsAt: new Date(base), endsAt: new Date(base + 3 * 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000, status: "PUBLISHED"
+    } });
+    const conflicting = await prisma.event.create({ data: {
+      slug: `test-overlap-b-${Date.now()}`, title: "Test chevauchement B", category: "Networking",
+      description: "Événement de test pour le chevauchement horaire, avec un horaire qui empiète sur le premier.",
+      startsAt: new Date(base + 1.5 * 3_600_000), endsAt: new Date(base + 4.5 * 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000, status: "PUBLISHED"
+    } });
+    const contiguous = await prisma.event.create({ data: {
+      // Commence exactement quand le premier finit : contigu, pas de chevauchement au sens strict.
+      slug: `test-overlap-c-${Date.now()}`, title: "Test chevauchement C", category: "Networking",
+      description: "Événement de test pour le chevauchement horaire, avec un horaire strictement contigu au premier.",
+      startsAt: new Date(base + 3 * 3_600_000), endsAt: new Date(base + 5 * 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000, status: "PUBLISHED"
+    } });
+    createdEventIds.push(overlapping.id, conflicting.id, contiguous.id);
+
+    const participant = await directParticipant("OverlapTest");
+    createdUserIds.push(participant.userId);
+
+    const firstApply = await applyToEvent(overlapping.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    const firstPay = await api(`/applications/${firstApply.body.application.id}/payment-intent`, { method: "POST" }, participant.token);
+    expect(firstPay.status).toBe(200);
+
+    const conflictingApply = await applyToEvent(conflicting.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    const conflictingPay = await api(`/applications/${conflictingApply.body.application.id}/payment-intent`, { method: "POST" }, participant.token);
+    expect(conflictingPay.status).toBe(409);
+    expect((conflictingPay.body as any).error).toMatch(/chevauche/i);
+    expect((conflictingPay.body as any).waitlisted).toBeFalsy();
+
+    const contiguousApply = await applyToEvent(contiguous.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    const contiguousPay = await api(`/applications/${contiguousApply.body.application.id}/payment-intent`, { method: "POST" }, participant.token);
+    expect(contiguousPay.status).toBe(200);
+  });
+});
+
+describe("retrait automatique de la liste d’attente d’origine si l’alternatif accepté est incompatible (§11)", () => {
+  it("retire l’inscription d’origine quand l’alternatif accepté chevauche son horaire", async () => {
+    const base = Date.now() + 210 * 86_400_000;
+    const original = await prisma.event.create({ data: {
+      slug: `test-altwaitlist-orig-incompat-${Date.now()}`, title: "Test original (incompatible)", category: "Networking",
+      description: "Événement de test pour le retrait de liste d'attente.",
+      startsAt: new Date(base), endsAt: new Date(base + 3 * 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000, status: "PUBLISHED"
+    } });
+    const alternative = await prisma.event.create({ data: {
+      slug: `test-altwaitlist-alt-incompat-${Date.now()}`, title: "Test alternatif (incompatible)", category: "Networking",
+      description: "Événement de test pour le retrait de liste d'attente, horaire chevauchant l'original.",
+      startsAt: new Date(base + 1 * 3_600_000), endsAt: new Date(base + 4 * 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000, status: "PUBLISHED"
+    } });
+    createdEventIds.push(original.id, alternative.id);
+
+    const participant = await directParticipant("AltWaitlistIncompat");
+    createdUserIds.push(participant.userId);
+    const applyRes = await applyToEvent(original.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    await prisma.waitlistEntry.create({ data: { eventId: original.id, userId: participant.userId, applicationId: applyRes.body.application.id, position: 1 } });
+    const offer = await prisma.alternativeOffer.create({ data: { userId: participant.userId, originalEventId: original.id, alternativeEventId: alternative.id, respondsBy: new Date(Date.now() + 86_400_000) } });
+
+    const respond = await api(`/alternative-offers/${offer.id}/respond`, { method: "POST", body: JSON.stringify({ accept: true }) }, participant.token);
+    expect(respond.status).toBe(200);
+
+    const remainingEntry = await prisma.waitlistEntry.findUnique({ where: { eventId_userId: { eventId: original.id, userId: participant.userId } } });
+    expect(remainingEntry).toBeNull();
+  });
+
+  it("conserve l’inscription d’origine quand l’alternatif accepté a un horaire compatible (pas de chevauchement)", async () => {
+    const base = Date.now() + 220 * 86_400_000;
+    const original = await prisma.event.create({ data: {
+      slug: `test-altwaitlist-orig-compat-${Date.now()}`, title: "Test original (compatible)", category: "Networking",
+      description: "Événement de test pour le retrait de liste d'attente.",
+      startsAt: new Date(base), endsAt: new Date(base + 3 * 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000, status: "PUBLISHED"
+    } });
+    const alternative = await prisma.event.create({ data: {
+      slug: `test-altwaitlist-alt-compat-${Date.now()}`, title: "Test alternatif (compatible)", category: "Networking",
+      description: "Événement de test pour le retrait de liste d'attente, horaire distinct de l'original.",
+      startsAt: new Date(base + 10 * 86_400_000), endsAt: new Date(base + 10 * 86_400_000 + 3 * 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000, status: "PUBLISHED"
+    } });
+    createdEventIds.push(original.id, alternative.id);
+
+    const participant = await directParticipant("AltWaitlistCompat");
+    createdUserIds.push(participant.userId);
+    const applyRes = await applyToEvent(original.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    await prisma.waitlistEntry.create({ data: { eventId: original.id, userId: participant.userId, applicationId: applyRes.body.application.id, position: 1 } });
+    const offer = await prisma.alternativeOffer.create({ data: { userId: participant.userId, originalEventId: original.id, alternativeEventId: alternative.id, respondsBy: new Date(Date.now() + 86_400_000) } });
+
+    const respond = await api(`/alternative-offers/${offer.id}/respond`, { method: "POST", body: JSON.stringify({ accept: true }) }, participant.token);
+    expect(respond.status).toBe(200);
+
+    const remainingEntry = await prisma.waitlistEntry.findUnique({ where: { eventId_userId: { eventId: original.id, userId: participant.userId } } });
+    expect(remainingEntry).toBeTruthy();
+  });
+});
+
 async function newOrganizer(displayName: string) {
   const phone = testPhone();
   await api("/auth/request-otp", { method: "POST", body: JSON.stringify({ phone }) });
