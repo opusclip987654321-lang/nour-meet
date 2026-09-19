@@ -103,6 +103,8 @@ export interface PublicEvent {
   imageUrl: string;
   photos: string[];
   perks: { drink: boolean; starter: boolean; main: boolean; dessert: boolean; description: string | null };
+  minAge: number | null;
+  maxAge: number | null;
   capacity: number;
   confirmedCount: number;
   priceCents: number;

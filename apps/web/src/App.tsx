@@ -1,5 +1,5 @@
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import jsQR from "jsqr";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
@@ -35,11 +35,46 @@ const STAFF_ROLES = ["ADMIN","ORGANIZER","MODERATOR","RECEPTION"];
 function Header() {
   const { user, logout } = useAuth();
   const isStaff = !!user && STAFF_ROLES.includes(user.role);
-  return <header className="site-header"><Logo/><nav>{isStaff?<><NavLink to="/admin">Administration</NavLink><NavLink to="/">Voir le site public</NavLink></>:<><NavLink to="/">Accueil</NavLink><NavLink to="/events">Événements</NavLink>{user && <NavLink to="/dashboard">Mon espace</NavLink>}</>}</nav><div className="header-actions">{user ? <><span className="member-name">{user.displayName}</span><button className="link-button" onClick={logout}>Déconnexion</button></> : <Link className="button small" to="/login">Se connecter</Link>}</div></header>;
+  return <header className="site-header"><Logo/><nav>{isStaff?<><NavLink to="/admin">Administration</NavLink><NavLink to="/">Voir le site public</NavLink></>:<><NavLink to="/">Accueil</NavLink><NavLink to="/events">Événements</NavLink><NavLink to="/concept">Le concept</NavLink>{user && <NavLink to="/dashboard">Mon espace</NavLink>}</>}</nav><div className="header-actions">{user ? <><span className="member-name">{user.displayName}</span><button className="link-button" onClick={logout}>Déconnexion</button></> : <Link className="button small" to="/login">Se connecter</Link>}</div></header>;
 }
 function Layout({ children }: {children: ReactNode}) { return <><Header/><main>{children}</main><footer><Logo/><p>Paris et Île-de-France · Expérience privée · Données protégées</p></footer></>; }
 function Loading() { return <div className="state-page"><div className="spinner"/><h2>Chargement…</h2></div>; }
 function Notice({ kind="info", children }: {kind?: "info"|"error"|"success", children: ReactNode}) { return <div className={`notice ${kind}`}>{children}</div>; }
+
+// « J'y vais, viens avec moi » (§12) : Web Share API sur appareils compatibles, sinon copie du
+// lien et boutons Facebook/Instagram/TikTok là où techniquement possible (Instagram et TikTok
+// n'offrant pas d'intention de partage par URL, seule la copie du lien fonctionne pour eux).
+function ShareButton({ event }: { event: PublicEvent }) {
+  const { user } = useAuth();
+  const [url, setUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const resolveUrl = async () => {
+    if (url) return url;
+    let resolved = `${window.location.origin}/events/${event.slug}`;
+    if (user) { try { resolved = (await api<{ url: string }>(`/events/${event.id}/share-link`, { method: "POST" })).url; } catch { /* lien public par défaut */ } }
+    setUrl(resolved); return resolved;
+  };
+  const share = async () => {
+    setError("");
+    const shareUrl = await resolveUrl();
+    const text = `J’y vais, viens avec moi : « ${event.title} » sur Nūr Meet.`;
+    if (navigator.share) { try { await navigator.share({ title: event.title, text, url: shareUrl }); return; } catch { /* annulé ou indisponible, on retombe sur la copie */ } }
+    try { await navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2500); }
+    catch { setError("Impossible de copier le lien automatiquement."); }
+  };
+  const copyForInstagramOrTikTok = async () => { const shareUrl = await resolveUrl(); try { await navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { setError("Impossible de copier le lien."); } };
+  const facebookUrl = url ? `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}` : null;
+  return <div className="share-block">
+    <button type="button" className="button secondary full" onClick={share}>J’y vais, viens avec moi</button>
+    <div className="share-row">
+      {facebookUrl?<a className="link-button" href={facebookUrl} target="_blank" rel="noopener noreferrer">Facebook</a>:<button type="button" className="link-button" onClick={async()=>{await resolveUrl()}}>Facebook</button>}
+      <button type="button" className="link-button" onClick={copyForInstagramOrTikTok}>Copier pour Instagram / TikTok</button>
+    </div>
+    {copied && <p className="fine share-copied">Lien copié !</p>}
+    {error && <p className="fine share-copied">{error}</p>}
+  </div>;
+}
 function Protected({ children, roles }: {children: ReactNode; roles?: string[]}) {
   const {user,loading}=useAuth();
   if(loading)return <Loading/>;
@@ -53,9 +88,34 @@ function EventCard({ event }: {event: PublicEvent}) {
   const priceLabel=event.priceTiers.length>0?`À partir de ${money(Math.min(...event.priceTiers.map(t=>t.amountCents)))}`:money(event.priceCents);
   return <article className="event-card"><Link to={`/events/${event.slug}`} className="event-art"><img src={imgUrl(event.imageUrl)} alt={event.title} loading="lazy"/><span className="category-badge">{event.category}</span>{full&&<span className="full-badge">Complet</span>}</Link><div className="event-copy"><small>{dateTime(event.startsAt).toUpperCase()}</small><h3>{event.title}</h3><p>{event.district} · {full?"Complet":`${event.capacity-event.confirmedCount} places restantes`}</p><div><strong>{priceLabel}</strong><Link to={`/events/${event.slug}`}>Découvrir →</Link></div></div></article>;
 }
+function TestimonialsSection({ eventType }: { eventType?: string }) {
+  const [items,setItems]=useState<any[]>([]);
+  useEffect(()=>{api<any[]>(`/testimonials${eventType?`?eventType=${encodeURIComponent(eventType)}`:""}`).then(setItems).catch(()=>{})},[eventType]);
+  if(items.length===0) return null;
+  return <section className="section"><div className="section-title"><span className="eyebrow">ILS EN PARLENT</span><h2>Des rencontres qui comptent.</h2></div><div className="feature-grid">{items.map(t=><div key={t.id} className="testimonial-card"><span className="eyebrow">{t.eventType.toUpperCase()}</span><blockquote>« {t.text} »</blockquote><b>{t.displayName}</b>{t.rating&&<span className="fine">{"★".repeat(t.rating)}{"☆".repeat(5-t.rating)}</span>}</div>)}</div></section>;
+}
+
 function Home() {
   const [events,setEvents]=useState<PublicEvent[]>([]); useEffect(()=>{api<PublicEvent[]>("/events").then(setEvents).catch(()=>{})},[]);
-  return <Layout><section className="hero"><div><span className="eyebrow">PARIS · ÎLE-DE-FRANCE</span><h1>Des rencontres<br/><em>qui comptent.</em></h1><p>Des événements élégants et confidentiels, pensés pour créer de vraies connexions dans un cadre respectueux.</p><div className="hero-actions"><Link className="button" to="/events">Voir les événements</Link><a className="button secondary" href="#concept">Découvrir le concept</a></div><div className="trust"><span>✓ Profils sélectionnés</span><span>✓ Lieux premium</span><span>✓ Cadre confidentiel</span></div></div><div className="hero-art"><div className="arch"><span>ن</span></div><div className="next-card">{events[0]?<img className="next-thumb" src={imgUrl(events[0].imageUrl)} alt=""/>:<div className="avatar">N</div>}<div><small>PROCHAINE SOIRÉE</small><strong>{events[0]?.title??"Dîner & Connexions"}</strong><span>{events[0]?dateTime(events[0].startsAt):"Samedi · Paris"}</span></div></div></div></section><section id="concept" className="section"><div className="section-title"><span className="eyebrow">LE CONCEPT</span><h2>Du réel au numérique, avec votre consentement.</h2></div><div className="feature-grid"><div><b>01</b><h3>Candidature</h3><p>Chaque nouveau membre complète son profil et réserve un court appel.</p></div><div><b>02</b><h3>Rencontre</h3><p>Les événements réunissent 20 à 40 personnes dans un cadre privé.</p></div><div><b>03</b><h3>Contact choisi</h3><p>Un code personnel permet d’envoyer une demande. Le chat s’ouvre après acceptation.</p></div></div></section>{events.length>0&&<section className="section"><div className="section-title row"><div><span className="eyebrow">À VENIR</span><h2>Les prochaines rencontres</h2></div><Link to="/events">Tout afficher →</Link></div><div className="event-grid">{events.slice(0,3).map(e=><EventCard key={e.id} event={e}/>)}</div></section>}</Layout>;
+  return <Layout><section className="hero"><div><span className="eyebrow">PARIS · ÎLE-DE-FRANCE</span><h1>Des rencontres<br/><em>qui comptent.</em></h1><p>Des événements élégants et confidentiels, pensés pour créer de vraies connexions dans un cadre respectueux.</p><div className="hero-actions"><Link className="button" to="/events">Voir les événements</Link><Link className="button secondary" to="/concept">Découvrir le concept</Link></div><div className="trust"><span>✓ Profils sélectionnés</span><span>✓ Lieux premium</span><span>✓ Cadre confidentiel</span></div></div><div className="hero-art"><div className="arch"><span>ن</span></div><div className="next-card">{events[0]?<img className="next-thumb" src={imgUrl(events[0].imageUrl)} alt=""/>:<div className="avatar">N</div>}<div><small>PROCHAINE SOIRÉE</small><strong>{events[0]?.title??"Dîner & Connexions"}</strong><span>{events[0]?dateTime(events[0].startsAt):"Samedi · Paris"}</span></div></div></div></section><section id="concept" className="section"><div className="section-title"><span className="eyebrow">LE CONCEPT</span><h2>Du réel au numérique, avec votre consentement.</h2></div><div className="feature-grid"><div><b>01</b><h3>Candidature</h3><p>Chaque nouveau membre complète son profil et réserve un court appel.</p></div><div><b>02</b><h3>Rencontre</h3><p>Les événements réunissent 20 à 40 personnes dans un cadre privé.</p></div><div><b>03</b><h3>Contact choisi</h3><p>Un code personnel permet d’envoyer une demande. Le chat s’ouvre après acceptation.</p></div></div><Link to="/concept" className="fine">En savoir plus sur le concept →</Link></section>{events.length>0&&<section className="section"><div className="section-title row"><div><span className="eyebrow">À VENIR</span><h2>Les prochaines rencontres</h2></div><Link to="/events">Tout afficher →</Link></div><div className="event-grid">{events.slice(0,3).map(e=><EventCard key={e.id} event={e}/>)}</div></section>}<TestimonialsSection/></Layout>;
+}
+
+function Concept() {
+  const [video,setVideo]=useState<{url:string;thumbnail:string;subtitles:string}|null>(null);
+  // Les réglages vidéo sont publics par nature (contenu éditorial), mais /admin/settings est
+  // réservé à l'administration : on lit les trois clés utiles depuis une petite route publique dédiée.
+  useEffect(()=>{api<{url:string;thumbnail:string;subtitles:string}>("/concept-video").then(setVideo).catch(()=>{})},[]);
+  return <Layout><section className="page"><span className="eyebrow">LE CONCEPT</span><h1>Comment fonctionne Nūr Meet.</h1>
+    {video?.url?<video controls poster={video.thumbnail||undefined} className="concept-video"><source src={video.url}/>{video.subtitles&&<track kind="subtitles" src={video.subtitles} srcLang="fr" label="Français" default/>}Votre navigateur ne prend pas en charge la vidéo — voir le résumé écrit ci-dessous.</video>
+    :<div className="concept-video-placeholder"><span>▶</span><p>La vidéo de présentation (60 à 90 secondes) sera bientôt disponible ici. En attendant, voici comment tout fonctionne :</p></div>}
+    <div className="feature-grid" style={{marginTop:40}}>
+      <div><b>01</b><h3>Speed dating, avec sélection</h3><p>Un questionnaire privé, un entretien téléphonique et une décision de notre équipe avant toute inscription : un cadre sérieux, pensé pour de vraies rencontres.</p></div>
+      <div><b>02</b><h3>Networking, en accès direct</h3><p>Un questionnaire professionnel non bloquant, puis une inscription immédiate : idéal pour élargir son réseau sans étape supplémentaire.</p></div>
+      <div><b>03</b><h3>Des profils sérieux, un cadre respectueux</h3><p>Chaque participant complète un profil et s’engage à respecter la charte de confidentialité et de respect mutuel de la communauté.</p></div>
+      <div><b>04</b><h3>Paiement et billet</h3><p>La place n’est acquise qu’après paiement confirmé ; un billet avec QR code personnel est alors délivré pour l’entrée.</p></div>
+      <div><b>05</b><h3>Déroulement de la soirée</h3><p>Accueil personnalisé, animation légère, temps libres, et la possibilité d’échanger un contact avec les personnes rencontrées.</p></div>
+    </div>
+  </section></Layout>;
 }
 
 function Events() {
@@ -180,6 +240,7 @@ function QuestionnaireForm({ requiresScreening, submitting, onSubmit }: { requir
 
 function EventDetail() {
   const {id}=useParams(); const {user}=useAuth();
+  const [searchParams]=useSearchParams();
   const [event,setEvent]=useState<PublicEvent|null>(null);
   const [application,setApplication]=useState<any>(null);
   const [loadingApplication,setLoadingApplication]=useState(true);
@@ -190,6 +251,15 @@ function EventDetail() {
   const [showQuestionnaire,setShowQuestionnaire]=useState(false);
 
   useEffect(()=>{api<PublicEvent>(`/events/${id}`).then(setEvent)},[id]);
+
+  // Partage attribué (§12) : le code de la personne qui a partagé le lien est capturé une seule
+  // fois, dès la visite, puis conservé pour la candidature — jamais recalculé après coup.
+  const shareCode=searchParams.get("ref");
+  useEffect(()=>{
+    if(!shareCode)return;
+    sessionStorage.setItem(`nour_ref_${id}`,shareCode);
+    api(`/share-links/${shareCode}/click`,{method:"POST"}).catch(()=>{});
+  },[shareCode,id]);
 
   useEffect(()=>{
     if(!user||!event){setLoadingApplication(false);return}
@@ -217,7 +287,8 @@ function EventDetail() {
   const apply=async(answers:Record<string,string>)=>{
     setBusy(true);setNotice(null);
     try{
-      const body=requiresScreening?{screeningAnswers:answers}:{networkingAnswers:answers};
+      const storedRef=sessionStorage.getItem(`nour_ref_${event.id}`)??undefined;
+      const body=requiresScreening?{screeningAnswers:answers,shareCode:storedRef}:{networkingAnswers:answers,shareCode:storedRef};
       const result=await api<any>(`/events/${event.id}/apply`,{method:"POST",body:JSON.stringify(body)});
       setApplication(result.application);setShowQuestionnaire(false);
       setNotice({kind:"success",text:"Candidature envoyée : vous pouvez maintenant régler votre billet."});
@@ -262,7 +333,7 @@ function EventDetail() {
   };
 
   const perkLabels=[event.perks.drink&&"Boisson incluse",event.perks.starter&&"Entrée incluse",event.perks.main&&"Plat inclus",event.perks.dessert&&"Dessert inclus"].filter(Boolean) as string[];
-  return <Layout><section className="event-hero" style={{backgroundImage:`linear-gradient(180deg,#0b0b0cb0,#0b0b0ce6),url(${imgUrl(event.imageUrl)})`}}><span className="eyebrow">{event.category.toUpperCase()}</span><h1>{event.title}</h1><p>{event.description}</p></section>{event.photos.length>0&&<section className="event-gallery">{event.photos.map((url,i)=><img key={i} src={imgUrl(url)} alt=""/>)}</section>}<section className="event-layout"><article><div className="facts"><div><small>DATE</small><b>{dateTime(event.startsAt)}</b></div><div><small>LIEU</small><b>{event.district}</b></div><div><small>CAPACITÉ</small><b>{event.capacity} participants</b></div></div>{event.quotas.length>0&&<div className="quota-breakdown"><small>PLACES PAR CATÉGORIE</small><div className="quota-rows">{event.quotas.map(q=><div key={q.category} className="quota-row"><span>{q.category==="HOMME"?"Hommes":"Femmes"}</span><b>{q.heldCount>=q.capacity?"Complet":`${q.capacity-q.heldCount} places`}</b></div>)}</div></div>}<h2>Une expérience pensée pour de vraies rencontres</h2><p>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité.</p>{(perkLabels.length>0||event.perks.description)&&<div className="event-perks">{perkLabels.map(l=><span key={l}>{l}</span>)}{event.perks.description&&<span>{event.perks.description}</span>}</div>}<ul><li>Profils sélectionnés</li><li>QR code d’entrée unique</li><li>Code de contact privé</li><li>Équipe présente sur place</li></ul></article><aside className="booking"><small>{event.priceTiers.length>0?"TARIFS":"À PARTIR DE"}</small>{event.priceTiers.length>0?<div className="quota-rows">{event.priceTiers.map(t=><div key={t.category} className="quota-row"><span>{t.category==="HOMME"?"Hommes":"Femmes"}</span><b>{money(t.amountCents)}</b></div>)}</div>:<strong>{money(event.priceCents)}</strong>}<div><span>Disponibilité</span><b>{event.quotas.length>0?(myQuota?(bucketFull?"Complet pour votre catégorie":`${myQuota.capacity-myQuota.heldCount} places pour vous`):"Places selon catégorie"):(bucketFull?"Complet":`${event.capacity-event.confirmedCount} places`)}</b></div>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
+  return <Layout><section className="event-hero" style={{backgroundImage:`linear-gradient(180deg,#0b0b0cb0,#0b0b0ce6),url(${imgUrl(event.imageUrl)})`}}><span className="eyebrow">{event.category.toUpperCase()}</span> <span className={`flow-badge ${requiresScreening?"screening":"direct"}`}>{requiresScreening?"◆ Sélection":"● Accès direct"}</span><h1>{event.title}</h1><p>{event.description}</p></section>{event.photos.length>0&&<section className="event-gallery">{event.photos.map((url,i)=><img key={i} src={imgUrl(url)} alt=""/>)}</section>}<section className="event-layout"><article><div className="facts"><div><small>DATE</small><b>{dateTime(event.startsAt)}</b></div><div><small>LIEU</small><b>{event.district}</b></div><div><small>CAPACITÉ</small><b>{event.capacity} participants</b></div>{(event.minAge||event.maxAge)&&<div><small>TRANCHE D’ÂGE</small><b>{event.minAge&&event.maxAge?`${event.minAge}-${event.maxAge} ans`:event.minAge?`${event.minAge} ans et plus`:`Jusqu’à ${event.maxAge} ans`}</b></div>}<div><small>ORGANISATEUR</small><b>{event.organizer.name}</b></div></div>{event.quotas.length>0&&<div className="quota-breakdown"><small>PLACES PAR CATÉGORIE</small><div className="quota-rows">{event.quotas.map(q=><div key={q.category} className="quota-row"><span>{q.category==="HOMME"?"Hommes":"Femmes"}</span><b>{q.heldCount>=q.capacity?"Complet":`${q.capacity-q.heldCount} places`}</b></div>)}</div></div>}<h2>Une expérience pensée pour de vraies rencontres</h2><p>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité.</p>{(perkLabels.length>0||event.perks.description)&&<div className="event-perks">{perkLabels.map(l=><span key={l}>{l}</span>)}{event.perks.description&&<span>{event.perks.description}</span>}</div>}<ul><li>{requiresScreening?"Profils sélectionnés":"Inscription directe"}</li><li>QR code d’entrée unique</li><li>Code de contact privé</li><li>Équipe présente sur place</li></ul><div className="cancellation-policy"><small>POLITIQUE D’ANNULATION</small><p>Annulation gratuite jusqu’à 24 heures avant l’événement : remboursement intégral automatique. Passé ce délai, aucun remboursement n’est possible de plein droit (une exception peut être accordée par l’administration selon les circonstances).</p></div></article><aside className="booking"><ShareButton event={event}/><small>{event.priceTiers.length>0?"TARIFS":"À PARTIR DE"}</small>{event.priceTiers.length>0?<div className="quota-rows">{event.priceTiers.map(t=><div key={t.category} className="quota-row"><span>{t.category==="HOMME"?"Hommes":"Femmes"}</span><b>{money(t.amountCents)}</b></div>)}</div>:<strong>{money(event.priceCents)}</strong>}<div><span>Disponibilité</span><b>{event.quotas.length>0?(myQuota?(bucketFull?"Complet pour votre catégorie":`${myQuota.capacity-myQuota.heldCount} places pour vous`):"Places selon catégorie"):(bucketFull?"Complet":`${event.capacity-event.confirmedCount} places`)}</b></div>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
     {altOffer&&<div className="alt-offer"><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{altOffer.alternativeEvent.title}</h3><p>{dateTime(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</p><p><b>{money(altOffer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busy} onClick={()=>respondAltOffer(true)}>Accepter</button><button className="button secondary" disabled={busy} onClick={()=>respondAltOffer(false)}>Refuser</button></div></div>}
     {!user?<Link className="button full" to="/login">Se connecter pour vous inscrire</Link>
     :loadingApplication?<div className="calendar-state"><div className="spinner small"/><span>Chargement…</span></div>
@@ -502,9 +573,28 @@ function Messages() {
 function Admin() {
   const {user}=useAuth();
   const showStats = user?.role==="ADMIN"||user?.role==="ORGANIZER";
-  const [stats,setStats]=useState<any>(null); useEffect(()=>{if(showStats)api("/admin/dashboard").then(setStats)},[showStats]);
+  const [periodDays,setPeriodDays]=useState(30);
+  const [stats,setStats]=useState<any>(null); useEffect(()=>{if(showStats)api(`/admin/dashboard?since=${new Date(Date.now()-periodDays*86_400_000).toISOString()}`).then(setStats)},[showStats,periodDays]);
   if(!showStats) return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">{user?.role==="MODERATOR"?"MODÉRATION":"ACCUEIL"}</span><h1>Bienvenue, {user?.displayName}</h1><p className="fine">{user?.role==="MODERATOR"?"Utilisez le menu pour traiter les signalements.":"Utilisez le menu pour scanner les billets de l’établissement."}</p></div></section></Layout>;
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><div className="admin-heading"><div><span className="eyebrow">{user?.role==="ADMIN"?"SUPER-ADMINISTRATION":"ESPACE RESTAURATEUR"}</span><h1>Tableau de bord {user?.role==="ADMIN"?"général":"de mon établissement"}</h1></div></div>{!stats?<Loading/>:<><div className="stat-grid"><Stat label="Événements actifs" value={stats.events}/><Stat label="Inscriptions" value={stats.applications}/><Stat label="Revenus" value={money(stats.revenueCents)}/>{stats.openReports!=null&&<Stat label="Signalements ouverts" value={stats.openReports}/>}{stats.pendingInterviews!=null&&<Stat label="Entretiens en attente" value={stats.pendingInterviews}/>}</div><div className="admin-grid"><div className="panel chart"><div className="panel-title"><h2>Activité sur 30 jours</h2><span>Données de démonstration</span></div><div className="bars">{[32,50,42,68,60,82,75,94,70,85,97,88].map((n,i)=><i key={i} style={{height:`${n}%`}}/>)}</div></div><div className="panel quick"><h2>Actions rapides</h2>{user?.role==="ADMIN"&&<Link to="/admin/applications">Traiter les entretiens <span>→</span></Link>}<Link to="/admin/attendees">Voir les participants <span>→</span></Link><Link to="/admin/scanner">Scanner un billet <span>→</span></Link>{user?.role==="ADMIN"&&<Link to="/admin/restaurants">Demandes restaurateurs <span>→</span></Link>}<Link to="/events">Voir les événements <span>→</span></Link></div></div></>}</div></section></Layout>;
+  const SUBSCRIPTION_STATUS_LABEL:Record<string,string>={TRIALING:"Essai",ACTIVE:"Actifs",PAST_DUE:"Impayés",CANCELLED:"Résiliés",INCOMPLETE:"Incomplets"};
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><div className="admin-heading"><div><span className="eyebrow">{user?.role==="ADMIN"?"SUPER-ADMINISTRATION":"ESPACE RESTAURATEUR"}</span><h1>Tableau de bord {user?.role==="ADMIN"?"général":"de mon établissement"}</h1></div><select value={periodDays} onChange={e=>setPeriodDays(Number(e.target.value))}><option value={7}>7 derniers jours</option><option value={30}>30 derniers jours</option><option value={90}>90 derniers jours</option></select></div>{!stats?<Loading/>:<><div className="stat-grid">
+    <Stat label="Candidatures (30j)" value={stats.applications}/>
+    {stats.acceptanceRate!=null&&<Stat label="Taux d’acceptation (entretien)" value={`${stats.acceptanceRate}%`}/>}
+    <Stat label="Événements à venir" value={stats.upcomingEvents}/>
+    <Stat label="Événements au total" value={stats.events}/>
+    <Stat label="Places restantes" value={stats.remainingSpots}/>
+    <Stat label="Billets vendus (30j)" value={stats.ticketsSold}/>
+    <Stat label="Sur liste d’attente" value={stats.waitlisted}/>
+    <Stat label="Revenus (30j)" value={money(stats.revenueCents)}/>
+    {stats.openReports!=null&&<Stat label="Signalements ouverts" value={stats.openReports}/>}
+    {stats.pendingInterviews!=null&&<Stat label="Entretiens en attente" value={stats.pendingInterviews}/>}
+    {stats.upcomingInterviews!=null&&<Stat label="Entretiens à venir" value={stats.upcomingInterviews}/>}
+    {stats.pendingRestaurantApplications!=null&&<Stat label="Demandes restaurateurs" value={stats.pendingRestaurantApplications}/>}
+    {stats.pendingPayments!=null&&<Stat label="Paiements en attente" value={stats.pendingPayments}/>}
+    {stats.failedPayments!=null&&<Stat label="Paiements échoués" value={stats.failedPayments}/>}
+    {stats.shareClicks!=null&&<Stat label="Clics de partage" value={stats.shareClicks}/>}
+    {stats.subscriptionsByStatus?.map((s:any)=><Stat key={s.status} label={`Abonnements ${SUBSCRIPTION_STATUS_LABEL[s.status]??s.status}`} value={s.count}/>)}
+  </div><div className="admin-grid"><div className="panel chart"><div className="panel-title"><h2>Activité sur 30 jours</h2><span>Données de démonstration</span></div><div className="bars">{[32,50,42,68,60,82,75,94,70,85,97,88].map((n,i)=><i key={i} style={{height:`${n}%`}}/>)}</div></div><div className="panel quick"><h2>Actions rapides</h2>{user?.role==="ADMIN"&&<Link to="/admin/applications">Traiter les entretiens <span>→</span></Link>}<Link to="/admin/attendees">Voir les participants <span>→</span></Link><Link to="/admin/scanner">Scanner un billet <span>→</span></Link>{user?.role==="ADMIN"&&<Link to="/admin/restaurants">Demandes restaurateurs <span>→</span></Link>}{user?.role==="ADMIN"&&<Link to="/admin/finance">Voir les finances <span>→</span></Link>}<Link to="/events">Voir les événements <span>→</span></Link></div></div></>}</div></section></Layout>;
 }
 function Stat({label,value}:{label:string;value:string|number}){return <div className="stat"><small>{label.toUpperCase()}</small><strong>{value}</strong><span>Mis à jour maintenant</span></div>}
 function AdminNav(){
@@ -523,6 +613,8 @@ function AdminNav(){
     {role==="ADMIN"&&<NavLink to="/admin/restaurants">Demandes restaurateurs</NavLink>}
     {(role==="ADMIN"||role==="MODERATOR")&&<NavLink to="/admin/moderation">Modération</NavLink>}
     {role==="ADMIN"&&<NavLink to="/admin/outbox">Notifications</NavLink>}
+    {role==="ADMIN"&&<NavLink to="/admin/testimonials">Témoignages</NavLink>}
+    {role==="ADMIN"&&<NavLink to="/admin/settings">Paramètres</NavLink>}
     <Link to="/">Voir le site public</Link>
   </aside>;
 }
@@ -536,7 +628,7 @@ function AdminGlobalInterviews() {
 function AdminCreateEvent() {
   const {user}=useAuth();
   const navigate=useNavigate();
-const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].name,flow:"" as ""|"SCREENING"|"DIRECT",description:"",startsAt:"",endsAt:"",district:"",address:"",zone:EVENT_ZONES[0],capacity:20,priceCents:3000,includesDrink:false,includesStarter:false,includesMain:false,includesDessert:false,perksDescription:"",minParticipants:"",minParticipantsDeadline:""});
+const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].name,flow:"" as ""|"SCREENING"|"DIRECT",description:"",startsAt:"",endsAt:"",district:"",address:"",zone:EVENT_ZONES[0],minAge:"",maxAge:"",capacity:20,priceCents:3000,includesDrink:false,includesStarter:false,includesMain:false,includesDessert:false,perksDescription:"",minParticipants:"",minParticipantsDeadline:""});
   const [submitting,setSubmitting]=useState(false);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [restaurantInfo,setRestaurantInfo]=useState<any>(null);
@@ -546,7 +638,7 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
   const submit=async(e:FormEvent)=>{
     e.preventDefault();setSubmitting(true);setNotice(null);
     try{
-      await api("/admin/events",{method:"POST",body:JSON.stringify({...form,flow:form.flow||undefined,minParticipants:form.minParticipants?Number(form.minParticipants):undefined,minParticipantsDeadline:form.minParticipantsDeadline?new Date(form.minParticipantsDeadline).toISOString():undefined,startsAt:new Date(form.startsAt).toISOString(),endsAt:new Date(form.endsAt).toISOString()})});
+      await api("/admin/events",{method:"POST",body:JSON.stringify({...form,flow:form.flow||undefined,minAge:form.minAge?Number(form.minAge):undefined,maxAge:form.maxAge?Number(form.maxAge):undefined,minParticipants:form.minParticipants?Number(form.minParticipants):undefined,minParticipantsDeadline:form.minParticipantsDeadline?new Date(form.minParticipantsDeadline).toISOString():undefined,startsAt:new Date(form.startsAt).toISOString(),endsAt:new Date(form.endsAt).toISOString()})});
       setNotice({kind:"success",text:user?.role==="ORGANIZER"?"Brouillon créé. Ajoutez vos photos puis soumettez-le à validation.":"Événement créé."});
       setTimeout(()=>navigate("/admin/events"),1200);
     }catch(err){setNotice({kind:"error",text:(err as Error).message})}
@@ -562,6 +654,7 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
       <label>Catégorie<select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>{EVENT_CATEGORIES.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}</select></label>
       {user?.role==="ADMIN"&&<label>Parcours d’inscription<select value={form.flow} onChange={e=>setForm({...form,flow:e.target.value as ""|"SCREENING"|"DIRECT"})}><option value="">Suggéré selon la catégorie</option><option value="SCREENING">Sélection (entretien requis)</option><option value="DIRECT">Accès direct (paiement immédiat)</option></select></label>}
       <label>Zone<select value={form.zone} onChange={e=>setForm({...form,zone:e.target.value})}>{EVENT_ZONES.map(z=><option key={z} value={z}>{z}</option>)}</select></label>
+      <div className="time-row"><label>Âge minimum (facultatif)<input type="number" min={18} max={99} value={form.minAge} onChange={e=>setForm({...form,minAge:e.target.value})}/></label><label>Âge maximum (facultatif)<input type="number" min={18} max={99} value={form.maxAge} onChange={e=>setForm({...form,maxAge:e.target.value})}/></label></div>
       <label className="wide">Description<textarea required minLength={20} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
       <div className="time-row"><label>Début<input required type="datetime-local" value={form.startsAt} onChange={e=>setForm({...form,startsAt:e.target.value})}/></label><label>Fin<input required type="datetime-local" value={form.endsAt} onChange={e=>setForm({...form,endsAt:e.target.value})}/></label></div>
       <label>Quartier / ville<input required value={form.district} onChange={e=>setForm({...form,district:e.target.value})}/></label>
@@ -981,6 +1074,75 @@ function AdminOutbox() {
   </div></section></Layout>;
 }
 
+function AdminSettings() {
+  const [items,setItems]=useState<any[]>([]);
+  const [editing,setEditing]=useState<Record<string,string>>({});
+  const [busy,setBusy]=useState<string|null>(null);
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const load=()=>api<any[]>("/admin/settings").then(setItems);
+  useEffect(()=>{load()},[]);
+
+  const save=async(key:string)=>{
+    setBusy(key);setNotice(null);
+    const raw=editing[key];
+    let value:unknown=raw;
+    if(typeof items.find(i=>i.key===key)?.value==="boolean") value=raw==="true";
+    else if(typeof items.find(i=>i.key===key)?.value==="number") value=Number(raw);
+    try{await api(`/admin/settings/${key}`,{method:"PATCH",body:JSON.stringify({value})});setNotice({kind:"success",text:`${key} mis à jour.`});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Paramètres applicatifs</h1><p className="fine left">Valeurs provisoires du cahier des charges (verrou de paiement, quotas, drapeaux de fonction, contenu de la page « Le concept »…), modifiables ici sans redéploiement. Chaque modification est journalisée.</p>
+    {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    <div className="panel table">
+      <div className="table-row head"><span>Paramètre</span><span>Valeur</span><span>Par défaut</span></div>
+      {items.map(it=><div key={it.key} className="table-row settings-row"><span><b>{it.key}</b><small>{it.description}</small></span><span><input value={editing[it.key]??String(it.value)} onChange={e=>setEditing({...editing,[it.key]:e.target.value})}/></span><span><small className="fine">{String(it.default)}</small><button className="button small" disabled={busy===it.key} onClick={()=>save(it.key)}>Enregistrer</button></span></div>)}
+    </div>
+  </div></section></Layout>;
+}
+
+function AdminTestimonials() {
+  const [items,setItems]=useState<any[]>([]);
+  const [form,setForm]=useState({displayName:"",eventType:"Speed dating",text:"",rating:5,status:"DRAFT" as "DRAFT"|"PUBLISHED",position:0});
+  const [busy,setBusy]=useState<string|null>(null);
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const load=()=>api<any[]>("/admin/testimonials").then(setItems);
+  useEffect(()=>{load()},[]);
+
+  const create=async(e:FormEvent)=>{
+    e.preventDefault();setBusy("new");setNotice(null);
+    try{await api("/admin/testimonials",{method:"POST",body:JSON.stringify(form)});setForm({displayName:"",eventType:"Speed dating",text:"",rating:5,status:"DRAFT",position:0});setNotice({kind:"success",text:"Témoignage créé."});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+  const toggleStatus=async(t:any)=>{
+    setBusy(t.id);setNotice(null);
+    try{await api(`/admin/testimonials/${t.id}`,{method:"PATCH",body:JSON.stringify({status:t.status==="PUBLISHED"?"DRAFT":"PUBLISHED"})});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+  const remove=async(id:string)=>{
+    setBusy(id);setNotice(null);
+    try{await api(`/admin/testimonials/${id}`,{method:"DELETE"});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Témoignages</h1><p className="fine left">Jamais publié automatiquement, même soumis par un participant : chaque témoignage reste en brouillon tant qu’il n’est pas explicitement publié ici.</p>
+    {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    <form className="panel form-grid" onSubmit={create}>
+      <div className="panel-title"><h2>Nouveau témoignage</h2></div>
+      <label>Prénom ou pseudonyme<input required value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})}/></label>
+      <label>Type d’événement<select value={form.eventType} onChange={e=>setForm({...form,eventType:e.target.value})}>{EVENT_CATEGORIES.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}</select></label>
+      <label>Note (1 à 5, facultatif)<input type="number" min={1} max={5} value={form.rating} onChange={e=>setForm({...form,rating:Number(e.target.value)})}/></label>
+      <label className="wide">Texte<textarea required minLength={10} value={form.text} onChange={e=>setForm({...form,text:e.target.value})}/></label>
+      <button className="button" disabled={busy==="new"}>Créer (en brouillon)</button>
+    </form>
+    <div className="stack">{items.map(t=><article key={t.id} className="panel restaurant-request"><div><h3>{t.displayName}</h3><p className="fine left">{t.eventType}{t.rating?` · ${"★".repeat(t.rating)}`:""}</p><p className="fine left">{t.text}</p><small>{t.status==="PUBLISHED"?"Publié":"Brouillon"}</small></div><div className="decision-buttons"><button className="button small" disabled={busy===t.id} onClick={()=>toggleStatus(t)}>{t.status==="PUBLISHED"?"Dépublier":"Publier"}</button><button className="button small danger" disabled={busy===t.id} onClick={()=>remove(t.id)}>Supprimer</button></div></article>)}</div>
+  </div></section></Layout>;
+}
+
 function AdminModeration() {
   const {user}=useAuth();
   const [items,setItems]=useState<any[]>([]);
@@ -1092,4 +1254,4 @@ function Scanner() {
   </div><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b>✓</b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b>×</b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Présentez le QR code du billet devant la caméra, ou saisissez le code manuellement.</p></>}</aside></div></div></section></Layout>;
 }
 
-export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}
+export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/concept" element={<Concept/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/settings" element={<Protected roles={["ADMIN"]}><AdminSettings/></Protected>}/><Route path="/admin/testimonials" element={<Protected roles={["ADMIN"]}><AdminTestimonials/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}

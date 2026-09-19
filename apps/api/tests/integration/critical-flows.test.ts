@@ -308,6 +308,39 @@ describe("minimum de participants non atteint : maintien ou annulation", () => {
   }, 20_000);
 });
 
+describe("partage attribué : clic, inscription et achat rattachés au bon lien, jamais à soi-même", () => {
+  it("compte le clic et attribue la candidature au partageur, mais jamais un partage vers soi-même", async () => {
+    const event = await prisma.event.findUniqueOrThrow({ where: { slug: "soiree-nour-x-amana" } });
+    const sharer = await tracked("SharerTest");
+    const buyer = await directParticipant("SharedBuyer");
+    createdUserIds.push(buyer.userId);
+
+    const { body: link } = await api<{ code: string; url: string }>(`/events/${event.id}/share-link`, { method: "POST" }, sharer.token);
+    expect(link.url).toContain(link.code);
+
+    // Le clic est public (n'importe qui suivant le lien), sans authentification.
+    const click = await api(`/share-links/${link.code}/click`, { method: "POST" });
+    expect(click.status).toBe(204);
+
+    // Le partageur qui applique via son propre lien ne s'attribue jamais lui-même.
+    const selfApply = await applyToEvent(event.id, sharer.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE, shareCode: link.code });
+    expect(selfApply.status).toBe(201);
+
+    const buyerApply = await applyToEvent(event.id, buyer.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE, shareCode: link.code });
+    expect(buyerApply.status).toBe(201);
+    await payAndConfirm(buyerApply.body.application.id, buyer.token);
+
+    const admin = await adminToken();
+    const stats = await api<{ totalClicks: number; totalAttributedApplications: number; totalAttributedPurchases: number }>(`/admin/events/${event.id}/shares`, {}, admin);
+    expect(stats.body.totalClicks).toBe(1);
+    expect(stats.body.totalAttributedApplications).toBe(1);
+    expect(stats.body.totalAttributedPurchases).toBe(1);
+
+    const selfApplication = await prisma.application.findUniqueOrThrow({ where: { eventId_userId: { eventId: event.id, userId: sharer.userId } } });
+    expect(selfApplication.attributedShareLinkId).toBeNull();
+  }, 20_000);
+});
+
 // Un participant DIRECT (networking) n'a besoin d'aucune validation de profil, seulement d'un
 // profil complété : inscription minimale dédiée à ces tests de politique de remboursement.
 async function directParticipant(displayName: string) {

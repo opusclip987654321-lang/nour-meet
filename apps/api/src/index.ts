@@ -260,6 +260,7 @@ const publicEvent = (event: any, revealAddress = false) => ({
   imageUrl: event.imageUrl ?? defaultCategoryImage(event.category),
   photos: (event.photos ?? []).map((p: any) => p.url),
   perks: { drink: event.includesDrink, starter: event.includesStarter, main: event.includesMain, dessert: event.includesDessert, description: event.perksDescription ?? null },
+  minAge: event.minAge ?? null, maxAge: event.maxAge ?? null,
   capacity: event.capacity, confirmedCount: event._count?.reservations ?? 0, priceCents: event.priceCents, status: event.status,
   priceTiers: (event.priceTiers ?? []).map((t: any) => ({ category: t.category, amountCents: t.amountCents })),
   proposedStartsAt: event.proposedStartsAt ?? null, proposedEndsAt: event.proposedEndsAt ?? null,
@@ -342,6 +343,27 @@ app.get("/events/:id/my-application", { preHandler: auth }, async (request, repl
   return application;
 });
 
+// Partage « J'y vais, viens avec moi » (§12) : un code non sensible par (personne, événement),
+// jamais l'identité de la personne dans le lien lui-même. Le clic est compté par n'importe qui
+// (route publique) ; l'inscription et l'achat attribués se lisent depuis les Application liées.
+app.post("/events/:id/share-link", { preHandler: auth }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const userId = currentId(request);
+  const event = await prisma.event.findUniqueOrThrow({ where: { id } });
+  const link = await prisma.shareLink.upsert({
+    where: { userId_eventId: { userId, eventId: id } },
+    update: {},
+    create: { userId, eventId: id, code: randomUUID().replace(/-/g, "").slice(0, 12) }
+  });
+  return { code: link.code, url: `${env.WEB_ORIGIN}/events/${event.slug}?ref=${link.code}` };
+});
+app.post("/share-links/:code/click", async (request, reply) => {
+  const { code } = z.object({ code: z.string() }).parse(request.params);
+  const updated = await prisma.shareLink.updateMany({ where: { code }, data: { clicks: { increment: 1 } } });
+  if (updated.count === 0) return reply.code(404).send({ error: "Lien de partage introuvable" });
+  return reply.code(204).send();
+});
+
 const screeningAnswersSchema = z.object({
   motivation: z.string().min(10).max(1000),
   relationshipGoal: z.string().min(5).max(500),
@@ -380,8 +402,11 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   const existing = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
   if (existing) return reply.code(409).send({ error: "Vous êtes déjà inscrit(e) à cet événement", application: existing });
   const input = requiresScreening
-    ? z.object({ screeningAnswers: screeningAnswersSchema }).parse(request.body)
-    : z.object({ networkingAnswers: networkingAnswersSchema }).parse(request.body);
+    ? z.object({ screeningAnswers: screeningAnswersSchema, shareCode: z.string().optional() }).parse(request.body)
+    : z.object({ networkingAnswers: networkingAnswersSchema, shareCode: z.string().optional() }).parse(request.body);
+  // Partage attribué (§12) : le code vient de l'URL au moment de la visite, jamais recalculé après
+  // coup ; un code inconnu ou expiré n'échoue jamais la candidature, il est simplement ignoré.
+  const shareLink = input.shareCode ? await prisma.shareLink.findUnique({ where: { code: input.shareCode } }) : null;
   const quotas = await prisma.eventQuota.findMany({ where: { eventId: id } });
   // La catégorie est nécessaire pour les quotas (speed dating) ET pour résoudre un tarif différencié
   // éventuel (networking inclus) — sans jamais transformer ce tarif en quota implicite pour autant.
@@ -394,6 +419,7 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   const application = await prisma.application.create({
     data: {
       eventId: id, userId, quotaCategory, status: ApplicationStatus.PAYMENT_PENDING,
+      attributedShareLinkId: shareLink && shareLink.eventId === id && shareLink.userId !== userId ? shareLink.id : undefined,
       ...(requiresScreening
         ? { screeningAnswer: { create: (input as { screeningAnswers: z.infer<typeof screeningAnswersSchema> }).screeningAnswers } }
         : { networkingAnswer: { create: (input as { networkingAnswers: z.infer<typeof networkingAnswersSchema> }).networkingAnswers } })
@@ -1009,20 +1035,58 @@ app.post("/admin/reports/:id/decision", { preHandler: roles(UserRole.ADMIN, User
   return updated;
 });
 
+// Tableau de bord (§14) : filtrable par période, cartes séparées par nature — jamais un seul total
+// qui mélangerait des choses de nature différente (voir aussi /admin/finance/summary pour le détail
+// financier). Les cartes propres à la plateforme entière (entretiens, abonnements, partages...)
+// restent réservées au super-admin, un restaurateur ne voyant que son propre périmètre.
 app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
+  const query = z.object({ since: z.string().optional() }).parse(request.query);
+  const since = query.since ? new Date(query.since) : new Date(Date.now() - 30 * 86_400_000);
   const eventScope = restaurant ? { controllerRestaurantId: restaurant.id } : undefined;
-  const [events, applications, payments] = await Promise.all([
+  const applicationEventScope = restaurant ? { event: { controllerRestaurantId: restaurant.id } } : { eventId: { not: null } };
+  const [events, upcomingEvents, applications, payments, ticketsSold, waitlisted] = await Promise.all([
     prisma.event.count({ where: eventScope }),
-    prisma.application.count({ where: restaurant ? { event: { controllerRestaurantId: restaurant.id } } : { eventId: { not: null } } }),
-    prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED, ...(restaurant ? { reservation: { event: { controllerRestaurantId: restaurant.id } } } : {}) }, _sum: { amountCents: true } })
+    prisma.event.count({ where: { ...eventScope, status: EventStatus.PUBLISHED, startsAt: { gt: new Date() } } }),
+    prisma.application.count({ where: { ...applicationEventScope, createdAt: { gte: since } } }),
+    prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED, ...(restaurant ? { reservation: { event: { controllerRestaurantId: restaurant.id } } } : {}), paidAt: { gte: since } }, _sum: { amountCents: true } }),
+    prisma.ticket.count({ where: { status: { not: "CANCELLED" }, reservation: { event: eventScope, createdAt: { gte: since } } } }),
+    prisma.waitlistEntry.count({ where: restaurant ? { event: { controllerRestaurantId: restaurant.id } } : undefined })
   ]);
-  // Les signalements et les entretiens globaux concernent des comptes utilisateurs, pas un
-  // restaurant précis : réservés au super-admin, qui est aujourd'hui le seul à les conduire.
+  const remainingSpots = await prisma.event.aggregate({ where: { ...eventScope, status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] } }, _sum: { capacity: true } });
+  const confirmedReservations = await prisma.reservation.count({ where: { confirmedAt: { not: null }, cancelledAt: null, event: eventScope } });
+  // Les signalements, entretiens globaux, demandes restaurateurs, abonnements et partages concernent
+  // la plateforme entière ou des comptes utilisateurs, pas un restaurant précis : réservés au
+  // super-admin, qui est aujourd'hui le seul à les conduire.
   const openReports = restaurant ? null : await prisma.report.count({ where: { status: "OPEN" } });
   const pendingInterviews = restaurant ? null : await prisma.application.count({ where: { eventId: null, status: { notIn: [ApplicationStatus.ACCEPTED, ApplicationStatus.REFUSED, ApplicationStatus.CANCELLED] } } });
-  return { events, applications, revenueCents: payments._sum.amountCents ?? 0, openReports, pendingInterviews };
+  // Taux d'acceptation : calculé sur les décisions de l'entretien global (eventId null), seule
+  // démarche qui aboutit réellement à ACCEPTED/REFUSED dans l'architecture actuelle (Lot 1) — une
+  // candidature à un événement précis ne passe jamais par ces statuts, elle irait directement en
+  // PAYMENT_PENDING une fois le profil déjà validé.
+  let acceptanceRate: number | null = null;
+  if (!restaurant) {
+    const [acceptedInterviews, decidedInterviews] = await Promise.all([
+      prisma.application.count({ where: { eventId: null, status: ApplicationStatus.ACCEPTED, decidedAt: { gte: since } } }),
+      prisma.application.count({ where: { eventId: null, status: { in: [ApplicationStatus.ACCEPTED, ApplicationStatus.REFUSED] }, decidedAt: { gte: since } } })
+    ]);
+    acceptanceRate = decidedInterviews > 0 ? Math.round((acceptedInterviews / decidedInterviews) * 100) : null;
+  }
+  const upcomingInterviews = restaurant ? null : await prisma.screeningCall.count({ where: { eventId: null, startsAt: { gt: new Date() }, completedAt: null } });
+  const pendingRestaurantApplications = restaurant ? null : await prisma.restaurant.count({ where: { status: "PENDING" } });
+  const subscriptionsByStatus = restaurant ? null : await prisma.restaurantSubscription.groupBy({ by: ["status"], _count: true });
+  const pendingPayments = restaurant ? null : await prisma.payment.count({ where: { status: PaymentStatus.PENDING, createdAt: { gte: since } } });
+  const failedPayments = restaurant ? null : await prisma.payment.count({ where: { status: PaymentStatus.FAILED, createdAt: { gte: since } } });
+  const shareClicks = restaurant ? null : await prisma.shareLink.aggregate({ _sum: { clicks: true } });
+  return {
+    events, upcomingEvents, applications, acceptanceRate, ticketsSold,
+    remainingSpots: (remainingSpots._sum.capacity ?? 0) - confirmedReservations,
+    waitlisted, revenueCents: payments._sum.amountCents ?? 0,
+    openReports, pendingInterviews, upcomingInterviews, pendingRestaurantApplications,
+    subscriptionsByStatus: subscriptionsByStatus?.map(s => ({ status: s.status, count: s._count })) ?? null,
+    pendingPayments, failedPayments, shareClicks: shareClicks?._sum.clicks ?? null
+  };
 });
 // Entretiens globaux : uniquement le super-admin, jamais un restaurateur (voir cahier des charges §6).
 app.get("/admin/global-interviews", { preHandler: roles(UserRole.ADMIN) }, async () =>
@@ -1274,7 +1338,7 @@ app.delete("/admin/interview-slots/:id", { preHandler: roles(UserRole.ADMIN) }, 
 });
 const perksInput = { includesDrink: z.boolean().default(false), includesStarter: z.boolean().default(false), includesMain: z.boolean().default(false), includesDessert: z.boolean().default(false), perksDescription: z.string().max(500).optional() };
 app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
-  const input = z.object({ venueRestaurantId: z.string().optional(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), flow: z.enum(["SCREENING", "DIRECT"]).optional(), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), zone: z.enum(EVENT_ZONES as [string, ...string[]]), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false), minParticipants: z.number().int().min(1).optional(), minParticipantsDeadline: z.string().optional(), ...perksInput })
+  const input = z.object({ venueRestaurantId: z.string().optional(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), flow: z.enum(["SCREENING", "DIRECT"]).optional(), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), zone: z.enum(EVENT_ZONES as [string, ...string[]]), minAge: z.number().int().min(18).max(99).optional(), maxAge: z.number().int().min(18).max(99).optional(), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false), minParticipants: z.number().int().min(1).optional(), minParticipantsDeadline: z.string().optional(), ...perksInput })
     // Minimum facultatif, mais la date limite devient obligatoire dès qu'un minimum est défini (§10).
     .refine(v => !v.minParticipants || v.minParticipantsDeadline, { message: "Une date limite de décision est obligatoire dès qu'un minimum de participants est défini", path: ["minParticipantsDeadline"] })
     .parse(request.body);
@@ -1296,6 +1360,7 @@ app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER
     controllerRestaurantId: restaurant?.id ?? null,
     venueRestaurantId,
     minParticipants: input.minParticipants, minParticipantsDeadline: input.minParticipantsDeadline ? new Date(input.minParticipantsDeadline) : undefined,
+    minAge: input.minAge, maxAge: input.maxAge,
     status: token.role === UserRole.ADMIN && input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT
   } });
   await audit(currentId(request), "CREATE_EVENT", "Event", event.id); return event;
@@ -1311,6 +1376,7 @@ app.patch("/admin/events/:id", { preHandler: roles(UserRole.ADMIN, UserRole.ORGA
     capacity: z.number().int().min(5).max(500).optional(), priceCents: z.number().int().min(0).optional(),
     startsAt: z.string().optional(), endsAt: z.string().optional(), flow: z.enum(["SCREENING", "DIRECT"]).optional(),
     minParticipants: z.number().int().min(1).nullable().optional(), minParticipantsDeadline: z.string().nullable().optional(),
+    minAge: z.number().int().min(18).max(99).nullable().optional(), maxAge: z.number().int().min(18).max(99).nullable().optional(),
     ...Object.fromEntries(Object.entries(perksInput).map(([k, v]) => [k, v.optional()]))
   }).parse(request.body);
   if ((input.minParticipants ?? event.minParticipants) && !(input.minParticipantsDeadline !== undefined ? input.minParticipantsDeadline : event.minParticipantsDeadline)) {
@@ -1408,6 +1474,23 @@ app.get("/admin/events/:id/history", { preHandler: roles(UserRole.ADMIN, UserRol
   await assertEventAccess(request, id);
   return prisma.auditLog.findMany({ where: { entity: "Event", entityId: id }, orderBy: { createdAt: "desc" } });
 });
+// Statistiques de conversion des partages (§12/§14) : l'identité de qui a partagé n'apparaît
+// jamais publiquement, uniquement ici pour l'administration.
+app.get("/admin/events/:id/shares", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  await assertEventAccess(request, id);
+  const links = await prisma.shareLink.findMany({ where: { eventId: id }, include: { user: true, applications: { include: { reservation: { include: { payment: true } } } } }, orderBy: { clicks: "desc" } });
+  const bySharer = links.map(l => ({
+    displayName: l.user.displayName, clicks: l.clicks, applications: l.applications.length,
+    purchases: l.applications.filter(a => a.reservation?.payment?.status === PaymentStatus.SUCCEEDED).length
+  }));
+  return {
+    totalClicks: links.reduce((n, l) => n + l.clicks, 0),
+    totalAttributedApplications: bySharer.reduce((n, s) => n + s.applications, 0),
+    totalAttributedPurchases: bySharer.reduce((n, s) => n + s.purchases, 0),
+    bySharer
+  };
+});
 app.post("/admin/events/:id/submit-for-review", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const event = await assertEventAccess(request, id);
@@ -1495,6 +1578,9 @@ app.get("/admin/outbox", { preHandler: roles(UserRole.ADMIN) }, async () => pris
 
 // Paramètres applicatifs centralisés (voir settings.ts) : valeurs provisoires du cahier des charges,
 // modifiables sans redéploiement, jamais en dur ailleurs dans le code.
+// Contenu éditorial public (§16) : distinct de /admin/settings (réservé à l'administration), ne
+// renvoie que les trois clés nécessaires à la page « Le concept ».
+app.get("/concept-video", async () => ({ url: getSetting("CONCEPT_VIDEO_URL"), thumbnail: getSetting("CONCEPT_VIDEO_THUMBNAIL_URL"), subtitles: getSetting("CONCEPT_VIDEO_SUBTITLES_URL") }));
 app.get("/admin/settings", { preHandler: roles(UserRole.ADMIN) }, async () => listSettingsForAdmin());
 app.patch("/admin/settings/:key", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const { key } = z.object({ key: z.enum(Object.keys(SETTINGS_SCHEMA) as [string, ...string[]]) }).parse(request.params);
@@ -1502,6 +1588,40 @@ app.patch("/admin/settings/:key", { preHandler: roles(UserRole.ADMIN) }, async (
   const updated = await updateSetting(prisma, key as keyof typeof SETTINGS_SCHEMA, value, currentId(request));
   await audit(currentId(request), "UPDATE_APP_SETTING", "AppSetting", key, { value: updated });
   return { key, value: updated };
+});
+
+// Témoignages (§17) : jamais publiés automatiquement, même soumis par un participant — un
+// administrateur doit explicitement passer le statut à PUBLISHED.
+app.get("/testimonials", async (request) => {
+  const query = z.object({ eventType: z.string().optional() }).parse(request.query);
+  return prisma.testimonial.findMany({ where: { status: "PUBLISHED", eventType: query.eventType }, orderBy: [{ position: "asc" }, { createdAt: "desc" }] });
+});
+app.post("/me/testimonials", { preHandler: auth }, async (request, reply) => {
+  const input = z.object({ eventType: z.string().min(2).max(60), text: z.string().min(10).max(1000), rating: z.number().int().min(1).max(5).optional(), consentGiven: z.literal(true) }).parse(request.body);
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: currentId(request) } });
+  const testimonial = await prisma.testimonial.create({ data: { displayName: user.displayName, eventType: input.eventType, text: input.text, rating: input.rating, consentGiven: input.consentGiven, submittedByUserId: user.id, status: "DRAFT" } });
+  await audit(user.id, "SUBMIT_TESTIMONIAL", "Testimonial", testimonial.id);
+  return reply.code(201).send(testimonial);
+});
+app.get("/admin/testimonials", { preHandler: roles(UserRole.ADMIN) }, async () => prisma.testimonial.findMany({ orderBy: [{ position: "asc" }, { createdAt: "desc" }] }));
+app.post("/admin/testimonials", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const input = z.object({ displayName: z.string().min(2).max(80), eventType: z.string().min(2).max(60), text: z.string().min(10).max(1000), rating: z.number().int().min(1).max(5).optional(), status: z.enum(["DRAFT", "PUBLISHED"]).default("DRAFT"), position: z.number().int().default(0), consentGiven: z.boolean().default(true) }).parse(request.body);
+  const testimonial = await prisma.testimonial.create({ data: input });
+  await audit(currentId(request), "CREATE_TESTIMONIAL", "Testimonial", testimonial.id);
+  return reply.code(201).send(testimonial);
+});
+app.patch("/admin/testimonials/:id", { preHandler: roles(UserRole.ADMIN) }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const input = z.object({ displayName: z.string().min(2).max(80).optional(), eventType: z.string().min(2).max(60).optional(), text: z.string().min(10).max(1000).optional(), rating: z.number().int().min(1).max(5).nullable().optional(), status: z.enum(["DRAFT", "PUBLISHED"]).optional(), position: z.number().int().optional() }).parse(request.body);
+  const updated = await prisma.testimonial.update({ where: { id }, data: input });
+  await audit(currentId(request), "UPDATE_TESTIMONIAL", "Testimonial", id, input);
+  return updated;
+});
+app.delete("/admin/testimonials/:id", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  await prisma.testimonial.delete({ where: { id } });
+  await audit(currentId(request), "DELETE_TESTIMONIAL", "Testimonial", id);
+  return reply.code(204).send();
 });
 
 // Libère toutes les 60 secondes les réservations temporaires expirées (place + quota), enchaîne sur la

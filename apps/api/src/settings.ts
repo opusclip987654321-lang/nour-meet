@@ -60,6 +60,21 @@ export const SETTINGS_SCHEMA = {
     schema: z.boolean(),
     default: false,
     description: "Active les notifications WhatsApp. Désactivé par défaut : hors périmètre actif."
+  },
+  CONCEPT_VIDEO_URL: {
+    schema: z.string(),
+    default: "" as const,
+    description: "URL de la vidéo de présentation (60 à 90 secondes) sur la page « Le concept ». Vide : la page affiche seulement le résumé écrit, jamais un lecteur cassé."
+  },
+  CONCEPT_VIDEO_THUMBNAIL_URL: {
+    schema: z.string(),
+    default: "" as const,
+    description: "Miniature affichée avant le lancement de la vidéo de présentation."
+  },
+  CONCEPT_VIDEO_SUBTITLES_URL: {
+    schema: z.string(),
+    default: "" as const,
+    description: "Fichier de sous-titres (.vtt) de la vidéo de présentation, pour l'accessibilité."
   }
 } as const;
 

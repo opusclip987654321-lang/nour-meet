@@ -124,6 +124,7 @@ model User {
   notifications    Notification[]
   loyaltyEntries   LoyaltyEntry[]
   alternativeOffers AlternativeOffer[]
+  shareLinks       ShareLink[]
 }
 
 model Profile {
@@ -221,6 +222,8 @@ model Event {
   district                String
   address                 String
   zone                    String?
+  minAge                  Int?
+  maxAge                  Int?
   capacity                Int
   priceCents              Int
   // Prestations réellement incluses avec le billet (choix prédéfinis) : ne jamais en afficher
@@ -261,6 +264,7 @@ model Event {
   ledgerEntries           LedgerEntry[]
   originalOffers          AlternativeOffer[] @relation("OriginalEvent")
   alternativeOffers       AlternativeOffer[] @relation("AlternativeEvent")
+  shareLinks              ShareLink[]
   createdAt               DateTime    @default(now())
   updatedAt               DateTime    @updatedAt
 }
@@ -317,9 +321,52 @@ model Application {
   waitlistEntry WaitlistEntry?
   screeningAnswer   ScreeningAnswer?
   networkingAnswer  NetworkingAnswer?
+  // Partage attribué (§12) : jamais révélé publiquement, seulement à l'administration (statistiques
+  // de conversion). Posé à la candidature à partir du code présent dans l'URL au moment de la
+  // visite, jamais recalculé après coup.
+  attributedShareLinkId String?
+  attributedShareLink    ShareLink?        @relation(fields: [attributedShareLinkId], references: [id])
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
   @@unique([eventId, userId])
+}
+
+// Lien de partage "J'y vais, viens avec moi" (§12) : un code non sensible par (personne, événement).
+// Le clic est comptabilisé ici ; l'inscription et l'achat attribués se lisent depuis les
+// Application liées (attributedShareLinkId), jamais l'inverse. L'identité de la personne qui a
+// partagé n'est jamais exposée publiquement, uniquement dans les statistiques d'administration.
+model ShareLink {
+  id        String        @id @default(cuid())
+  code      String        @unique
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventId   String
+  event     Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  clicks    Int           @default(0)
+  createdAt DateTime      @default(now())
+  applications Application[]
+  @@unique([userId, eventId])
+}
+
+enum TestimonialStatus {
+  DRAFT
+  PUBLISHED
+}
+
+// Témoignage (§17) : jamais publié automatiquement, même soumis par un participant — un
+// administrateur doit explicitement passer le statut à PUBLISHED.
+model Testimonial {
+  id                String            @id @default(cuid())
+  displayName       String
+  eventType         String
+  text              String
+  rating            Int?
+  status            TestimonialStatus @default(DRAFT)
+  position          Int               @default(0)
+  consentGiven      Boolean           @default(false)
+  submittedByUserId String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 }
 
 // Questionnaire speed dating (7 questions, §4.1 du cahier des charges) : privé, jamais accessible
