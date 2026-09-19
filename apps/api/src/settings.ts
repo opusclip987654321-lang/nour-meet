@@ -24,7 +24,12 @@ export const SETTINGS_SCHEMA = {
   RESTAURANT_MONTHLY_EVENT_QUOTA: {
     schema: z.number().int().positive(),
     default: 2,
-    description: "Nombre d'événements qu'un restaurateur abonné peut publier chaque mois avant de devoir attendre le mois suivant."
+    description: "Quota mensuel du plan d'abonnement par défaut (Plan \"Standard\", créé par migration). Modifier le quota d'un restaurateur déjà abonné se fait sur son Plan, pas ici."
+  },
+  ENABLE_COMMISSION_LEDGER: {
+    schema: z.boolean(),
+    default: false,
+    description: "Active la création automatique d'une ligne comptable 30/70 (LedgerEntry) à chaque vente restaurateur. Désactivée par défaut depuis le passage à l'abonnement mensuel (§8.2) : les anciennes lignes restent en base, mais aucune nouvelle n'est créée."
   },
   MIN_PARTICIPANTS_DECISION_WINDOW_HOURS: {
     schema: z.number().int().positive(),

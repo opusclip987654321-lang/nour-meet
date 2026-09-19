@@ -14,7 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES, EVENT_ZONES, regionOfZone, eventRequiresScreening, suggestedFlowForCategory } from "@nour/shared";
 import { env } from "./env.js";
-import { paymentDeadline, paymentLockExpiry, interviewRetryDate, refundEligibility } from "./domain.js";
+import { paymentDeadline, paymentLockExpiry, interviewRetryDate, refundEligibility, currentYearMonth } from "./domain.js";
 import { normalizePhoneNumber } from "./phone.js";
 import { createSmsVerificationProvider } from "./sms-verification.js";
 import { createEmailProvider } from "./email-provider.js";
@@ -23,6 +23,8 @@ import { loadSettings, updateSetting, getSetting, listSettingsForAdmin, SETTINGS
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const uploadsDir = path.join(publicDir, "uploads", "events");
 await mkdir(uploadsDir, { recursive: true });
+const restaurantUploadsDir = path.join(publicDir, "uploads", "restaurants");
+await mkdir(restaurantUploadsDir, { recursive: true });
 const ALLOWED_IMAGE_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -620,10 +622,13 @@ await app.register(async (webhooks) => {
           if (outcome === "CONFIRMED") {
             await notify(reservation.userId, "Paiement confirmé", `Votre billet pour ${reservation.event.title} est disponible.`);
             await audit(reservation.userId, "PAYMENT_SUCCEEDED", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });
-            // Comptabilité 30/70 : uniquement pour les événements qu'un restaurant organise
-            // commercialement (jamais pour un événement Nour où ce restaurant n'est que le lieu).
-            // Le taux et les frais Stripe réels sont figés au moment de la vente.
-            if (reservation.event.controllerRestaurantId) {
+            // Comptabilité 30/70 : neutralisée par défaut depuis le passage à l'abonnement mensuel
+            // (§8.2 — voir ENABLE_COMMISSION_LEDGER). Les anciennes lignes restent en base, aucune
+            // nouvelle n'est créée tant que le drapeau n'est pas explicitement réactivé, et
+            // uniquement pour les événements qu'un restaurant organise commercialement (jamais pour
+            // un événement Nour où ce restaurant n'est que le lieu). Le taux et les frais Stripe
+            // réels sont figés au moment de la vente.
+            if (reservation.event.controllerRestaurantId && getSetting("ENABLE_COMMISSION_LEDGER")) {
               const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id: reservation.event.controllerRestaurantId } });
               const grossAmountCents = reservation.payment!.amountCents;
               const commissionRate = restaurant.commissionRate;
@@ -768,14 +773,23 @@ app.post("/alternative-offers/:id/respond", { preHandler: auth }, async (request
 });
 
 app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
-  const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) } });
+  const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) }, include: { photos: { orderBy: { position: "asc" } }, subscription: { include: { plan: true } }, connectedAccount: true } });
   if (!restaurant) return reply.code(404).send({ error: "Aucune demande restaurateur" });
-  return restaurant;
+  const usage = await prisma.restaurantMonthlyUsage.findUnique({ where: { restaurantId_yearMonth: { restaurantId: restaurant.id, yearMonth: currentYearMonth() } } });
+  return { ...restaurant, currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
 });
 app.post("/restaurants/apply", { preHandler: auth }, async (request, reply) => {
   // Le SIRET est saisi par le demandeur mais n'est pas vérifié auprès d'un registre officiel : ce
   // n'est qu'une déclaration, à ne jamais présenter comme une vérification légale effectuée par Nour.
-  const input = z.object({ name: z.string().min(2).max(120), managerName: z.string().min(2).max(120), siret: z.string().regex(/^\d{14}$/, "Le SIRET doit comporter 14 chiffres"), description: z.string().max(1000).optional(), district: z.string().max(120).optional(), address: z.string().max(200).optional(), phone: z.string().max(30).optional() }).parse(request.body);
+  const input = z.object({
+    name: z.string().min(2).max(120), managerName: z.string().min(2).max(120), siret: z.string().regex(/^\d{14}$/, "Le SIRET doit comporter 14 chiffres"),
+    description: z.string().max(1000).optional(), district: z.string().max(120).optional(), address: z.string().max(200).optional(), phone: z.string().max(30).optional(),
+    // Champs enrichis §8.1 : tous facultatifs à la candidature, complétables ensuite.
+    desiredCapacity: z.number().int().min(1).max(500).optional(), desiredSchedule: z.string().max(300).optional(),
+    averagePricePerPersonCents: z.number().int().min(0).optional(), defaultMinParticipants: z.number().int().min(1).optional(),
+    priceIncludesDrink: z.boolean().optional(), priceIncludesStarter: z.boolean().optional(), priceIncludesMain: z.boolean().optional(), priceIncludesDessert: z.boolean().optional(),
+    priceNotes: z.string().max(500).optional(), proposesCategoryPricing: z.boolean().optional(), allowsPrivatization: z.boolean().optional(), specialConditions: z.string().max(1000).optional()
+  }).parse(request.body);
   const userId = currentId(request);
   const existing = await prisma.restaurant.findUnique({ where: { ownerId: userId } });
   if (existing?.status === "APPROVED") return reply.code(409).send({ error: "Vous êtes déjà restaurateur" });
@@ -792,7 +806,17 @@ app.post("/restaurants/apply", { preHandler: auth }, async (request, reply) => {
 });
 app.get("/admin/restaurants", { preHandler: roles(UserRole.ADMIN) }, async (request) => {
   const query = z.object({ status: z.enum(["PENDING", "APPROVED", "REJECTED", "SUSPENDED"]).optional() }).parse(request.query);
-  return prisma.restaurant.findMany({ where: query.status ? { status: query.status } : undefined, include: { owner: true }, orderBy: { submittedAt: "desc" } });
+  // Fiche complète pour la vue admin (§8.1) : galerie, coordonnées, disponibilité, conditions
+  // tarifaires, statut de l'abonnement et du compte connecté. Les notes internes (adminNotes) sont
+  // un champ de la fiche elle-même, jamais exposées au restaurateur (voir /restaurants/me).
+  return prisma.restaurant.findMany({ where: query.status ? { status: query.status } : undefined, include: { owner: true, photos: { orderBy: { position: "asc" } }, subscription: { include: { plan: true } }, connectedAccount: true }, orderBy: { submittedAt: "desc" } });
+});
+app.patch("/admin/restaurants/:id/notes", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { adminNotes } = z.object({ adminNotes: z.string().max(2000).nullable() }).parse(request.body);
+  const updated = await prisma.restaurant.update({ where: { id }, data: { adminNotes } });
+  await audit(currentId(request), "UPDATE_RESTAURANT_NOTES", "Restaurant", id);
+  return updated;
 });
 app.post("/admin/restaurants/:id/decision", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -801,11 +825,20 @@ app.post("/admin/restaurants/:id/decision", { preHandler: roles(UserRole.ADMIN) 
   if (restaurant.status !== "PENDING") return reply.code(409).send({ error: "Cette demande a déjà été traitée" });
   const adminId = currentId(request);
   if (accept) {
+    // Remplace la commission 30/70 (§8.2) : un abonnement d'essai est ouvert automatiquement sur le
+    // plan par défaut plutôt que d'exiger une action manuelle supplémentaire. Aucun prélèvement
+    // réel n'est déclenché (voir le résumé de fin de lot : Stripe Billing n'est pas câblé).
+    const defaultPlan = await prisma.plan.findFirst({ where: { active: true }, orderBy: { createdAt: "asc" } });
     const [updated] = await prisma.$transaction([
       prisma.restaurant.update({ where: { id }, data: { status: "APPROVED", verifiedAt: new Date(), reviewedBy: adminId, rejectionReason: null } }),
-      prisma.user.update({ where: { id: restaurant.ownerId }, data: { role: restaurant.owner.role === UserRole.PARTICIPANT ? UserRole.ORGANIZER : restaurant.owner.role } })
+      prisma.user.update({ where: { id: restaurant.ownerId }, data: { role: restaurant.owner.role === UserRole.PARTICIPANT ? UserRole.ORGANIZER : restaurant.owner.role } }),
+      ...(defaultPlan ? [prisma.restaurantSubscription.upsert({
+        where: { restaurantId: id },
+        update: {},
+        create: { restaurantId: id, planId: defaultPlan.id, status: "TRIALING", currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60_000) }
+      })] : [])
     ]);
-    await notify(restaurant.ownerId, "Compte restaurateur approuvé", "Votre établissement est validé, vous pouvez préparer vos événements.");
+    await notify(restaurant.ownerId, "Compte restaurateur approuvé", `Votre établissement est validé, vous pouvez préparer vos événements.${defaultPlan ? ` Un essai gratuit de votre abonnement (${(defaultPlan.monthlyPriceCents / 100).toFixed(0)} €/mois, ${defaultPlan.monthlyEventQuota} événements publiables par mois) a été activé.` : ""}`);
     await audit(adminId, "APPROVE_RESTAURANT", "Restaurant", id);
     return updated;
   }
@@ -813,6 +846,98 @@ app.post("/admin/restaurants/:id/decision", { preHandler: roles(UserRole.ADMIN) 
   await notify(restaurant.ownerId, "Demande restaurateur refusée", reason ?? "Votre demande n’a pas été retenue.");
   await audit(adminId, "REJECT_RESTAURANT", "Restaurant", id, { reason });
   return updated;
+});
+
+// Espace restaurateur : compléter les champs enrichis après approbation, galerie de photos.
+app.patch("/restaurants/me", { preHandler: roles(UserRole.ORGANIZER) }, async (request) => {
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
+  const input = z.object({
+    description: z.string().max(1000).optional(), district: z.string().max(120).optional(), address: z.string().max(200).optional(), phone: z.string().max(30).optional(),
+    desiredCapacity: z.number().int().min(1).max(500).optional(), desiredSchedule: z.string().max(300).optional(),
+    averagePricePerPersonCents: z.number().int().min(0).optional(), defaultMinParticipants: z.number().int().min(1).optional(),
+    priceIncludesDrink: z.boolean().optional(), priceIncludesStarter: z.boolean().optional(), priceIncludesMain: z.boolean().optional(), priceIncludesDessert: z.boolean().optional(),
+    priceNotes: z.string().max(500).optional(), proposesCategoryPricing: z.boolean().optional(), allowsPrivatization: z.boolean().optional(), specialConditions: z.string().max(1000).optional()
+  }).parse(request.body);
+  const updated = await prisma.restaurant.update({ where: { id: restaurant.id }, data: input });
+  await audit(currentId(request), "UPDATE_RESTAURANT_PROFILE", "Restaurant", restaurant.id);
+  return updated;
+});
+app.post("/restaurants/me/photos", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
+  const count = await prisma.restaurantPhoto.count({ where: { restaurantId: restaurant.id } });
+  if (count >= 8) return reply.code(409).send({ error: "8 photos maximum : supprimez-en une avant d’en ajouter une nouvelle" });
+  const file = await request.file();
+  if (!file) return reply.code(400).send({ error: "Aucun fichier reçu" });
+  const extension = ALLOWED_IMAGE_TYPES[file.mimetype];
+  if (!extension) return reply.code(415).send({ error: "Format non pris en charge (jpeg, png ou webp uniquement)" });
+  const buffer = await file.toBuffer();
+  if (buffer.byteLength > MAX_IMAGE_BYTES) return reply.code(413).send({ error: "Image trop volumineuse (5 Mo maximum)" });
+  const filename = `${randomUUID()}.${extension}`;
+  await writeFile(path.join(restaurantUploadsDir, filename), buffer);
+  const photo = await prisma.restaurantPhoto.create({ data: { restaurantId: restaurant.id, url: `/static/uploads/restaurants/${filename}`, position: count } });
+  await audit(currentId(request), "ADD_RESTAURANT_PHOTO", "Restaurant", restaurant.id);
+  return reply.code(201).send(photo);
+});
+app.delete("/restaurants/me/photos/:photoId", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
+  const { photoId } = z.object({ photoId: z.string() }).parse(request.params);
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
+  const deleted = await prisma.restaurantPhoto.deleteMany({ where: { id: photoId, restaurantId: restaurant.id } });
+  if (deleted.count === 0) return reply.code(404).send({ error: "Photo introuvable" });
+  return reply.code(204).send();
+});
+
+// Abonnement (§8.2) : résiliable à tout moment par le restaurateur, jamais réactivé seul (une
+// nouvelle souscription passe par l'administration). La résiliation bloque les prochaines
+// publications mais ne touche jamais les événements déjà vendus.
+app.post("/restaurants/me/subscription/cancel", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
+  const subscription = await prisma.restaurantSubscription.findUnique({ where: { restaurantId: restaurant.id } });
+  if (!subscription || subscription.status === "CANCELLED") return reply.code(409).send({ error: "Aucun abonnement actif à résilier" });
+  const updated = await prisma.restaurantSubscription.update({ where: { restaurantId: restaurant.id }, data: { status: "CANCELLED", cancelledAt: new Date() } });
+  await audit(currentId(request), "CANCEL_SUBSCRIPTION", "RestaurantSubscription", updated.id);
+  return updated;
+});
+app.get("/admin/plans", { preHandler: roles(UserRole.ADMIN) }, async () => prisma.plan.findMany({ orderBy: { createdAt: "asc" } }));
+app.post("/admin/plans", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const input = z.object({ name: z.string().min(2).max(80), monthlyPriceCents: z.number().int().min(0), monthlyEventQuota: z.number().int().min(1), active: z.boolean().default(true) }).parse(request.body);
+  const plan = await prisma.plan.create({ data: input });
+  await audit(currentId(request), "CREATE_PLAN", "Plan", plan.id, input);
+  return reply.code(201).send(plan);
+});
+app.post("/admin/restaurants/:id/subscription", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const input = z.object({ planId: z.string(), status: z.enum(["TRIALING", "ACTIVE", "PAST_DUE", "CANCELLED", "INCOMPLETE"]).optional(), currentPeriodEnd: z.string().optional() }).parse(request.body);
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id } });
+  const plan = await prisma.plan.findUniqueOrThrow({ where: { id: input.planId } });
+  const updated = await prisma.restaurantSubscription.upsert({
+    where: { restaurantId: id },
+    update: { planId: plan.id, status: input.status ?? undefined, currentPeriodEnd: input.currentPeriodEnd ? new Date(input.currentPeriodEnd) : undefined },
+    create: { restaurantId: id, planId: plan.id, status: input.status ?? "ACTIVE", currentPeriodEnd: input.currentPeriodEnd ? new Date(input.currentPeriodEnd) : new Date(Date.now() + 30 * 24 * 60 * 60_000) }
+  });
+  await notify(restaurant.ownerId, "Abonnement mis à jour", `Votre abonnement « ${plan.name} » est maintenant ${updated.status === "ACTIVE" ? "actif" : updated.status.toLowerCase()}.`);
+  await audit(currentId(request), "UPDATE_SUBSCRIPTION", "RestaurantSubscription", updated.id, input);
+  return updated;
+});
+
+// Scaffolding marketplace (§9), Stripe Connect en mode test uniquement : suit un compte connecté,
+// ne déclenche jamais de virement (voir MARKETPLACE_PAYOUTS_ENABLED, toujours désactivé par
+// défaut ; aucune route de la plateforme n'exécute de transfert réel, avec ou sans le drapeau).
+app.post("/restaurants/me/connected-account", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
+  if (!stripe) return reply.code(503).send({ error: "Stripe n’est pas configuré sur ce serveur" });
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
+  if (restaurant.status !== "APPROVED") return reply.code(409).send({ error: "Votre établissement doit être approuvé avant de créer un compte connecté" });
+  const existing = await prisma.connectedAccount.findUnique({ where: { restaurantId: restaurant.id } });
+  if (existing) return existing;
+  const account = await stripe.accounts.create({ type: "express", country: "FR", capabilities: { transfers: { requested: true } }, business_type: "company" });
+  const created = await prisma.connectedAccount.create({ data: { restaurantId: restaurant.id, provider: "stripe", externalAccountId: account.id, status: "PENDING" } });
+  await audit(currentId(request), "CREATE_CONNECTED_ACCOUNT", "Restaurant", restaurant.id, { externalAccountId: account.id });
+  return reply.code(201).send(created);
+});
+app.get("/restaurants/me/connected-account", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
+  const account = await prisma.connectedAccount.findUnique({ where: { restaurantId: restaurant.id } });
+  if (!account) return reply.code(404).send({ error: "Aucun compte connecté" });
+  return account;
 });
 
 // Personnel d'accueil (rôle RECEPTION) : un restaurateur ne peut créer ce personnel que pour son
@@ -951,21 +1076,20 @@ app.get("/admin/events/:id/reservations", { preHandler: roles(UserRole.ADMIN, Us
   await assertEventAccess(request, id);
   return prisma.reservation.findMany({ where: { eventId: id }, include: { user: true, payment: true, ticket: true }, orderBy: { createdAt: "desc" } });
 });
-// Annulation par l'organisateur (§7) : remboursement intégral automatique de tous les billets
-// concernés, jamais "à traiter manuellement" — l'événement n'existant plus, les quotas tenus sont
-// aussi réinitialisés pour ne pas laisser de données de capacité incohérentes.
-app.post("/admin/events/:id/cancel", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
-  const { id } = z.object({ id: z.string() }).parse(request.params);
-  const event = await assertEventAccess(request, id);
+// Annulation d'un événement (§7 organisateur, §10 minimum non atteint) : remboursement intégral
+// automatique de tous les billets concernés, jamais "à traiter manuellement" — l'événement
+// n'existant plus, les quotas tenus sont aussi réinitialisés pour ne pas laisser de données de
+// capacité incohérentes. Partagée entre l'annulation manuelle et la décision minimum non atteint.
+const cancelEventWithRefunds = async (event: { id: string; title: string; status: EventStatus }, actorId: string | undefined, action: string) => {
   if (event.status === EventStatus.CANCELLED) throw httpError(409, "Cet événement est déjà annulé");
-  const reservations = await prisma.reservation.findMany({ where: { eventId: id, cancelledAt: null }, include: { payment: { include: { ledgerEntry: true } }, user: true } });
+  const reservations = await prisma.reservation.findMany({ where: { eventId: event.id, cancelledAt: null }, include: { payment: { include: { ledgerEntry: true } }, user: true } });
   await prisma.$transaction(async (tx) => {
-    await tx.event.update({ where: { id }, data: { status: EventStatus.CANCELLED } });
-    await tx.application.updateMany({ where: { eventId: id, status: { notIn: [ApplicationStatus.REFUSED, ApplicationStatus.CANCELLED] } }, data: { status: ApplicationStatus.CANCELLED } });
-    await tx.reservation.updateMany({ where: { eventId: id, cancelledAt: null }, data: { cancelledAt: new Date() } });
-    await tx.ticket.updateMany({ where: { reservation: { eventId: id }, status: { not: TicketStatus.CANCELLED } }, data: { status: TicketStatus.CANCELLED } });
-    await tx.waitlistEntry.deleteMany({ where: { eventId: id } });
-    await tx.eventQuota.updateMany({ where: { eventId: id }, data: { heldCount: 0 } });
+    await tx.event.update({ where: { id: event.id }, data: { status: EventStatus.CANCELLED } });
+    await tx.application.updateMany({ where: { eventId: event.id, status: { notIn: [ApplicationStatus.REFUSED, ApplicationStatus.CANCELLED] } }, data: { status: ApplicationStatus.CANCELLED } });
+    await tx.reservation.updateMany({ where: { eventId: event.id, cancelledAt: null }, data: { cancelledAt: new Date() } });
+    await tx.ticket.updateMany({ where: { reservation: { eventId: event.id }, status: { not: TicketStatus.CANCELLED } }, data: { status: TicketStatus.CANCELLED } });
+    await tx.waitlistEntry.deleteMany({ where: { eventId: event.id } });
+    await tx.eventQuota.updateMany({ where: { eventId: event.id }, data: { heldCount: 0 } });
   });
   const paid = reservations.filter(r => r.payment?.status === PaymentStatus.SUCCEEDED);
   const refundedIds = new Set<string>();
@@ -973,8 +1097,32 @@ app.post("/admin/events/:id/cancel", { preHandler: roles(UserRole.ADMIN, UserRol
     if (await executeRefund(r.payment!, event, {})) refundedIds.add(r.id);
   }
   await Promise.all(reservations.map(r => notify(r.userId, "Événement annulé", `« ${event.title} » a été annulé.${refundedIds.has(r.id) ? ` Vous avez été intégralement remboursé(e) (${(r.payment!.amountCents / 100).toFixed(2)} €).` : ""}`)));
-  await audit(currentId(request), "CANCEL_EVENT", "Event", id, { affectedReservations: reservations.length, refunded: refundedIds.size, refundFailed: paid.length - refundedIds.size });
+  await audit(actorId, action, "Event", event.id, { affectedReservations: reservations.length, refunded: refundedIds.size, refundFailed: paid.length - refundedIds.size });
   return { cancelled: true, refundedCount: refundedIds.size, refundFailedCount: paid.length - refundedIds.size };
+};
+app.post("/admin/events/:id/cancel", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const event = await assertEventAccess(request, id);
+  return cancelEventWithRefunds(event, currentId(request), "CANCEL_EVENT");
+});
+// Décision explicite du restaurateur (ou de l'admin) après notification d'un minimum non atteint
+// (§10) : n'est utilisable que pendant la fenêtre de réponse, avant que la décision par défaut ne
+// s'applique automatiquement (voir checkMinParticipantsThresholds).
+app.post("/admin/events/:id/min-participants-decision", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { action } = z.object({ action: z.enum(["MAINTAIN", "CANCEL"]) }).parse(request.body);
+  const event = await assertEventAccess(request, id);
+  if (!event.minParticipantsNotifiedAt) return reply.code(409).send({ error: "Aucune notification de minimum non atteint pour cet événement" });
+  if (event.minParticipantsOutcome) return reply.code(409).send({ error: "Une décision a déjà été prise pour cet événement" });
+  const actorId = currentId(request);
+  if (action === "CANCEL") {
+    const result = await cancelEventWithRefunds(event, actorId, "MIN_PARTICIPANTS_CANCELLED");
+    await prisma.event.update({ where: { id }, data: { minParticipantsOutcome: "CANCELLED", minParticipantsDecidedAt: new Date(), minParticipantsDecidedBy: actorId } });
+    return result;
+  }
+  const updated = await prisma.event.update({ where: { id }, data: { minParticipantsOutcome: "MAINTAINED", minParticipantsDecidedAt: new Date(), minParticipantsDecidedBy: actorId } });
+  await audit(actorId, "MIN_PARTICIPANTS_MAINTAINED", "Event", id);
+  return updated;
 });
 // Exception admin motivée (§7) : en dehors du délai de 24h, un motif est obligatoire — sinon le
 // remboursement relève du calcul automatique déjà exécuté à l'annulation, pas de cette route.
@@ -1029,6 +1177,10 @@ app.get("/admin/finance/ledger", { preHandler: roles(UserRole.ADMIN, UserRole.OR
   const now = new Date();
   return entries.map(e => ({ ...e, readyToPayOut: !e.paidOutAt && now.getTime() - e.event.endsAt.getTime() >= PAYOUT_COOLDOWN_MS }));
 });
+// Sépare strictement (§9/§14) : volume brut et montant dû au restaurateur (LedgerEntry, restant
+// pertinent pour les anciennes ventes sous commission), chiffre d'affaires PROPRE de Nour (ses
+// événements en direct, controllerRestaurantId null) et abonnements restaurateur (revenu récurrent
+// distinct, jamais mélangé avec le volume de billets vendu pour compte de tiers).
 app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
@@ -1040,12 +1192,24 @@ app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN, UserRole.O
     prisma.ledgerEntry.aggregate({ where: { ...where, paidOutAt: { not: null } }, _sum: { restaurantDueCents: true } }),
     prisma.ledgerEntry.aggregate({ where, _sum: { refundedAmountCents: true } })
   ]);
-  return {
+  const summary = {
     grossCents: gross._sum.grossAmountCents ?? 0,
     commissionCents: commission._sum.commissionAmountCents ?? 0,
     restaurantDueCents: due._sum.restaurantDueCents ?? 0,
     paidOutCents: paidOut._sum.restaurantDueCents ?? 0,
     refundedCents: refunded._sum.refundedAmountCents ?? 0
+  };
+  if (restaurant) return summary;
+  // Le reste n'a de sens qu'à l'échelle de la plateforme, jamais restreint à un seul restaurateur.
+  const [nourOwnRevenue, activeSubscriptions] = await Promise.all([
+    prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED, reservation: { event: { controllerRestaurantId: null } } }, _sum: { amountCents: true } }),
+    prisma.restaurantSubscription.findMany({ where: { status: "ACTIVE" }, include: { plan: true } })
+  ]);
+  return {
+    ...summary,
+    nourOwnRevenueCents: nourOwnRevenue._sum.amountCents ?? 0,
+    subscriptionMonthlyRevenueCents: activeSubscriptions.reduce((sum, s) => sum + s.plan.monthlyPriceCents, 0),
+    activeSubscriptionsCount: activeSubscriptions.length
   };
 });
 app.post("/admin/finance/ledger/:id/mark-paid", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
@@ -1110,7 +1274,10 @@ app.delete("/admin/interview-slots/:id", { preHandler: roles(UserRole.ADMIN) }, 
 });
 const perksInput = { includesDrink: z.boolean().default(false), includesStarter: z.boolean().default(false), includesMain: z.boolean().default(false), includesDessert: z.boolean().default(false), perksDescription: z.string().max(500).optional() };
 app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
-  const input = z.object({ venueRestaurantId: z.string().optional(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), flow: z.enum(["SCREENING", "DIRECT"]).optional(), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), zone: z.enum(EVENT_ZONES as [string, ...string[]]), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false), ...perksInput }).parse(request.body);
+  const input = z.object({ venueRestaurantId: z.string().optional(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), flow: z.enum(["SCREENING", "DIRECT"]).optional(), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), zone: z.enum(EVENT_ZONES as [string, ...string[]]), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false), minParticipants: z.number().int().min(1).optional(), minParticipantsDeadline: z.string().optional(), ...perksInput })
+    // Minimum facultatif, mais la date limite devient obligatoire dès qu'un minimum est défini (§10).
+    .refine(v => !v.minParticipants || v.minParticipantsDeadline, { message: "Une date limite de décision est obligatoire dès qu'un minimum de participants est défini", path: ["minParticipantsDeadline"] })
+    .parse(request.body);
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
   // Un restaurateur ne prépare jamais qu'un brouillon : seul le super-admin peut publier (POST /admin/events/:id/review-decision).
@@ -1128,6 +1295,7 @@ app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER
     includesDrink: input.includesDrink, includesStarter: input.includesStarter, includesMain: input.includesMain, includesDessert: input.includesDessert, perksDescription: input.perksDescription,
     controllerRestaurantId: restaurant?.id ?? null,
     venueRestaurantId,
+    minParticipants: input.minParticipants, minParticipantsDeadline: input.minParticipantsDeadline ? new Date(input.minParticipantsDeadline) : undefined,
     status: token.role === UserRole.ADMIN && input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT
   } });
   await audit(currentId(request), "CREATE_EVENT", "Event", event.id); return event;
@@ -1142,8 +1310,12 @@ app.patch("/admin/events/:id", { preHandler: roles(UserRole.ADMIN, UserRole.ORGA
     title: z.string().min(3).optional(), description: z.string().min(20).optional(), district: z.string().optional(), address: z.string().optional(),
     capacity: z.number().int().min(5).max(500).optional(), priceCents: z.number().int().min(0).optional(),
     startsAt: z.string().optional(), endsAt: z.string().optional(), flow: z.enum(["SCREENING", "DIRECT"]).optional(),
+    minParticipants: z.number().int().min(1).nullable().optional(), minParticipantsDeadline: z.string().nullable().optional(),
     ...Object.fromEntries(Object.entries(perksInput).map(([k, v]) => [k, v.optional()]))
   }).parse(request.body);
+  if ((input.minParticipants ?? event.minParticipants) && !(input.minParticipantsDeadline !== undefined ? input.minParticipantsDeadline : event.minParticipantsDeadline)) {
+    return reply.code(400).send({ error: "Une date limite de décision est obligatoire dès qu'un minimum de participants est défini" });
+  }
   const activeReservations = await prisma.reservation.count({ where: { eventId: id, cancelledAt: null } });
   if (input.capacity !== undefined && input.capacity < activeReservations) return reply.code(400).send({ error: `Impossible de descendre sous ${activeReservations} places déjà payées ou bloquées` });
   // Seul le super-admin décide du parcours (sélection ou accès direct) : jamais le restaurateur,
@@ -1153,6 +1325,7 @@ app.patch("/admin/events/:id", { preHandler: roles(UserRole.ADMIN, UserRole.ORGA
   const data: Record<string, unknown> = { ...input };
   delete data.startsAt; delete data.endsAt;
   if (token.role !== UserRole.ADMIN) delete data.flow;
+  if (input.minParticipantsDeadline !== undefined) data.minParticipantsDeadline = input.minParticipantsDeadline ? new Date(input.minParticipantsDeadline) : null;
   const dateChanged = (input.startsAt && new Date(input.startsAt).getTime() !== event.startsAt.getTime()) || (input.endsAt && new Date(input.endsAt).getTime() !== event.endsAt.getTime());
   if (dateChanged && activeReservations > 0) {
     data.proposedStartsAt = input.startsAt ? new Date(input.startsAt) : event.startsAt;
@@ -1248,12 +1421,43 @@ app.post("/admin/events/:id/submit-for-review", { preHandler: roles(UserRole.ORG
 app.post("/admin/events/:id/review-decision", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const { accept, note } = z.object({ accept: z.boolean(), note: z.string().max(1000).optional() }).parse(request.body);
-  const event = await prisma.event.findUniqueOrThrow({ where: { id }, include: { controllerRestaurant: true } });
+  const event = await prisma.event.findUniqueOrThrow({ where: { id }, include: { controllerRestaurant: { include: { subscription: { include: { plan: true } } } } } });
   if (event.status !== EventStatus.PENDING_REVIEW) return reply.code(409).send({ error: "Cet événement n’est pas en attente de validation" });
-  const updated = await prisma.event.update({ where: { id }, data: { status: accept ? EventStatus.PUBLISHED : EventStatus.DRAFT, reviewedAt: new Date(), reviewNote: note ?? null } });
+  // Publication d'un événement organisé commercialement par un restaurant (jamais pour un événement
+  // Nour où le restaurant n'est que le lieu) : bloquée si l'abonnement n'est pas actif, et ne
+  // consomme le quota mensuel qu'à cette toute première publication (§8.2), jamais avant.
+  let quotaConsumedNow = false;
+  if (accept && event.controllerRestaurant && !event.quotaConsumedAt) {
+    const subscription = event.controllerRestaurant.subscription;
+    if (!subscription || (subscription.status !== "ACTIVE" && subscription.status !== "TRIALING")) {
+      return reply.code(409).send({ error: "L’abonnement de ce restaurateur n’est pas actif : impossible de publier tant qu’il n’est pas régularisé." });
+    }
+    const yearMonth = currentYearMonth();
+    const usage = await prisma.restaurantMonthlyUsage.upsert({ where: { restaurantId_yearMonth: { restaurantId: event.controllerRestaurant.id, yearMonth } }, update: {}, create: { restaurantId: event.controllerRestaurant.id, yearMonth } });
+    if (usage.eventsPublished >= subscription.plan.monthlyEventQuota) {
+      return reply.code(409).send({ error: `Quota mensuel atteint (${usage.eventsPublished}/${subscription.plan.monthlyEventQuota} événements publiés ce mois-ci).` });
+    }
+    await prisma.restaurantMonthlyUsage.update({ where: { restaurantId_yearMonth: { restaurantId: event.controllerRestaurant.id, yearMonth } }, data: { eventsPublished: { increment: 1 } } });
+    quotaConsumedNow = true;
+  }
+  const updated = await prisma.event.update({ where: { id }, data: { status: accept ? EventStatus.PUBLISHED : EventStatus.DRAFT, reviewedAt: new Date(), reviewNote: note ?? null, quotaConsumedAt: quotaConsumedNow ? new Date() : undefined } });
   if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, accept ? "Événement publié" : "Événement renvoyé en brouillon", accept ? `« ${event.title} » est maintenant publié.` : `« ${event.title} » nécessite des modifications${note ? ` : ${note}` : "."}`);
-  await audit(currentId(request), accept ? "APPROVE_EVENT" : "REJECT_EVENT", "Event", id, { note });
+  await audit(currentId(request), accept ? "APPROVE_EVENT" : "REJECT_EVENT", "Event", id, { note, quotaConsumedNow });
   return updated;
+});
+// Action explicite d'un administrateur (§8.2) : la seule façon de rendre un quota déjà consommé,
+// jamais automatique (une annulation ou une suppression ne le rend pas seule).
+app.post("/admin/events/:id/refund-quota", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const event = await prisma.event.findUniqueOrThrow({ where: { id } });
+  if (!event.quotaConsumedAt || !event.controllerRestaurantId) return reply.code(409).send({ error: "Cet événement n’a consommé aucun quota" });
+  const yearMonth = currentYearMonth(event.quotaConsumedAt);
+  await prisma.$transaction([
+    prisma.event.update({ where: { id }, data: { quotaConsumedAt: null } }),
+    prisma.restaurantMonthlyUsage.updateMany({ where: { restaurantId: event.controllerRestaurantId, yearMonth, eventsPublished: { gt: 0 } }, data: { eventsPublished: { decrement: 1 } } })
+  ]);
+  await audit(currentId(request), "REFUND_EVENT_QUOTA", "Event", id);
+  return { refunded: true };
 });
 app.post("/admin/events/:id/image", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -1334,6 +1538,39 @@ const backfillStripeFees = async () => {
   }
 };
 setInterval(() => { backfillStripeFees().catch(err => app.log.error(err)); }, 60_000);
+
+// Minimum de participants (§10) : à la date limite, si le seuil n'est pas atteint, notifie le
+// restaurateur et ouvre une fenêtre de réponse courte (AppSetting MIN_PARTICIPANTS_DECISION_WINDOW_HOURS) ;
+// sans décision explicite dans ce délai, applique l'action par défaut (AppSetting
+// MIN_PARTICIPANTS_NO_RESPONSE_ACTION, "maintien" par défaut pour éviter une annulation surprise).
+const checkMinParticipantsThresholds = async () => {
+  const dueForNotification = await prisma.event.findMany({
+    where: { status: EventStatus.PUBLISHED, minParticipants: { not: null }, minParticipantsDeadline: { lt: new Date() }, minParticipantsNotifiedAt: null },
+    include: { controllerRestaurant: true, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }
+  });
+  for (const event of dueForNotification) {
+    if (event._count.reservations >= (event.minParticipants ?? 0)) { await prisma.event.update({ where: { id: event.id }, data: { minParticipantsNotifiedAt: new Date() } }); continue; }
+    await prisma.event.update({ where: { id: event.id }, data: { minParticipantsNotifiedAt: new Date() } });
+    const windowHours = getSetting("MIN_PARTICIPANTS_DECISION_WINDOW_HOURS");
+    if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, "Minimum de participants non atteint", `« ${event.title} » n’a pas atteint son minimum de ${event.minParticipants} participants. Vous avez ${windowHours}h pour maintenir ou annuler, sans quoi l’événement sera maintenu par défaut.`);
+    const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+    await Promise.all(admins.map(a => notify(a.id, "Minimum de participants non atteint", `« ${event.title} » n’a pas atteint son minimum de participants.`)));
+    await audit(undefined, "MIN_PARTICIPANTS_NOT_REACHED", "Event", event.id, { minParticipants: event.minParticipants, confirmedCount: event._count.reservations });
+  }
+  const windowHours = getSetting("MIN_PARTICIPANTS_DECISION_WINDOW_HOURS");
+  const dueForDefaultDecision = await prisma.event.findMany({ where: { status: EventStatus.PUBLISHED, minParticipantsNotifiedAt: { not: null, lt: new Date(Date.now() - windowHours * 60 * 60_000) }, minParticipantsOutcome: null } });
+  for (const event of dueForDefaultDecision) {
+    const action = getSetting("MIN_PARTICIPANTS_NO_RESPONSE_ACTION");
+    if (action === "CANCEL") {
+      await cancelEventWithRefunds(event, undefined, "MIN_PARTICIPANTS_AUTO_CANCELLED");
+      await prisma.event.update({ where: { id: event.id }, data: { minParticipantsOutcome: "CANCELLED", minParticipantsDecidedAt: new Date() } });
+    } else {
+      await prisma.event.update({ where: { id: event.id }, data: { minParticipantsOutcome: "MAINTAINED", minParticipantsDecidedAt: new Date() } });
+      await audit(undefined, "MIN_PARTICIPANTS_AUTO_MAINTAINED", "Event", event.id);
+    }
+  }
+};
+setInterval(() => { checkMinParticipantsThresholds().catch(err => app.log.error(err)); }, 60_000);
 
 const close = async () => { await prisma.$disconnect(); await app.close(); };
 process.on("SIGINT", close); process.on("SIGTERM", close);

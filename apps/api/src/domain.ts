@@ -23,6 +23,13 @@ export function interviewRetryDate(from: Date, months = 3) {
   return date;
 }
 
+// Clé de mois calendaire (fuseau UTC, cohérent avec le stockage) utilisée pour le quota mensuel
+// restaurateur (§8.2) : "2026-09" par exemple. Un événement brouillon ne consomme jamais ce
+// compteur ; seule la toute première publication le fait (voir index.ts, review-decision).
+export function currentYearMonth(from = new Date()) {
+  return `${from.getUTCFullYear()}-${String(from.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 // Politique d'annulation/remboursement (§7) : plus de 24h avant le début de l'événement, annulation
 // et remboursement intégral automatiques ; 24h ou moins avant, aucun remboursement de plein droit
 // (seule une exception admin motivée peut en accorder un). Calcul strictement serveur, jamais

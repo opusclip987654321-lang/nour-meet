@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canUseTicket, hasCapacity, paymentDeadline, paymentLockExpiry, refundEligibility, interviewRetryDate } from "./domain.js";
+import { canUseTicket, hasCapacity, paymentDeadline, paymentLockExpiry, refundEligibility, interviewRetryDate, currentYearMonth } from "./domain.js";
 import { eventRequiresScreening, suggestedFlowForCategory } from "@nour/shared";
 
 describe("règles métier Nūr Meet", () => {
@@ -50,5 +50,11 @@ describe("règles métier Nūr Meet", () => {
     expect(refundEligibility(justOver, now).eligible).toBe(true);
     expect(refundEligibility(exactly24h, now).eligible).toBe(false);
     expect(refundEligibility(justUnder, now).eligible).toBe(false);
+  });
+
+  it("calcule la clé de mois calendaire utilisée pour le quota mensuel restaurateur", () => {
+    expect(currentYearMonth(new Date("2026-09-19T23:00:00Z"))).toBe("2026-09");
+    expect(currentYearMonth(new Date("2026-01-01T00:00:00Z"))).toBe("2026-01");
+    expect(currentYearMonth(new Date("2026-12-31T23:59:59Z"))).toBe("2026-12");
   });
 });

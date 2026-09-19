@@ -135,12 +135,15 @@ Les valeurs configurables (durée du verrou de paiement, quota mensuel restaurat
 - Connexion par téléphone avec mode local gratuit ou véritables codes Twilio Verify.
 - Profils privés et profil validé.
 - Catalogue, filtres et fiches événements.
-- Entretien global de validation du profil (une seule démarche par personne, pas par événement), avec délai de trois mois avant nouvelle demande après un refus.
-- Acceptation/refus dans l’administration.
-- Réservation temporaire de 24 heures avant paiement (règle amenée à changer, voir le cahier des charges v3 en cours).
+- Deux parcours distincts et centralisés par `Event.flow` : speed dating à sélection (entretien global une seule fois, jamais par événement, avec délai de trois mois après un refus) et networking à accès direct (aucune validation de profil requise).
+- Questionnaire structuré obligatoire avant toute candidature (7 questions privées en speed dating, 7 questions non bloquantes en networking).
+- Aucune place n'est retenue à la candidature : un verrou technique court (10 min par défaut, `AppSetting PAYMENT_LOCK_MINUTES`) n'est posé qu'au moment réel d'une tentative de paiement.
 - Paiement réel Stripe (mode test) avec webhook, protection contre la survente sur paiement tardif.
+- Politique d'annulation/remboursement calculée et exécutée côté serveur (plus de 24h : remboursement intégral automatique ; 24h ou moins : aucun remboursement de plein droit, sauf exception admin motivée).
 - Tarifs différenciés par catégorie et prestations réelles par événement.
-- Comptabilité 30/70 restaurateur (reversements manuels, jamais de virement automatique).
+- Abonnement mensuel restaurateur (100 €/mois par défaut, quota d'événements publiables par mois) remplaçant la commission 30/70 ; l'ancien registre 30/70 reste en base mais n'est plus utilisé par défaut (`AppSetting ENABLE_COMMISSION_LEDGER`).
+- Minimum de participants par événement avec date limite de décision et notification automatique du restaurateur.
+- Scaffolding marketplace (comptes Stripe Connect en mode test) préparé mais aucun virement réel n'est jamais déclenché (`AppSetting MARKETPLACE_PAYOUTS_ENABLED`, désactivé par défaut, bloqué par validation juridique).
 - Billet et QR code unique.
 - Contrôle d’entrée et protection contre le double scan.
 - Liste d’attente.

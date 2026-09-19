@@ -322,26 +322,68 @@ function ProfileEditor({onSaved}:{onSaved:()=>void}) {
   return <form className="panel form-grid" onSubmit={save}><div className="panel-title"><h2>Mon profil</h2><span>Informations privées</span></div>{message&&<Notice kind="success">{message}</Notice>}<label>Prénom ou pseudonyme<input value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})}/></label><label>E-mail<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Date de naissance<input type="date" value={form.birthDate} onChange={e=>setForm({...form,birthDate:e.target.value})}/></label><label>Ville<input value={form.city} onChange={e=>setForm({...form,city:e.target.value})}/></label><label>Profession<input value={form.profession} onChange={e=>setForm({...form,profession:e.target.value})}/></label><label>Centres d’intérêt<input value={form.interests} onChange={e=>setForm({...form,interests:e.target.value})}/></label><label>Catégorie (pour les événements avec quotas, ex. speed dating)<select value={form.quotaCategory} onChange={e=>setForm({...form,quotaCategory:e.target.value})}><option value="">Non renseignée</option><option value="HOMME">Homme</option><option value="FEMME">Femme</option></select></label><label className="wide">Biographie<textarea value={form.bio} onChange={e=>setForm({...form,bio:e.target.value})}/></label><button className="button">Enregistrer</button></form>;
 }
 
+const emptyRestaurantForm={name:"",managerName:"",siret:"",description:"",district:"",address:"",phone:"",desiredCapacity:"",desiredSchedule:"",averagePricePerPersonCents:"",defaultMinParticipants:"",priceIncludesDrink:false,priceIncludesStarter:false,priceIncludesMain:false,priceIncludesDessert:false,priceNotes:"",proposesCategoryPricing:false,allowsPrivatization:false,specialConditions:""};
 function RestaurantApplication() {
   const [restaurant,setRestaurant]=useState<any>(null);
   const [loading,setLoading]=useState(true);
-  const [form,setForm]=useState({name:"",managerName:"",siret:"",description:"",district:"",address:"",phone:""});
+  const [form,setForm]=useState(emptyRestaurantForm);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [submitting,setSubmitting]=useState(false);
 
-  const load=()=>api<any>("/restaurants/me").then(r=>{setRestaurant(r);setForm({name:r.name??"",managerName:r.managerName??"",siret:r.siret??"",description:r.description??"",district:r.district??"",address:r.address??"",phone:r.phone??""})}).catch(()=>setRestaurant(null)).finally(()=>setLoading(false));
+  const load=()=>api<any>("/restaurants/me").then(r=>{setRestaurant(r);setForm({...emptyRestaurantForm,name:r.name??"",managerName:r.managerName??"",siret:r.siret??"",description:r.description??"",district:r.district??"",address:r.address??"",phone:r.phone??"",desiredCapacity:r.desiredCapacity??"",desiredSchedule:r.desiredSchedule??"",averagePricePerPersonCents:r.averagePricePerPersonCents!=null?String(r.averagePricePerPersonCents/100):"",defaultMinParticipants:r.defaultMinParticipants??"",priceIncludesDrink:!!r.priceIncludesDrink,priceIncludesStarter:!!r.priceIncludesStarter,priceIncludesMain:!!r.priceIncludesMain,priceIncludesDessert:!!r.priceIncludesDessert,priceNotes:r.priceNotes??"",proposesCategoryPricing:!!r.proposesCategoryPricing,allowsPrivatization:!!r.allowsPrivatization,specialConditions:r.specialConditions??""})}).catch(()=>setRestaurant(null)).finally(()=>setLoading(false));
   useEffect(()=>{load()},[]);
+
+  const payload=()=>({...form,desiredCapacity:form.desiredCapacity?Number(form.desiredCapacity):undefined,defaultMinParticipants:form.defaultMinParticipants?Number(form.defaultMinParticipants):undefined,averagePricePerPersonCents:form.averagePricePerPersonCents?Math.round(Number(form.averagePricePerPersonCents)*100):undefined});
 
   const submit=async(e:FormEvent)=>{
     e.preventDefault();setSubmitting(true);setNotice(null);
-    try{await api("/restaurants/apply",{method:"POST",body:JSON.stringify(form)});setNotice({kind:"success",text:"Votre demande a été envoyée."});await load()}
+    try{await api("/restaurants/apply",{method:"POST",body:JSON.stringify(payload())});setNotice({kind:"success",text:"Votre demande a été envoyée."});await load()}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setSubmitting(false)}
   };
+  const saveProfile=async(e:FormEvent)=>{
+    e.preventDefault();setSubmitting(true);setNotice(null);
+    try{await api("/restaurants/me",{method:"PATCH",body:JSON.stringify(payload())});setNotice({kind:"success",text:"Fiche mise à jour."});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setSubmitting(false)}
+  };
+  const uploadPhoto=async(file:File)=>{
+    const body=new FormData();body.append("file",file);
+    try{await api("/restaurants/me/photos",{method:"POST",body});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+  };
+  const removePhoto=async(photoId:string)=>{try{await api(`/restaurants/me/photos/${photoId}`,{method:"DELETE"});await load()}catch(err){setNotice({kind:"error",text:(err as Error).message})}};
+
+  const priceFields=(f:typeof form,set:(f:typeof form)=>void)=><>
+    <label>Places pour la soirée<input type="number" min={1} value={f.desiredCapacity} onChange={e=>set({...f,desiredCapacity:e.target.value})}/></label>
+    <label>Jours et horaires souhaités<input value={f.desiredSchedule} onChange={e=>set({...f,desiredSchedule:e.target.value})} placeholder="Vendredi et samedi soir"/></label>
+    <label>Prix moyen par personne (€)<input type="number" min={0} step="0.01" value={f.averagePricePerPersonCents} onChange={e=>set({...f,averagePricePerPersonCents:e.target.value})}/></label>
+    <label>Minimum de participants habituel<input type="number" min={1} value={f.defaultMinParticipants} onChange={e=>set({...f,defaultMinParticipants:e.target.value})}/></label>
+    <label className="wide">Le prix comprend habituellement<div className="chips-input"><label><input type="checkbox" checked={f.priceIncludesDrink} onChange={e=>set({...f,priceIncludesDrink:e.target.checked})}/> Boisson</label><label><input type="checkbox" checked={f.priceIncludesStarter} onChange={e=>set({...f,priceIncludesStarter:e.target.checked})}/> Entrée</label><label><input type="checkbox" checked={f.priceIncludesMain} onChange={e=>set({...f,priceIncludesMain:e.target.checked})}/> Plat</label><label><input type="checkbox" checked={f.priceIncludesDessert} onChange={e=>set({...f,priceIncludesDessert:e.target.checked})}/> Dessert</label></div></label>
+    <label className="wide">Précisions sur le contenu du prix<textarea value={f.priceNotes} onChange={e=>set({...f,priceNotes:e.target.value})}/></label>
+    <label><input type="checkbox" checked={f.proposesCategoryPricing} onChange={e=>set({...f,proposesCategoryPricing:e.target.checked})}/> Je propose des tarifs par catégorie (homme/femme)</label>
+    <label><input type="checkbox" checked={f.allowsPrivatization} onChange={e=>set({...f,allowsPrivatization:e.target.checked})}/> Privatisation possible</label>
+    <label className="wide">Conditions particulières<textarea value={f.specialConditions} onChange={e=>set({...f,specialConditions:e.target.value})}/></label>
+  </>;
 
   if(loading) return <Loading/>;
   if(restaurant?.status==="PENDING") return <div className="panel"><Notice kind="info">Votre demande pour « {restaurant.name} » est en cours d’examen.</Notice></div>;
-  if(restaurant?.status==="APPROVED") return <div className="panel"><Notice kind="success">Votre établissement « {restaurant.name} » est approuvé. <Link to="/admin">Accéder à mon espace restaurateur →</Link></Notice></div>;
+  if(restaurant?.status==="APPROVED") return <div className="stack">
+    <div className="panel"><Notice kind="success">Votre établissement « {restaurant.name} » est approuvé. <Link to="/admin">Accéder à mon espace restaurateur →</Link></Notice>
+      {restaurant.subscription&&<p className="fine">Abonnement « {restaurant.subscription.plan.name} » — {(restaurant.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois — statut : <b>{restaurant.subscription.status}</b> — {restaurant.currentMonthEventsPublished}/{restaurant.subscription.plan.monthlyEventQuota} événements publiés ce mois-ci.</p>}
+    </div>
+    <form className="panel form-grid" onSubmit={saveProfile}>
+      <div className="panel-title"><h2>Fiche établissement</h2><span>Visible par l’administration</span></div>
+      {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+      {priceFields(form,setForm)}
+      <button className="button" disabled={submitting}>{submitting?"Enregistrement…":"Enregistrer"}</button>
+    </form>
+    <div className="panel">
+      <div className="panel-title"><h2>Galerie</h2><span>{(restaurant.photos??[]).length}/8 photos</span></div>
+      <div className="event-photo-grid">{(restaurant.photos??[]).map((p:any)=><div key={p.id} className="event-photo"><img src={imgUrl(p.url)} alt=""/><button type="button" className="link-button" onClick={()=>removePhoto(p.id)}>Retirer</button></div>)}</div>
+      <label className="fine">Ajouter une photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>e.target.files?.[0]&&uploadPhoto(e.target.files[0])}/></label>
+    </div>
+  </div>;
 
   return <form className="panel form-grid" onSubmit={submit}>
     <div className="panel-title"><h2>Devenir restaurateur</h2><span>Ouvrir un compte professionnel</span></div>
@@ -354,7 +396,8 @@ function RestaurantApplication() {
     <label>Quartier / ville<input value={form.district} onChange={e=>setForm({...form,district:e.target.value})}/></label>
     <label>Adresse<input value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></label>
     <label className="wide">Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
-    <p className="fine wide">Le SIRET est déclaratif : Nour ne réalise pas de vérification officielle auprès d’un registre.</p>
+    {priceFields(form,setForm)}
+    <p className="fine wide">Le SIRET est déclaratif : Nour ne réalise pas de vérification officielle auprès d’un registre. La galerie de photos se complète après approbation.</p>
     <button className="button" disabled={submitting}>{submitting?"Envoi…":"Envoyer ma demande"}</button>
   </form>;
 }
@@ -493,17 +536,17 @@ function AdminGlobalInterviews() {
 function AdminCreateEvent() {
   const {user}=useAuth();
   const navigate=useNavigate();
-const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].name,flow:"" as ""|"SCREENING"|"DIRECT",description:"",startsAt:"",endsAt:"",district:"",address:"",zone:EVENT_ZONES[0],capacity:20,priceCents:3000,includesDrink:false,includesStarter:false,includesMain:false,includesDessert:false,perksDescription:""});
+const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].name,flow:"" as ""|"SCREENING"|"DIRECT",description:"",startsAt:"",endsAt:"",district:"",address:"",zone:EVENT_ZONES[0],capacity:20,priceCents:3000,includesDrink:false,includesStarter:false,includesMain:false,includesDessert:false,perksDescription:"",minParticipants:"",minParticipantsDeadline:""});
   const [submitting,setSubmitting]=useState(false);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
-  const [commissionRate,setCommissionRate]=useState<number|null>(null);
-  useEffect(()=>{if(user?.role==="ORGANIZER")api<any>("/restaurants/me").then(r=>setCommissionRate(r.commissionRate)).catch(()=>{})},[user?.role]);
+  const [restaurantInfo,setRestaurantInfo]=useState<any>(null);
+  useEffect(()=>{if(user?.role==="ORGANIZER")api<any>("/restaurants/me").then(setRestaurantInfo).catch(()=>{})},[user?.role]);
   const slugify=(t:string)=>t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
 
   const submit=async(e:FormEvent)=>{
     e.preventDefault();setSubmitting(true);setNotice(null);
     try{
-      await api("/admin/events",{method:"POST",body:JSON.stringify({...form,flow:form.flow||undefined,startsAt:new Date(form.startsAt).toISOString(),endsAt:new Date(form.endsAt).toISOString()})});
+      await api("/admin/events",{method:"POST",body:JSON.stringify({...form,flow:form.flow||undefined,minParticipants:form.minParticipants?Number(form.minParticipants):undefined,minParticipantsDeadline:form.minParticipantsDeadline?new Date(form.minParticipantsDeadline).toISOString():undefined,startsAt:new Date(form.startsAt).toISOString(),endsAt:new Date(form.endsAt).toISOString()})});
       setNotice({kind:"success",text:user?.role==="ORGANIZER"?"Brouillon créé. Ajoutez vos photos puis soumettez-le à validation.":"Événement créé."});
       setTimeout(()=>navigate("/admin/events"),1200);
     }catch(err){setNotice({kind:"error",text:(err as Error).message})}
@@ -511,7 +554,7 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
   };
 
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ADMINISTRATION</span><h1>Créer une soirée</h1><p className="fine left">{user?.role==="ORGANIZER"?"Votre soirée démarre en brouillon : ajoutez ensuite vos photos puis soumettez-la à validation.":"Vous publiez directement vos propres événements."}</p>
-    {user?.role==="ORGANIZER"&&<Notice kind="info">Nour prélève {commissionRate??30}% du prix des billets. Vous recevez {100-(commissionRate??30)}% des ventes éligibles après l’événement. Les frais Stripe sont pris en charge par Nour.</Notice>}
+    {user?.role==="ORGANIZER"&&restaurantInfo?.subscription&&<Notice kind="info">Abonnement « {restaurantInfo.subscription.plan.name} » ({(restaurantInfo.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois) — {restaurantInfo.currentMonthEventsPublished}/{restaurantInfo.subscription.plan.monthlyEventQuota} événements publiés ce mois-ci. Un brouillon ne consomme le quota qu’à sa première publication.</Notice>}
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <form className="panel form-grid" onSubmit={submit}>
       <label>Titre<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value,slug:form.slug?form.slug:slugify(e.target.value)})}/></label>
@@ -531,6 +574,7 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
         <label><input type="checkbox" checked={form.includesDessert} onChange={e=>setForm({...form,includesDessert:e.target.checked})}/> Dessert</label>
       </div></div>
       <label className="wide">Précisions sur les prestations<textarea value={form.perksDescription} onChange={e=>setForm({...form,perksDescription:e.target.value})} placeholder="Ex. : coupe de champagne à l’arrivée, buffet salé…"/></label>
+      <div className="time-row"><label>Minimum de participants (facultatif)<input type="number" min={1} value={form.minParticipants} onChange={e=>setForm({...form,minParticipants:e.target.value})}/></label>{form.minParticipants&&<label>Date limite de décision<input required type="datetime-local" value={form.minParticipantsDeadline} onChange={e=>setForm({...form,minParticipantsDeadline:e.target.value})}/></label>}</div>
       <p className="fine wide">Les quotas hommes/femmes (Speed dating), les tarifs différenciés et la galerie photo se règlent après création, depuis « Mes événements ».</p>
       <button className="button" disabled={submitting}>{submitting?"Création…":"Créer la soirée"}</button>
     </form>
@@ -572,7 +616,13 @@ function AdminEventPhotos() {
   };
   const cancelEvent=async(eventId:string)=>{
     setActingOn(eventId);setNotice(null);
-    try{const res=await api<any>(`/admin/events/${eventId}/cancel`,{method:"POST"});setNotice({kind:"success",text:`Événement annulé.${res.paidReservationsToRefund?` ${res.paidReservationsToRefund} paiement(s) à rembourser manuellement.`:""}`});setCancelConfirmFor(null);await load()}
+    try{const res=await api<any>(`/admin/events/${eventId}/cancel`,{method:"POST"});setNotice({kind:"success",text:`Événement annulé.${res.refundedCount?` ${res.refundedCount} billet(s) remboursé(s) intégralement.`:""}`});setCancelConfirmFor(null);await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setActingOn(null)}
+  };
+  const decideMinParticipants=async(eventId:string, action:"MAINTAIN"|"CANCEL")=>{
+    setActingOn(eventId);setNotice(null);
+    try{await api(`/admin/events/${eventId}/min-participants-decision`,{method:"POST",body:JSON.stringify({action})});setNotice({kind:"success",text:action==="MAINTAIN"?"Événement maintenu.":"Événement annulé, billets remboursés."});await load()}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setActingOn(null)}
   };
@@ -706,6 +756,7 @@ function AdminEventPhotos() {
       <button type="button" className="button small secondary" onClick={()=>toggleHistory(ev.id)}>{historyFor===ev.id?"Masquer l’historique":"Voir l’historique"}</button>
       {historyFor===ev.id&&<div className="stack"><ul className="history-list">{historyItems.map(h=><li key={h.id}><small>{dateTime(h.createdAt)}</small> — {HISTORY_LABEL[h.action]??h.action}</li>)}</ul></div>}
 
+      {ev.minParticipantsNotifiedAt&&!ev.minParticipantsOutcome&&<div className="reject-note"><span className="fine left">Minimum de {ev.minParticipants} participants non atteint : maintenir ou annuler ?</span><button className="button small" disabled={actingOn===ev.id} onClick={()=>decideMinParticipants(ev.id,"MAINTAIN")}>Maintenir</button><button className="button small danger" disabled={actingOn===ev.id} onClick={()=>decideMinParticipants(ev.id,"CANCEL")}>Annuler (remboursement intégral)</button></div>}
       {ev.status!=="CANCELLED"&&(cancelConfirmFor===ev.id?<div className="reject-note"><span className="fine left">Confirmer l’annulation de cet événement ?</span><button className="button small danger" disabled={actingOn===ev.id} onClick={()=>cancelEvent(ev.id)}>Confirmer l’annulation</button></div>:<button className="button small danger" onClick={()=>setCancelConfirmFor(ev.id)}>Annuler l’événement</button>)}
     </div></div>)}</div>
   </div></section></Layout>;
@@ -713,32 +764,58 @@ function AdminEventPhotos() {
 
 function AdminRestaurants() {
   const [items,setItems]=useState<any[]>([]);
+  const [plans,setPlans]=useState<any[]>([]);
   const [filter,setFilter]=useState("PENDING");
   const [actingOn,setActingOn]=useState<string|null>(null);
   const [reasonFor,setReasonFor]=useState<string|null>(null);
   const [reason,setReason]=useState("");
-  const [rateFor,setRateFor]=useState<string|null>(null);
-  const [rate,setRate]=useState(30);
+  const [notesFor,setNotesFor]=useState<string|null>(null);
+  const [notes,setNotes]=useState("");
+  const [subFor,setSubFor]=useState<string|null>(null);
+  const [subForm,setSubForm]=useState({planId:"",status:"ACTIVE"});
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const load=()=>api<any[]>(`/admin/restaurants?status=${filter}`).then(setItems);
-  useEffect(()=>{load()},[filter]);
+  useEffect(()=>{load();api<any[]>("/admin/plans").then(setPlans).catch(()=>{})},[filter]);
 
   const decide=async(id:string, accept:boolean, rejectReason?:string)=>{
     setActingOn(id);setNotice(null);
-    try{await api(`/admin/restaurants/${id}/decision`,{method:"POST",body:JSON.stringify({accept,reason:rejectReason})});setNotice({kind:"success",text:accept?"Restaurateur approuvé.":"Demande refusée."});setReasonFor(null);setReason("");await load()}
+    try{await api(`/admin/restaurants/${id}/decision`,{method:"POST",body:JSON.stringify({accept,reason:rejectReason})});setNotice({kind:"success",text:accept?"Restaurateur approuvé. Un essai d’abonnement a été activé.":"Demande refusée."});setReasonFor(null);setReason("");await load()}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setActingOn(null)}
   };
-  const saveRate=async(id:string)=>{
+  const saveNotes=async(id:string)=>{
     setActingOn(id);setNotice(null);
-    try{await api(`/admin/restaurants/${id}/commission-rate`,{method:"POST",body:JSON.stringify({commissionRate:rate})});setNotice({kind:"success",text:"Taux de commission mis à jour."});setRateFor(null);await load()}
+    try{await api(`/admin/restaurants/${id}/notes`,{method:"PATCH",body:JSON.stringify({adminNotes:notes})});setNotice({kind:"success",text:"Notes internes enregistrées."});setNotesFor(null);await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setActingOn(null)}
+  };
+  const saveSubscription=async(id:string)=>{
+    setActingOn(id);setNotice(null);
+    try{await api(`/admin/restaurants/${id}/subscription`,{method:"POST",body:JSON.stringify(subForm)});setNotice({kind:"success",text:"Abonnement mis à jour."});setSubFor(null);await load()}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setActingOn(null)}
   };
 
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Demandes restaurateurs</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="filters"><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="PENDING">En attente</option><option value="APPROVED">Approuvés</option><option value="REJECTED">Refusés</option><option value="SUSPENDED">Suspendus</option></select></div>
-    {items.length===0?<div className="empty"><span>◇</span><h2>Aucune demande</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request"><div><h3>{r.name}</h3><p>{r.owner.displayName} · {r.owner.phone}</p><p className="fine left">Responsable : {r.managerName??"—"} · SIRET {r.siret??"—"}</p>{r.district&&<p className="fine left">{r.address}, {r.district}</p>}{r.description&&<p className="fine left">{r.description}</p>}<small>{RESTAURANT_STATUS_LABEL[r.status]}</small>{r.status==="APPROVED"&&(rateFor===r.id?<div className="time-row"><input type="number" min={0} max={100} value={rate} onChange={e=>setRate(Number(e.target.value))}/><button className="button small" disabled={actingOn===r.id} onClick={()=>saveRate(r.id)}>Enregistrer</button></div>:<p className="fine left">Commission Nour : {r.commissionRate}% <button type="button" className="link-button" onClick={()=>{setRate(r.commissionRate);setRateFor(r.id)}}>modifier</button></p>)}</div>{r.status==="PENDING"&&<div className="decision-buttons">
+    {items.length===0?<div className="empty"><span>◇</span><h2>Aucune demande</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request">
+      <div>
+        <h3>{r.name}</h3>
+        <p>{r.owner.displayName} · <a href={`tel:${r.phone||r.owner.phone}`}>{r.phone||r.owner.phone}</a>{r.owner.email?<> · <a href={`mailto:${r.owner.email}`}>Contacter par e-mail</a></>:null}</p>
+        <p className="fine left">Responsable : {r.managerName??"—"} · SIRET {r.siret??"—"}</p>
+        {r.district&&<p className="fine left">{r.address}, {r.district}</p>}
+        {r.description&&<p className="fine left">{r.description}</p>}
+        <p className="fine left">Places souhaitées : {r.desiredCapacity??"—"} · Créneaux : {r.desiredSchedule??"—"} · Prix moyen/pers. : {r.averagePricePerPersonCents!=null?money(r.averagePricePerPersonCents):"—"} · Minimum habituel : {r.defaultMinParticipants??"—"}</p>
+        <p className="fine left">Inclus : {[r.priceIncludesDrink&&"boisson",r.priceIncludesStarter&&"entrée",r.priceIncludesMain&&"plat",r.priceIncludesDessert&&"dessert"].filter(Boolean).join(", ")||"—"}{r.proposesCategoryPricing?" · tarifs par catégorie proposés":""}{r.allowsPrivatization?" · privatisation possible":""}</p>
+        {r.specialConditions&&<p className="fine left">Conditions particulières : {r.specialConditions}</p>}
+        {r.photos?.length>0&&<div className="event-photo-grid">{r.photos.map((p:any)=><img key={p.id} src={imgUrl(p.url)} alt="" style={{height:100,borderRadius:8,objectFit:"cover"}}/>)}</div>}
+        <small>{RESTAURANT_STATUS_LABEL[r.status]}</small>
+        {r.status==="APPROVED"&&<p className="fine left">Abonnement : {r.subscription?`${r.subscription.plan.name} (${(r.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois) — ${r.subscription.status}`:"aucun"} <button type="button" className="link-button" onClick={()=>{setSubFor(r.id);setSubForm({planId:r.subscription?.planId??plans[0]?.id??"",status:r.subscription?.status??"ACTIVE"})}}>modifier</button></p>}
+        {subFor===r.id&&<div className="time-row"><select value={subForm.planId} onChange={e=>setSubForm({...subForm,planId:e.target.value})}>{plans.map(p=><option key={p.id} value={p.id}>{p.name} ({(p.monthlyPriceCents/100).toFixed(0)} €/mois, {p.monthlyEventQuota} évt.)</option>)}</select><select value={subForm.status} onChange={e=>setSubForm({...subForm,status:e.target.value})}><option value="TRIALING">Essai</option><option value="ACTIVE">Actif</option><option value="PAST_DUE">Impayé</option><option value="CANCELLED">Résilié</option><option value="INCOMPLETE">Incomplet</option></select><button className="button small" disabled={actingOn===r.id} onClick={()=>saveSubscription(r.id)}>Enregistrer</button></div>}
+        <p className="fine left">Notes internes : {r.adminNotes||"—"} <button type="button" className="link-button" onClick={()=>{setNotesFor(r.id);setNotes(r.adminNotes??"")}}>modifier</button></p>
+        {notesFor===r.id&&<div className="time-row"><textarea value={notes} onChange={e=>setNotes(e.target.value)}/><button className="button small" disabled={actingOn===r.id} onClick={()=>saveNotes(r.id)}>Enregistrer</button></div>}
+      </div>
+      {r.status==="PENDING"&&<div className="decision-buttons">
       <button className="button" disabled={actingOn===r.id} onClick={()=>decide(r.id,true)}>Accepter</button>
       {reasonFor===r.id?<div className="reject-note"><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motif (optionnel)"/><button className="button danger" disabled={actingOn===r.id} onClick={()=>decide(r.id,false,reason)}>Confirmer le refus</button></div>:<button className="button danger" onClick={()=>setReasonFor(r.id)}>Refuser</button>}
     </div>}</article>)}</div>}
@@ -763,8 +840,10 @@ function AdminFinance() {
 
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">{user?.role==="ADMIN"?"SUPER-ADMINISTRATION":"ESPACE RESTAURATEUR"}</span><h1>Finances</h1><p className="fine left">Aucun virement n’est jamais déclenché automatiquement par la plateforme : « Marquer comme reversé » n’est qu’un registre, à cocher après un virement fait vous-même.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     {summary&&<div className="stat-grid">
-      <Stat label="Encaissé" value={money(summary.grossCents)}/>
-      <Stat label="Commission Nour" value={money(summary.commissionCents)}/>
+      {summary.nourOwnRevenueCents!=null&&<Stat label="CA propre Nūr (événements en direct)" value={money(summary.nourOwnRevenueCents)}/>}
+      {summary.subscriptionMonthlyRevenueCents!=null&&<Stat label="Abonnements restaurateurs (mensuel)" value={`${money(summary.subscriptionMonthlyRevenueCents)} · ${summary.activeSubscriptionsCount} actifs`}/>}
+      <Stat label="Volume brut billets restaurateurs" value={money(summary.grossCents)}/>
+      <Stat label="Commission Nour (héritée 30/70)" value={money(summary.commissionCents)}/>
       <Stat label="Dû au(x) restaurant(s)" value={money(summary.restaurantDueCents)}/>
       <Stat label="Déjà reversé" value={money(summary.paidOutCents)}/>
       <Stat label="Remboursé" value={money(summary.refundedCents)}/>

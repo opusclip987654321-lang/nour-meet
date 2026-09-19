@@ -225,6 +225,89 @@ describe("aucune survente si un paiement Stripe arrive après libération de la 
   }, 20_000);
 });
 
+async function newOrganizer(displayName: string) {
+  const phone = testPhone();
+  await api("/auth/request-otp", { method: "POST", body: JSON.stringify({ phone }) });
+  const { body: verify } = await api<{ token: string }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456", displayName }) });
+  let token = verify.token;
+  const { body: me } = await api<{ id: string }>("/me", {}, token);
+  const { body: restaurant } = await api<{ id: string }>("/restaurants/apply", { method: "POST", body: JSON.stringify({ name: `${displayName} Resto`, managerName: displayName, siret: "12345678900019" }) }, token);
+  const admin = await adminToken();
+  await api(`/admin/restaurants/${restaurant.id}/decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
+  // Le rôle vient de changer côté serveur : un jeton fraîchement émis le reflète.
+  const { body: reverify } = await api<{ token: string }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456" }) });
+  token = reverify.token;
+  return { token, userId: me.id, restaurantId: restaurant.id };
+}
+
+describe("restaurateur limité à son quota mensuel d'événements publiables", () => {
+  it("bloque la publication au-delà du quota du plan, sans bloquer la création de brouillons", async () => {
+    const organizer = await newOrganizer("QuotaTest");
+    createdUserIds.push(organizer.userId);
+    const admin = await adminToken();
+
+    const publishOne = async (n: number) => {
+      const { body: event } = await api<{ id: string }>("/admin/events", { method: "POST", body: JSON.stringify({
+        title: `Quota Test ${n}`, slug: `quota-test-${n}-${Date.now()}`, category: "Networking", description: "Événement de test pour le quota mensuel restaurateur.",
+        startsAt: new Date(Date.now() + 20 * 86_400_000).toISOString(), endsAt: new Date(Date.now() + 20 * 86_400_000 + 3_600_000).toISOString(),
+        district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2000
+      }) }, organizer.token);
+      createdEventIds.push(event.id);
+      await api(`/admin/events/${event.id}/submit-for-review`, { method: "POST" }, organizer.token);
+      return api(`/admin/events/${event.id}/review-decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
+    };
+
+    const first = await publishOne(1);
+    const second = await publishOne(2);
+    const third = await publishOne(3);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(third.status).toBe(409);
+    expect((third.body as any).error).toMatch(/quota/i);
+
+    const usage = await prisma.restaurantMonthlyUsage.findFirstOrThrow({ where: { restaurantId: organizer.restaurantId } });
+    expect(usage.eventsPublished).toBe(2);
+  });
+});
+
+describe("minimum de participants non atteint : maintien ou annulation", () => {
+  it("rembourse intégralement les billets déjà vendus si le restaurateur choisit d'annuler", async () => {
+    const organizer = await newOrganizer("MinPartTest");
+    createdUserIds.push(organizer.userId);
+    const admin = await adminToken();
+    const { body: event } = await api<{ id: string }>("/admin/events", { method: "POST", body: JSON.stringify({
+      title: "Test minimum de participants", slug: `min-part-test-${Date.now()}`, category: "Networking", description: "Événement de test pour le minimum de participants.",
+      startsAt: new Date(Date.now() + 20 * 86_400_000).toISOString(), endsAt: new Date(Date.now() + 20 * 86_400_000 + 3_600_000).toISOString(),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2500,
+      minParticipants: 5, minParticipantsDeadline: new Date(Date.now() + 86_400_000).toISOString()
+    }) }, organizer.token);
+    createdEventIds.push(event.id);
+    await api(`/admin/events/${event.id}/submit-for-review`, { method: "POST" }, organizer.token);
+    await api(`/admin/events/${event.id}/review-decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
+
+    const participant = await directParticipant("MinPartBuyer");
+    createdUserIds.push(participant.userId);
+    const applyRes = await applyToEvent(event.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    await payAndConfirm(applyRes.body.application.id, participant.token);
+
+    // Simule le passage de la fenêtre de notification (normalement posée par le balayage
+    // périodique une fois la date limite dépassée) sans attendre une vraie minute réelle.
+    await prisma.event.update({ where: { id: event.id }, data: { minParticipantsNotifiedAt: new Date() } });
+
+    const decision = await api<{ cancelled: boolean; refundedCount: number }>(`/admin/events/${event.id}/min-participants-decision`, { method: "POST", body: JSON.stringify({ action: "CANCEL" }) }, organizer.token);
+    expect(decision.status).toBe(200);
+    expect(decision.body.cancelled).toBe(true);
+    expect(decision.body.refundedCount).toBe(1);
+
+    const updatedEvent = await prisma.event.findUniqueOrThrow({ where: { id: event.id } });
+    expect(updatedEvent.minParticipantsOutcome).toBe("CANCELLED");
+    expect(updatedEvent.status).toBe("CANCELLED");
+
+    const payment = await prisma.payment.findFirstOrThrow({ where: { reservation: { applicationId: applyRes.body.application.id } } });
+    expect(payment.status).toBe("REFUNDED");
+  }, 20_000);
+});
+
 // Un participant DIRECT (networking) n'a besoin d'aucune validation de profil, seulement d'un
 // profil complété : inscription minimale dédiée à ces tests de politique de remboursement.
 async function directParticipant(displayName: string) {

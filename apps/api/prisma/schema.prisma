@@ -91,6 +91,14 @@ enum EventFlow {
   DIRECT
 }
 
+// Décision prise sur un événement dont le minimum de participants n'était pas atteint à la date
+// limite (§10) : par le restaurateur explicitement, ou par défaut (MAINTAIN, voir AppSetting
+// MIN_PARTICIPANTS_NO_RESPONSE_ACTION) s'il ne répond pas dans le délai.
+enum MinParticipantsOutcome {
+  MAINTAINED
+  CANCELLED
+}
+
 model User {
   id               String           @id @default(cuid())
   phone            String           @unique
@@ -161,7 +169,39 @@ model Restaurant {
   controlledEvents Event[]          @relation("Controller")
   hostedEvents     Event[]          @relation("Venue")
   ledgerEntries    LedgerEntry[]
+  // Champs enrichis de la candidature restaurateur (§8.1) : renseignés à la demande, modifiables
+  // ensuite depuis l'espace restaurateur. Tous facultatifs pour ne jamais bloquer une candidature
+  // existante lors de la migration.
+  desiredCapacity          Int?
+  desiredSchedule          String?
+  averagePricePerPersonCents Int?
+  defaultMinParticipants   Int?
+  priceIncludesDrink       Boolean  @default(false)
+  priceIncludesStarter     Boolean  @default(false)
+  priceIncludesMain        Boolean  @default(false)
+  priceIncludesDessert     Boolean  @default(false)
+  priceNotes               String?
+  proposesCategoryPricing  Boolean  @default(false)
+  allowsPrivatization      Boolean  @default(false)
+  specialConditions        String?
+  // Notes internes visibles uniquement par l'administration, jamais par le restaurateur.
+  adminNotes               String?
+  photos                   RestaurantPhoto[]
+  subscription             RestaurantSubscription?
+  connectedAccount         ConnectedAccount?
+  monthlyUsages            RestaurantMonthlyUsage[]
   @@map("Organizer")
+}
+
+// Galerie de la candidature/fiche restaurateur (§8.1), distincte de EventPhoto (galerie d'un
+// événement précis).
+model RestaurantPhoto {
+  id           String     @id @default(cuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  url          String
+  position     Int        @default(0)
+  createdAt    DateTime   @default(now())
 }
 
 model Event {
@@ -199,6 +239,18 @@ model Event {
   proposedStartsAt        DateTime?
   proposedEndsAt          DateTime?
   dateChangeRequestedAt   DateTime?
+  // Quota mensuel restaurateur (§8.2) : posé une seule fois, à la première publication, jamais
+  // à la création d'un brouillon. Reste tel quel même si l'événement est ensuite annulé ou
+  // supprimé, sauf remise à zéro explicite par un administrateur.
+  quotaConsumedAt         DateTime?
+  // Minimum de participants (§10) : facultatif, mais la date limite devient obligatoire dès qu'un
+  // minimum est défini (contrôlé côté serveur, voir la route de création/modification).
+  minParticipants           Int?
+  minParticipantsDeadline   DateTime?
+  minParticipantsNotifiedAt DateTime?
+  minParticipantsOutcome    MinParticipantsOutcome?
+  minParticipantsDecidedAt  DateTime?
+  minParticipantsDecidedBy  String?
   applications            Application[]
   callSlots               ScreeningCall[]
   reservations            Reservation[]
@@ -539,4 +591,78 @@ model AppSetting {
   value     Json
   updatedAt DateTime @updatedAt
   updatedBy String?
+}
+
+// Remplace le modèle 30/70 (§8.2) : un restaurateur paie un abonnement mensuel plutôt qu'une
+// commission par vente. Le taux de commission et les LedgerEntry existants restent en base
+// (jamais effacés), mais aucune nouvelle ligne n'est créée par défaut — voir ENABLE_COMMISSION_LEDGER
+// dans settings.ts.
+model Plan {
+  id                String                   @id @default(cuid())
+  name              String
+  monthlyPriceCents Int
+  monthlyEventQuota Int
+  active            Boolean                  @default(true)
+  createdAt         DateTime                 @default(now())
+  subscriptions     RestaurantSubscription[]
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  INCOMPLETE
+}
+
+model RestaurantSubscription {
+  id                   String             @id @default(cuid())
+  restaurantId         String             @unique
+  restaurant           Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  planId               String
+  plan                 Plan               @relation(fields: [planId], references: [id])
+  status               SubscriptionStatus @default(TRIALING)
+  currentPeriodStart   DateTime           @default(now())
+  currentPeriodEnd     DateTime
+  cancelledAt          DateTime?
+  // Réservé à une intégration future de Stripe Billing pour les prélèvements réels — non câblé ici
+  // (voir cahier des charges §2 : aucun encaissement réel sans autorisation explicite). Le statut
+  // est aujourd'hui géré manuellement par l'administration.
+  stripeSubscriptionId String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+}
+
+// Un événement ne consomme le quota mensuel qu'à sa toute première publication (Event.quotaConsumedAt),
+// jamais à la création d'un brouillon ; annuler ou supprimer l'événement ensuite ne rend jamais
+// automatiquement le quota (seule une action explicite d'un administrateur le peut, voir
+// POST /admin/events/:id/refund-quota).
+model RestaurantMonthlyUsage {
+  id              String     @id @default(cuid())
+  restaurantId    String
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  yearMonth       String
+  eventsPublished Int        @default(0)
+  @@unique([restaurantId, yearMonth])
+}
+
+// Scaffolding marketplace (§9), compatible Stripe Connect : suivi d'un compte connecté en
+// environnement de TEST uniquement. Aucun virement réel n'est jamais déclenché par la plateforme —
+// voir MARKETPLACE_PAYOUTS_ENABLED (désactivé par défaut) dans settings.ts. L'activation en
+// production reste bloquée par une validation juridique du modèle (vendeur contractuel,
+// responsabilité) non encore réalisée.
+enum ConnectedAccountStatus {
+  PENDING
+  ACTIVE
+  RESTRICTED
+  REJECTED
+}
+model ConnectedAccount {
+  id                String                 @id @default(cuid())
+  restaurantId      String                 @unique
+  restaurant        Restaurant             @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  provider          String                 @default("stripe")
+  externalAccountId String
+  status            ConnectedAccountStatus @default(PENDING)
+  createdAt         DateTime               @default(now())
 }
