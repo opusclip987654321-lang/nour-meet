@@ -2245,6 +2245,35 @@ const publishScheduledArticles = async () => {
 };
 setInterval(() => { publishScheduledArticles().catch(err => app.log.error(err)); }, 60_000);
 
+// §5 (cahier des charges 2026-09) : fait sortir un article de qualité éditoriale de la réserve
+// (ArticleQueueEntry, jamais un brouillon générique) vers Article au statut DRAFT, un par jour et
+// seulement une fois en production — jamais en développement, où cette réserve resterait intacte
+// pour être relue avant la mise en ligne réelle. L'article reste un simple brouillon, exactement
+// comme n'importe quel autre : aucune publication automatique, il doit être validé par un admin.
+const releaseQueuedArticle = async () => {
+  if (process.env.NODE_ENV !== "production") return;
+  const state = await prisma.articleQueueState.upsert({ where: { id: "singleton" }, update: {}, create: { id: "singleton" } });
+  const today = new Date().toISOString().slice(0, 10);
+  if (state.lastReleasedAt?.toISOString().slice(0, 10) === today) return;
+  const next = await prisma.articleQueueEntry.findFirst({ orderBy: { position: "asc" } });
+  if (!next) return;
+  await prisma.$transaction([
+    prisma.article.create({ data: { title: next.title, slug: next.slug, excerpt: next.excerpt, content: next.content, category: next.category, keywords: next.keywords, metaTitle: next.metaTitle, metaDescription: next.metaDescription, status: "DRAFT" } }),
+    prisma.articleQueueEntry.delete({ where: { id: next.id } }),
+    prisma.articleQueueState.update({ where: { id: "singleton" }, data: { lastReleasedAt: new Date() } })
+  ]);
+  const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+  await Promise.all(admins.map(a => notify(a.id, "Nouvel article proposé", `« ${next.title} » attend votre relecture dans le blog.`)));
+};
+setInterval(() => { releaseQueuedArticle().catch(err => app.log.error(err)); }, 60_000);
+app.get("/admin/articles/queue", { preHandler: roles(UserRole.ADMIN) }, async () => {
+  const [count, next] = await Promise.all([
+    prisma.articleQueueEntry.count(),
+    prisma.articleQueueEntry.findMany({ orderBy: { position: "asc" }, take: 5, select: { title: true, category: true } })
+  ]);
+  return { count, next };
+});
+
 const close = async () => { await prisma.$disconnect(); await app.close(); };
 process.on("SIGINT", close); process.on("SIGTERM", close);
 await loadSettings(prisma);

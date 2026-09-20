@@ -1409,9 +1409,10 @@ function AdminBlog() {
   const [newForm,setNewForm]=useState({title:"",category:BLOG_CATEGORIES[0]});
   const [busy,setBusy]=useState(false);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const [queue,setQueue]=useState<{count:number;next:{title:string;category:string}[]}|null>(null);
   const navigate=useNavigate();
   const load=()=>api<any[]>(`/admin/articles${status?`?status=${status}`:""}`).then(setItems);
-  useEffect(()=>{load()},[status]);
+  useEffect(()=>{load();api<{count:number;next:{title:string;category:string}[]}>("/admin/articles/queue").then(setQueue).catch(()=>{})},[status]);
   const slugify=(t:string)=>t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
 
   const generate=async(e:FormEvent)=>{
@@ -1430,6 +1431,7 @@ function AdminBlog() {
   };
 
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Blog</h1><p className="fine left">Aucun article — écrit à la main ou généré par IA — n’est jamais publié sans validation humaine explicite.</p>
+    {queue&&queue.count>0&&<Notice kind="info">{queue.count} article{queue.count>1?"s":""} en réserve, proposé{queue.count>1?"s":""} ici à raison d’un par jour une fois en production. Prochain : « {queue.next[0]?.title} » ({queue.next[0]?.category}).</Notice>}
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="admin-grid">
       <form className="panel form-grid" onSubmit={createManual}>

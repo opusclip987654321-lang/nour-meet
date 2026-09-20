@@ -768,6 +768,33 @@ model Article {
   reviewLogs      ArticleReviewLog[]
 }
 
+// File d'attente éditoriale (§5, 2026-09) : réserve d'articles déjà rédigés (qualité éditoriale,
+// jamais un brouillon générique IA) qui n'existent pas encore comme Article — et donc n'apparaissent
+// pas encore dans l'espace admin — jusqu'à ce que releaseQueuedArticle() en fasse passer un par jour,
+// une fois en production, dans la table Article au statut DRAFT pour relecture. position détermine
+// l'ordre de sortie (le plus petit sort le premier).
+model ArticleQueueEntry {
+  id              String   @id @default(cuid())
+  position        Int
+  title           String
+  slug            String
+  excerpt         String
+  content         String
+  category        String
+  keywords        String[]
+  metaTitle       String
+  metaDescription String
+  createdAt       DateTime @default(now())
+}
+
+// Ligne unique (id fixe "singleton") qui mémorise la dernière date de sortie automatique, pour que
+// releaseQueuedArticle() reste idempotent (un seul article libéré par jour) même après un redémarrage
+// du serveur entre deux passages du cron.
+model ArticleQueueState {
+  id             String    @id @default("singleton")
+  lastReleasedAt DateTime?
+}
+
 // Journal de validation (§18) : une ligne par changement de statut, jamais effacée.
 model ArticleReviewLog {
   id         String        @id @default(cuid())
