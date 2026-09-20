@@ -7,7 +7,10 @@ export const setToken = (token: string | null) => token ? AsyncStorage.setItem(T
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = await getToken();
-  const response = await fetch(`${API_URL}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init.headers ?? {}) } });
+  // FormData (upload photo) ne doit jamais recevoir de Content-Type manuel : fetch calcule seul la
+  // boundary multipart, la même règle que côté web (voir apps/web/src/api.ts).
+  const isFormData = init.body instanceof FormData;
+  const response = await fetch(`${API_URL}${path}`, { ...init, headers: { ...(init.body && !isFormData ? { "Content-Type": "application/json" } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init.headers ?? {}) } });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error ?? "Une erreur est survenue");
   return data;
