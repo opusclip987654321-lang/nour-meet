@@ -263,6 +263,32 @@ function PaymentModal({ applicationId, eventId, amountCents, onClose, onConfirme
   </div>;
 }
 
+// Page de paiement autonome ouverte depuis l'app mobile dans un navigateur intégré (expo-web-
+// browser) : Stripe n'a pas de module natif installable dans Expo Go (seuls les modules Expo
+// officiels le sont, pas les SDK tiers), donc plutôt que de dupliquer PaymentModal en React Native
+// et de forcer un client de développement natif, le mobile réutilise ici la page web déjà testée.
+// L'authentification se fait par un jeton passé en paramètre d'URL (le mobile n'a pas de cookie ou
+// de localStorage partagé avec le navigateur web) : il est stocké avant tout appel à l'API, jamais
+// après, pour éviter toute course avec PaymentModal ci-dessus qui lit le jeton dès son montage.
+function PayStandalone(){
+  const { applicationId } = useParams();
+  const [searchParams] = useSearchParams();
+  const [ready, setReady] = useState(false);
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    const token = searchParams.get("token");
+    if (token) setToken(token);
+    setReady(true);
+  }, []);
+  if (!ready) return <div className="state-page"><div className="spinner"/></div>;
+  if (done) return <div className="state-page"><h2>C’est terminé ici.</h2><p>Vous pouvez fermer cette fenêtre et retourner dans l’application Nūr Meet.</p></div>;
+  const eventId = searchParams.get("eventId") ?? "";
+  const amountCents = Number(searchParams.get("amount") ?? "0");
+  return <div style={{ minHeight: "100vh", background: "#0b0b0c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <PaymentModal applicationId={applicationId!} eventId={eventId} amountCents={amountCents} onClose={() => setDone(true)} onConfirmed={() => setDone(true)} onWaitlisted={() => setDone(true)}/>
+  </div>;
+}
+
 function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { application: any; event: PublicEvent; onPaid: () => void; onWaitlisted: () => void }) {
   const [showPayment, setShowPayment] = useState(false);
   if (application.status === "REFUSED") return <Notice kind="error">Votre candidature n’a pas été retenue pour cet événement.</Notice>;
@@ -1553,4 +1579,4 @@ function Scanner() {
   </div><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b>✓</b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b>×</b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Présentez le QR code du billet devant la caméra, ou saisissez le code manuellement.</p></>}</aside></div></div></section></Layout>;
 }
 
-export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/concept" element={<Concept/>}/><Route path="/blog" element={<Blog/>}/><Route path="/blog/:id" element={<ArticlePage/>}/><Route path="/login" element={<Login/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/restaurant" element={<Protected roles={["PARTICIPANT"]}><RestaurantSpace/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/settings" element={<Protected roles={["ADMIN"]}><AdminSettings/></Protected>}/><Route path="/admin/testimonials" element={<Protected roles={["ADMIN"]}><AdminTestimonials/></Protected>}/><Route path="/admin/blog" element={<Protected roles={["ADMIN"]}><AdminBlog/></Protected>}/><Route path="/admin/blog/:id" element={<Protected roles={["ADMIN"]}><AdminArticleEditor/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}
+export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/concept" element={<Concept/>}/><Route path="/blog" element={<Blog/>}/><Route path="/blog/:id" element={<ArticlePage/>}/><Route path="/login" element={<Login/>}/><Route path="/pay/:applicationId" element={<PayStandalone/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/restaurant" element={<Protected roles={["PARTICIPANT"]}><RestaurantSpace/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/settings" element={<Protected roles={["ADMIN"]}><AdminSettings/></Protected>}/><Route path="/admin/testimonials" element={<Protected roles={["ADMIN"]}><AdminTestimonials/></Protected>}/><Route path="/admin/blog" element={<Protected roles={["ADMIN"]}><AdminBlog/></Protected>}/><Route path="/admin/blog/:id" element={<Protected roles={["ADMIN"]}><AdminArticleEditor/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}

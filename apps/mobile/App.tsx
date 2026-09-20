@@ -3,7 +3,8 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
-import { API_URL, api, getToken, setToken } from "./src/api";
+import * as WebBrowser from "expo-web-browser";
+import { API_URL, WEB_URL, api, getToken, setToken } from "./src/api";
 import { SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening, EVENT_CATEGORIES } from "@nour/shared";
 
 // §15 : même code couleur par type d'événement que le web, pour une identité cohérente entre les
@@ -18,6 +19,14 @@ type Tab="home"|"events"|"scan"|"messages"|"profile"|"concept"|"blog";
 const BLOG_CATEGORIES=["Couple","Rencontre","Solitude","Mariage","Communication","Vie relationnelle"];
 const money=(n:number)=>`${(n/100).toFixed(2).replace(".",",")} €`;
 const when=(v:string)=>new Intl.DateTimeFormat("fr-FR",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}).format(new Date(v));
+// Stripe n'a pas de module natif installable dans Expo Go (seuls les modules Expo officiels le
+// sont) : plutôt que de dupliquer PaymentModal en React Native derrière un client de développement
+// natif, le paiement carte ouvre la page web déjà testée (voir PayStandalone dans
+// apps/web/src/App.tsx) dans un navigateur intégré, authentifiée par le jeton en paramètre d'URL.
+const payByCard=async(applicationId:string,eventId:string,amountCents:number)=>{
+  const token=await getToken();
+  await WebBrowser.openBrowserAsync(`${WEB_URL}/pay/${applicationId}?token=${encodeURIComponent(token??"")}&eventId=${eventId}&amount=${amountCents}`);
+};
 
 function Logo(){return <View style={s.logo}><View style={s.logoMark}><Text style={s.logoN}>N</Text></View><Text style={s.logoText}>NŪR <Text style={{color:C.gold}}>MEET</Text></Text></View>}
 function GoldButton({title,onPress,secondary=false,disabled=false}:{title:string,onPress:()=>void,secondary?:boolean,disabled?:boolean}){return <Pressable disabled={disabled} onPress={onPress} style={[s.button,secondary&&s.buttonSecondary,disabled&&{opacity:.5}]}><Text style={[s.buttonText,secondary&&{color:C.cream}]}>{title}</Text></Pressable>}
@@ -110,15 +119,15 @@ function Events({user}:{user:any}){
   const full=selected?selected.confirmedCount>=selected.capacity:false;
   const canCancel=application&&!["REFUSED","CANCELLED"].includes(application.status);
   // La candidature ne garantit jamais de place (elle enregistre le questionnaire et autorise
-  // seulement à tenter le paiement) : le paiement par carte se termine depuis le site pour
-  // l'instant, l'application mobile n'intègre pas encore le module de paiement Stripe.
+  // seulement à tenter le paiement) : c'est le clic sur "Payer par carte" ci-dessous qui pose
+  // réellement le verrou de réservation, pas cet envoi.
   const apply=async()=>{
     setSubmitting(true);
     try{
       const body=requiresScreening?{screeningAnswers:answers}:{networkingAnswers:answers};
       const result=await api<any>(`/events/${selected.id}/apply`,{method:"POST",body:JSON.stringify(body)});
       setApplication(result.application);
-      setMessage("Candidature envoyée. Finalisez le paiement par carte depuis le site nour-meet dans votre espace personnel.");
+      setMessage("Candidature envoyée. Vous pouvez régler votre billet ci-dessous.");
       setShowForm(false);
     }catch(e){setMessage((e as Error).message)}
     finally{setSubmitting(false)}
@@ -160,6 +169,7 @@ function Events({user}:{user:any}){
   if(selected)return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>{setSelected(null);setApplication(null);setWaitlistEntry(null);setAltOffer(null)}}><Text style={s.back}>‹ Retour</Text></Pressable><View style={s.detailArt}><Text style={[s.eyebrow,{color:categoryColor(selected.category)}]}>{selected.category.toUpperCase()}</Text><Text style={s.detailTitle}>{selected.title}</Text></View><View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View><Text style={s.sectionTitle}>Rencontrez autrement</Text><Text style={s.paragraph}>{selected.description}</Text><GoldButton title="J’y vais, viens avec moi" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
     {altOffer&&<View style={s.altOffer}><Text style={s.eyebrow}>ÉVÉNEMENT ALTERNATIF PROPOSÉ</Text><Text style={s.sectionTitle}>{altOffer.alternativeEvent.title}</Text><Text style={s.meta}>{when(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</Text><Text style={s.bodyStrong}>{money(altOffer.alternativeEvent.priceCents)}</Text><View style={{flexDirection:"row",gap:10,marginTop:10}}><View style={{flex:1}}><GoldButton title={submitting?"…":"Accepter"} onPress={()=>respondAltOffer(true)} disabled={submitting}/></View><View style={{flex:1}}><GoldButton title={submitting?"…":"Refuser"} secondary onPress={()=>respondAltOffer(false)} disabled={submitting}/></View></View></View>}
     {application?<View>
+      {application.status==="PAYMENT_PENDING"&&<View style={s.reservationCard}><Text style={s.meta}>{application.reservation?`Votre place est retenue quelques minutes (jusqu’au ${when(application.reservation.expiresAt)}) : finalisez votre paiement.`:"Vous pouvez régler votre billet dès maintenant."}</Text><GoldButton title={`Payer par carte · ${money(selected.priceCents)}`} onPress={async()=>{await payByCard(application.id,selected.id,selected.priceCents);await loadApplication(selected.id)}}/></View>}
       {waitlistEntry?<View style={s.reservationCard}><Text style={s.eyebrow}>LISTE D’ATTENTE</Text><Text style={s.bodyStrong}>Position {waitlistEntry.rank??waitlistEntry.position}</Text><GoldButton title={submitting?"…":"Quitter la liste d’attente"} secondary onPress={leaveWaitlist} disabled={submitting}/></View>
       :full&&canCancel?<GoldButton title={submitting?"…":"Rejoindre la liste d’attente"} secondary onPress={joinWaitlist} disabled={submitting}/>
       :null}
@@ -277,7 +287,7 @@ function EspaceReservations({apps,offers,onChanged}:{apps:any[],offers:any[],onC
   };
   const respondOffer=async(offerId:string,accept:boolean)=>{
     setBusyId(offerId);setMessage("");
-    try{await api(`/alternative-offers/${offerId}/respond`,{method:"POST",body:JSON.stringify({accept})});setMessage(accept?"Place réservée : réglez votre billet depuis le site.":"Proposition refusée.");onChanged()}
+    try{await api(`/alternative-offers/${offerId}/respond`,{method:"POST",body:JSON.stringify({accept})});setMessage(accept?"Place réservée : réglez votre billet ci-dessous.":"Proposition refusée.");onChanged()}
     catch(e){setMessage((e as Error).message)}
     finally{setBusyId(null)}
   };
@@ -292,6 +302,7 @@ function EspaceReservations({apps,offers,onChanged}:{apps:any[],offers:any[],onC
         <Text style={s.meta}>{when(a.event.startsAt)} · {a.event.district}</Text>
         {a.call&&a.status==="CALL_SCHEDULED"&&<Text style={s.meta}>Entretien : {when(a.call.startsAt)}</Text>}
         {offer&&<AltOfferCard offer={offer} busy={busyId===offer.id} onRespond={accept=>respondOffer(offer.id,accept)}/>}
+        {a.status==="PAYMENT_PENDING"&&<GoldButton title={`Payer par carte · ${money(a.event.priceCents)}`} onPress={async()=>{await payByCard(a.id,a.event.id,a.event.priceCents);onChanged()}}/>}
         {!["REFUSED","CANCELLED"].includes(a.status)&&<GoldButton title={busyId===a.id?"…":"Annuler ma participation"} secondary disabled={busyId===a.id} onPress={()=>cancelApplication(a.id)}/>}
       </View>;
     })}

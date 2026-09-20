@@ -18,6 +18,7 @@
     "expo-camera": "^57.0.5",
     "expo-image-picker": "~57.0.19",
     "expo-status-bar": "^57.0.1",
+    "expo-web-browser": "~57.0.3",
     "invariant": "^2.2.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
