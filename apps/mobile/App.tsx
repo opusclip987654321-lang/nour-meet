@@ -14,7 +14,8 @@ const dayLabel = (v: string) => new Intl.DateTimeFormat("fr-FR", { weekday: "sho
 const timeLabel = (v: string) => new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(new Date(v));
 
 const C={bg:"#0B0B0C",panel:"#171718",line:"#34322E",gold:"#C9A765",cream:"#F6F0E5",muted:"#918C82",green:"#62D89A",red:"#F0747C"};
-type Tab="home"|"events"|"scan"|"messages"|"profile"|"concept";
+type Tab="home"|"events"|"scan"|"messages"|"profile"|"concept"|"blog";
+const BLOG_CATEGORIES=["Couple","Rencontre","Solitude","Mariage","Communication","Vie relationnelle"];
 const money=(n:number)=>`${(n/100).toFixed(2).replace(".",",")} €`;
 const when=(v:string)=>new Intl.DateTimeFormat("fr-FR",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}).format(new Date(v));
 
@@ -41,7 +42,7 @@ function EventCard({event,onPress}:{event:any,onPress:()=>void}){return <Pressab
 
 function Home({user,setTab}:{user:any,setTab:(t:Tab)=>void}){
   const [events,setEvents]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]);useEffect(()=>{api<any[]>("/events").then(setEvents);api<any[]>("/me/tickets").then(setTickets)},[]);
-  return <ScrollView contentContainerStyle={s.content}><View style={s.hello}><View><Text style={s.eyebrow}>BONJOUR {user.displayName.toUpperCase()}</Text><Text style={s.homeTitle}>Votre prochaine{`\n`}rencontre commence ici.</Text></View><Avatar name={user.displayName} photoUrl={user.profile?.photoUrl}/></View>{tickets[0]&&<Pressable style={s.ticketMini} onPress={()=>setTab("profile")}><View><Text style={s.eyebrow}>{when(tickets[0].reservation.event.startsAt).toUpperCase()}</Text><Text style={s.ticketTitle}>{tickets[0].reservation.event.title}</Text><Text style={{color:C.green,fontWeight:"700"}}>Billet confirmé</Text></View><Image source={{uri:tickets[0].qrDataUrl}} style={s.miniQr}/></Pressable>}<ScreenTitle title="À découvrir" action={<Pressable onPress={()=>setTab("events")}><Text style={s.link}>Voir tout</Text></Pressable>}/>{events.slice(0,2).map(e=><EventCard event={e} onPress={()=>setTab("events")} key={e.id}/>)}<ScreenTitle title="Pour vous"/><View style={s.chips}><Text style={s.chipGold}>Rencontres</Text><Text style={s.chip}>Networking</Text><Text style={s.chip}>Culture</Text></View><Pressable onPress={()=>setTab("concept")}><Text style={s.link}>Le concept →</Text></Pressable></ScrollView>
+  return <ScrollView contentContainerStyle={s.content}><View style={s.hello}><View><Text style={s.eyebrow}>BONJOUR {user.displayName.toUpperCase()}</Text><Text style={s.homeTitle}>Votre prochaine{`\n`}rencontre commence ici.</Text></View><Avatar name={user.displayName} photoUrl={user.profile?.photoUrl}/></View>{tickets[0]&&<Pressable style={s.ticketMini} onPress={()=>setTab("profile")}><View><Text style={s.eyebrow}>{when(tickets[0].reservation.event.startsAt).toUpperCase()}</Text><Text style={s.ticketTitle}>{tickets[0].reservation.event.title}</Text><Text style={{color:C.green,fontWeight:"700"}}>Billet confirmé</Text></View><Image source={{uri:tickets[0].qrDataUrl}} style={s.miniQr}/></Pressable>}<ScreenTitle title="À découvrir" action={<Pressable onPress={()=>setTab("events")}><Text style={s.link}>Voir tout</Text></Pressable>}/>{events.slice(0,2).map(e=><EventCard event={e} onPress={()=>setTab("events")} key={e.id}/>)}<ScreenTitle title="Pour vous"/><View style={s.chips}><Text style={s.chipGold}>Rencontres</Text><Text style={s.chip}>Networking</Text><Text style={s.chip}>Culture</Text></View><View style={{flexDirection:"row",gap:20}}><Pressable onPress={()=>setTab("concept")}><Text style={s.link}>Le concept →</Text></Pressable><Pressable onPress={()=>setTab("blog")}><Text style={s.link}>Le blog →</Text></Pressable></View></ScrollView>
 }
 
 // §16 : résumé écrit toujours disponible sans lancer de vidéo (la vidéo elle-même n'est pas
@@ -55,6 +56,41 @@ function Concept({setTab}:{setTab:(t:Tab)=>void}){
       ["04","Paiement et billet","La place n’est acquise qu’après paiement confirmé ; un billet avec QR code personnel est alors délivré pour l’entrée."],
       ["05","Déroulement de la soirée","Accueil personnalisé, animation légère, temps libres, et la possibilité d’échanger un contact avec les personnes rencontrées."]
     ].map(([n,title,body])=><View key={n} style={{marginTop:20}}><Text style={s.eyebrow}>{n}</Text><Text style={s.sectionTitle}>{title}</Text><Text style={s.paragraph}>{body}</Text></View>)}
+  </ScrollView>;
+}
+
+function Blog({setTab}:{setTab:(t:Tab)=>void}){
+  const [articles,setArticles]=useState<any[]>([]);
+  const [category,setCategory]=useState("");
+  const [selected,setSelected]=useState<any>(null);
+  useEffect(()=>{api<any[]>(`/articles${category?`?category=${encodeURIComponent(category)}`:""}`).then(setArticles).catch(()=>{})},[category]);
+  const openArticle=(slug:string)=>api<any>(`/articles/${slug}`).then(setSelected).catch(()=>{});
+
+  if(selected)return <ScrollView contentContainerStyle={s.content}>
+    <Pressable onPress={()=>setSelected(null)}><Text style={s.back}>‹ Retour</Text></Pressable>
+    <Text style={[s.eyebrow,{marginTop:6}]}>{selected.category.toUpperCase()}</Text>
+    <Text style={s.detailTitle}>{selected.title}</Text>
+    {selected.author&&<Text style={s.meta}>Par {selected.author.displayName} · {new Date(selected.publishedAt).toLocaleDateString("fr-FR")}</Text>}
+    {selected.imageUrl&&<Image source={{uri:`${API_URL}${selected.imageUrl}`}} style={{width:"100%",height:220,borderRadius:14,marginVertical:16}}/>}
+    {selected.content.split("\n\n").map((p:string,i:number)=><Text key={i} style={[s.paragraph,{marginBottom:14}]}>{p}</Text>)}
+    {selected.keywords?.length>0&&<View style={s.chips}>{selected.keywords.map((k:string)=><Text key={k} style={s.chip}>{k}</Text>)}</View>}
+  </ScrollView>;
+
+  return <ScrollView contentContainerStyle={s.content}>
+    <Pressable onPress={()=>setTab("home")}><Text style={s.back}>‹ Retour</Text></Pressable>
+    <ScreenTitle eyebrow="LE BLOG" title="Couple, rencontre et vie relationnelle."/>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:16}} contentContainerStyle={{gap:8}}>
+      <Pressable onPress={()=>setCategory("")} style={[s.choiceChip,!category&&s.choiceChipActive]}><Text style={[s.choiceChipText,!category&&{color:"#111"}]}>Tous les thèmes</Text></Pressable>
+      {BLOG_CATEGORIES.map(c=><Pressable key={c} onPress={()=>setCategory(c)} style={[s.choiceChip,category===c&&s.choiceChipActive]}><Text style={[s.choiceChipText,category===c&&{color:"#111"}]}>{c}</Text></Pressable>)}
+    </ScrollView>
+    {articles.length===0?<Text style={s.meta}>Aucun article pour le moment.</Text>:articles.map(a=>
+      <Pressable key={a.id} onPress={()=>openArticle(a.slug)} style={s.reservationCard}>
+        {a.imageUrl&&<Image source={{uri:`${API_URL}${a.imageUrl}`}} style={{width:"100%",height:140,borderRadius:8,marginBottom:10}}/>}
+        <Text style={s.eyebrow}>{a.category.toUpperCase()}</Text>
+        <Text style={s.sectionTitle}>{a.title}</Text>
+        <Text style={s.paragraph}>{a.excerpt}</Text>
+      </Pressable>
+    )}
   </ScrollView>;
 }
 
@@ -518,7 +554,7 @@ export default function App(){
   if(!user)return <Login onLogin={opts=>{if(opts?.restaurateur){setForceRestaurantSpace(true);setTab("profile")}load()}}/>;
   if(["ADMIN","MODERATOR","RECEPTION"].includes(user.role))return <StaffHome user={user} onLogout={logout}/>;
   const showRestaurantSpace=user.hasRestaurant||forceRestaurantSpace;
-  return <SafeAreaView style={s.safe}><StatusBar style="light"/><View style={s.app}>{tab==="home"&&<Home user={user} setTab={setTab}/>} {tab==="events"&&<Events user={user}/>}{tab==="concept"&&<Concept setTab={setTab}/>}{tab==="scan"&&<Scanner/>}{tab==="messages"&&<Messages user={user}/>} {tab==="profile"&&(showRestaurantSpace?<RestaurantSpace onLogout={logout}/>:<Espace user={user} onSaved={load} onLogout={logout}/>)}</View><TabBar tab={tab} setTab={setTab} profileLabel={showRestaurantSpace?"Mon établissement":"Mon espace"}/></SafeAreaView>
+  return <SafeAreaView style={s.safe}><StatusBar style="light"/><View style={s.app}>{tab==="home"&&<Home user={user} setTab={setTab}/>} {tab==="events"&&<Events user={user}/>}{tab==="concept"&&<Concept setTab={setTab}/>}{tab==="blog"&&<Blog setTab={setTab}/>}{tab==="scan"&&<Scanner/>}{tab==="messages"&&<Messages user={user}/>} {tab==="profile"&&(showRestaurantSpace?<RestaurantSpace onLogout={logout}/>:<Espace user={user} onSaved={load} onLogout={logout}/>)}</View><TabBar tab={tab} setTab={setTab} profileLabel={showRestaurantSpace?"Mon établissement":"Mon espace"}/></SafeAreaView>
 }
 
 const s=StyleSheet.create({
