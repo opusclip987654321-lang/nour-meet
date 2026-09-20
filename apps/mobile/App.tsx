@@ -167,6 +167,7 @@ function Events({user}:{user:any}){
       :<Text style={s.meta}>Statut : {application.status}</Text>}
     </View>
     :user.hasRestaurant?<Notice text="Votre compte restaurateur vous permet de découvrir les événements proposés, mais ne permet pas d’y participer."/>
+    :requiresScreening&&!user.profile?.validatedAt?<Notice text="Votre profil doit d’abord être validé lors d’un entretien avec Nour Meet avant de vous inscrire à un speed dating. Rendez-vous dans « Mon espace » → « Entretien »." error/>
     :showForm?<View>{questions.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={answers[q.key]??""} onChangeText={v=>setAnswers({...answers,[q.key]:v})}/></View>)}<GoldButton title={submitting?"Envoi…":"Envoyer ma candidature"} onPress={apply} disabled={submitting}/></View>
     :full?<View style={s.bookingBar}><Text style={s.meta}>Cet événement est complet</Text><GoldButton title={submitting?"…":"Rejoindre la liste d’attente"} onPress={joinWaitlist} disabled={submitting}/></View>
     :<View style={s.bookingBar}><View><Text style={s.meta}>À partir de</Text><Text style={s.bookingPrice}>{money(selected.priceCents)}</Text></View><GoldButton title={requiresScreening?"Candidater":"S’inscrire"} onPress={()=>setShowForm(true)}/></View>}
