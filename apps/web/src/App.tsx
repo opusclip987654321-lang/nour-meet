@@ -218,7 +218,20 @@ function ArticlePage() {
     let meta=document.querySelector('meta[name="description"]');
     if(!meta){meta=document.createElement("meta");meta.setAttribute("name","description");document.head.appendChild(meta)}
     meta.setAttribute("content",article.metaDescription||article.excerpt||"");
-    return ()=>{document.title="Nūr Meet"};
+    // C31 : données structurées réelles (Article), jamais un graphique/schéma décoratif — uniquement
+    // les champs dont on dispose vraiment (pas d'auteur générique inventé si l'article n'en a pas).
+    const script=document.createElement("script");
+    script.type="application/ld+json";
+    script.text=JSON.stringify({
+      "@context":"https://schema.org","@type":"Article",
+      headline:article.title, description:article.excerpt??undefined,
+      image:article.imageUrl?imgUrl(article.imageUrl):undefined,
+      datePublished:article.publishedAt??undefined, dateModified:article.updatedAt??article.publishedAt??undefined,
+      author:article.author?{"@type":"Person",name:article.author.displayName}:undefined,
+      publisher:{"@type":"Organization",name:"Nūr Meet"}
+    });
+    document.head.appendChild(script);
+    return ()=>{document.title="Nūr Meet";script.remove()};
   },[article]);
   if(notFound)return <Layout><div className="empty"><span>◇</span><h2>Article introuvable</h2></div></Layout>;
   if(!article)return <Layout><Loading/></Layout>;
@@ -1036,6 +1049,8 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
 
 function AdminEventPhotos() {
   const {user}=useAuth();
+  const [searchParams]=useSearchParams();
+  const highlightId=searchParams.get("highlight");
   const [events,setEvents]=useState<any[]>([]);
   const [uploadingFor,setUploadingFor]=useState<string|null>(null);
   const [actingOn,setActingOn]=useState<string|null>(null);
@@ -1053,6 +1068,14 @@ function AdminEventPhotos() {
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const load=()=>api<any[]>("/admin/events").then(setEvents);
   useEffect(()=>{load()},[]);
+  // C14 (ordre correctif 2026-09-20) : une notification "soirée approuvée/à valider/..." doit ouvrir
+  // CETTE soirée, pas seulement la liste — /admin/events?highlight=<id> défile jusqu'à sa carte et
+  // la met en évidence brièvement plutôt que de forcer le restaurateur à la rechercher lui-même.
+  useEffect(()=>{
+    if(!highlightId||events.length===0)return;
+    const el=document.getElementById(`event-${highlightId}`);
+    if(el){el.scrollIntoView({behavior:"smooth",block:"center"});el.classList.add("highlighted");setTimeout(()=>el.classList.remove("highlighted"),3000)}
+  },[highlightId,events]);
 
   const toLocalInput=(iso:string)=>new Date(iso).toISOString().slice(0,16);
 
@@ -1163,7 +1186,7 @@ function AdminEventPhotos() {
   const HISTORY_LABEL:Record<string,string>={CREATE_EVENT:"Création",SUBMIT_EVENT_FOR_REVIEW:"Soumis à validation",APPROVE_EVENT:"Publié",REJECT_EVENT:"Renvoyé en brouillon",UPDATE_EVENT:"Modifié",SET_EVENT_PRICING:"Tarifs modifiés",SET_EVENT_QUOTAS:"Quotas modifiés",ADD_EVENT_PHOTO:"Photo ajoutée",CANCEL_EVENT:"Annulé",APPROVE_DATE_CHANGE:"Changement de date approuvé",REJECT_DATE_CHANGE:"Changement de date refusé"};
 
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ADMINISTRATION</span><h1>Mes événements</h1><p className="fine left">Formats acceptés : JPEG, PNG, WEBP · 5 Mo maximum. Sans photo personnalisée, l’illustration de la catégorie est utilisée.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
-    <div className="event-photo-grid">{events.map(ev=><div key={ev.id} className="panel event-photo-card"><img src={imgUrl(ev.imageUrl)} alt={ev.title}/><div><b>{ev.title}</b><div className="admin-event-meta"><CategoryBadge category={ev.category} className="inline"/><small>{EVENT_STATUS_LABEL[ev.status]??ev.status}</small></div>
+    <div className="event-photo-grid">{events.map(ev=><div key={ev.id} id={`event-${ev.id}`} className="panel event-photo-card"><img src={imgUrl(ev.imageUrl)} alt={ev.title}/><div><b>{ev.title}</b><div className="admin-event-meta"><CategoryBadge category={ev.category} className="inline"/><small>{EVENT_STATUS_LABEL[ev.status]??ev.status}</small></div>
       <label className="button small secondary">{uploadingFor===ev.id?"Envoi…":"Changer la photo principale"}<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploadingFor===ev.id} onChange={e=>{const f=e.target.files?.[0];if(f)upload(ev.id,f);e.target.value=""}}/></label>
 
       <div className="gallery-editor"><small>GALERIE ({ev.photos?.length??0}/5)</small><div className="gallery-thumbs">{(ev.photos??[]).map((p:any)=><div key={p.id} className="gallery-thumb"><img src={imgUrl(p.url)} alt=""/><button type="button" onClick={()=>removeGalleryPhoto(ev.id,p.id)} aria-label="Supprimer la photo">×</button></div>)}</div><label className="button small secondary" style={{opacity:(ev.photos?.length??0)>=5?0.5:1}}>{uploadingFor===ev.id?"Envoi…":"Ajouter une photo"}<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploadingFor===ev.id||(ev.photos?.length??0)>=5} onChange={e=>{const f=e.target.files?.[0];if(f)uploadGalleryPhoto(ev.id,f);e.target.value=""}}/></label></div>

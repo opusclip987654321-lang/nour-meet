@@ -380,6 +380,29 @@ app.setErrorHandler((error, _request, reply) => {
 
 app.get("/health", async () => ({ status: "ok", service: "nour-api", smsMode: smsVerification.mode, now: new Date().toISOString() }));
 
+// C31 (ordre correctif 2026-09-20) : sitemap réel généré depuis les événements publiés et les
+// articles réellement publiés — jamais une liste statique périmée. En production, faire pointer
+// <domaine>/sitemap.xml ici via le reverse proxy si le web et l'API ne partagent pas déjà l'origine.
+app.get("/sitemap.xml", async (_request, reply) => {
+  const [events, articles] = await Promise.all([
+    prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] } }, select: { slug: true, updatedAt: true } }),
+    prisma.article.findMany({ where: { status: "PUBLISHED" }, select: { slug: true, updatedAt: true } })
+  ]);
+  const staticUrls = ["/", "/events", "/concept", "/blog"];
+  const urls = [
+    ...staticUrls.map(path => ({ path, updatedAt: new Date() })),
+    ...events.map(e => ({ path: `/events/${e.slug}`, updatedAt: e.updatedAt })),
+    ...articles.map(a => ({ path: `/blog/${a.slug}`, updatedAt: a.updatedAt }))
+  ];
+  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `  <url><loc>${env.WEB_ORIGIN}${u.path}</loc><lastmod>${u.updatedAt.toISOString().slice(0, 10)}</lastmod></url>`).join("\n")}\n</urlset>`;
+  reply.header("Content-Type", "application/xml; charset=utf-8");
+  return body;
+});
+app.get("/robots.txt", async (_request, reply) => {
+  reply.header("Content-Type", "text/plain; charset=utf-8");
+  return `User-agent: *\nAllow: /\nSitemap: ${env.WEB_ORIGIN}/sitemap.xml`;
+});
+
 // C32-C34 (ordre correctif 2026-09-20) : n'écrit strictement rien tant que ANALYTICS_ENABLED est
 // désactivé (défaut) — jamais de traceur actif silencieusement, voir settings.ts. anonId reste un
 // identifiant aléatoire posé par le navigateur, jamais une empreinte technique reconstituée ici.
@@ -854,7 +877,7 @@ await app.register(async (webhooks) => {
             // C16 (ordre correctif 2026-09-20) : le restaurateur est informé d'une vente une seule
             // fois, ici, après confirmation réelle du webhook — jamais à la simple ouverture de la
             // page de paiement par le participant.
-            if (reservation.event.controllerRestaurant) await notify(reservation.event.controllerRestaurant.ownerId, "Nouvelle place vendue", `Un billet pour « ${reservation.event.title} » vient d’être payé.`, "/admin/events");
+            if (reservation.event.controllerRestaurant) await notify(reservation.event.controllerRestaurant.ownerId, "Nouvelle place vendue", `Un billet pour « ${reservation.event.title} » vient d’être payé.`, `/admin/events?highlight=${reservation.eventId}`);
             await audit(reservation.userId, "PAYMENT_SUCCEEDED", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });
             // Comptabilité 30/70 : neutralisée par défaut depuis le passage à l'abonnement mensuel
             // (§8.2 — voir ENABLE_COMMISSION_LEDGER). Les anciennes lignes restent en base, aucune
@@ -2003,7 +2026,7 @@ app.patch("/admin/events/:id", { preHandler: roles(UserRole.ADMIN, UserRole.ORGA
     data.proposedEndsAt = input.endsAt ? new Date(input.endsAt) : event.endsAt;
     data.dateChangeRequestedAt = new Date();
     const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
-    await Promise.all(admins.map(a => notify(a.id, "Changement de date proposé", `« ${event.title} » : nouvelle date proposée, en attente de votre approbation.`, "/admin/events")));
+    await Promise.all(admins.map(a => notify(a.id, "Changement de date proposé", `« ${event.title} » : nouvelle date proposée, en attente de votre approbation.`, `/admin/events?highlight=${event.id}`)));
   } else if (dateChanged) {
     if (input.startsAt) data.startsAt = new Date(input.startsAt);
     if (input.endsAt) data.endsAt = new Date(input.endsAt);
@@ -2102,7 +2125,7 @@ app.post("/admin/events/:id/submit-for-review", { preHandler: roles(UserRole.ORG
   if (event.status !== EventStatus.DRAFT) return reply.code(409).send({ error: "Seul un événement en brouillon peut être soumis" });
   const updated = await prisma.event.update({ where: { id }, data: { status: EventStatus.PENDING_REVIEW, submittedForReviewAt: new Date(), reviewNote: null } });
   const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
-  await Promise.all(admins.map(a => notify(a.id, "Événement à valider", `« ${event.title} » attend votre validation avant publication.`, "/admin/events")));
+  await Promise.all(admins.map(a => notify(a.id, "Événement à valider", `« ${event.title} » attend votre validation avant publication.`, `/admin/events?highlight=${event.id}`)));
   await audit(currentId(request), "SUBMIT_EVENT_FOR_REVIEW", "Event", id);
   return updated;
 });
@@ -2130,7 +2153,7 @@ app.post("/admin/events/:id/review-decision", { preHandler: roles(UserRole.ADMIN
     quotaConsumedNow = true;
   }
   const updated = await prisma.event.update({ where: { id }, data: { status: accept ? EventStatus.PUBLISHED : EventStatus.DRAFT, reviewedAt: new Date(), reviewNote: note ?? null, quotaConsumedAt: quotaConsumedNow ? new Date() : undefined } });
-  if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, accept ? "Événement publié" : "Événement renvoyé en brouillon", accept ? `« ${event.title} » est maintenant publié.` : `« ${event.title} » nécessite des modifications${note ? ` : ${note}` : "."}`, "/admin/events");
+  if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, accept ? "Événement publié" : "Événement renvoyé en brouillon", accept ? `« ${event.title} » est maintenant publié.` : `« ${event.title} » nécessite des modifications${note ? ` : ${note}` : "."}`, `/admin/events?highlight=${event.id}`);
   await audit(currentId(request), accept ? "APPROVE_EVENT" : "REJECT_EVENT", "Event", id, { note, quotaConsumedNow });
   return updated;
 });
@@ -2416,9 +2439,9 @@ const checkMinParticipantsThresholds = async () => {
     if (event._count.reservations >= (event.minParticipants ?? 0)) { await prisma.event.update({ where: { id: event.id }, data: { minParticipantsNotifiedAt: new Date() } }); continue; }
     await prisma.event.update({ where: { id: event.id }, data: { minParticipantsNotifiedAt: new Date() } });
     const windowHours = getSetting("MIN_PARTICIPANTS_DECISION_WINDOW_HOURS");
-    if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, "Minimum de participants non atteint", `« ${event.title} » n’a pas atteint son minimum de ${event.minParticipants} participants. Vous avez ${windowHours}h pour maintenir ou annuler, sans quoi l’événement sera maintenu par défaut.`, "/admin/events");
+    if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, "Minimum de participants non atteint", `« ${event.title} » n’a pas atteint son minimum de ${event.minParticipants} participants. Vous avez ${windowHours}h pour maintenir ou annuler, sans quoi l’événement sera maintenu par défaut.`, `/admin/events?highlight=${event.id}`);
     const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
-    await Promise.all(admins.map(a => notify(a.id, "Minimum de participants non atteint", `« ${event.title} » n’a pas atteint son minimum de participants.`, "/admin/events")));
+    await Promise.all(admins.map(a => notify(a.id, "Minimum de participants non atteint", `« ${event.title} » n’a pas atteint son minimum de participants.`, `/admin/events?highlight=${event.id}`)));
     await audit(undefined, "MIN_PARTICIPANTS_NOT_REACHED", "Event", event.id, { minParticipants: event.minParticipants, confirmedCount: event._count.reservations });
   }
   const windowHours = getSetting("MIN_PARTICIPANTS_DECISION_WINDOW_HOURS");
