@@ -1658,16 +1658,23 @@ app.get("/admin/stats", { preHandler: roles(UserRole.ADMIN) }, async (request) =
   const previous = query.compareSince && query.compareUntil ? await statsForRange(new Date(query.compareSince), new Date(query.compareUntil)) : null;
   // C37 : hausse inhabituelle des annulations (fenêtre glissante distincte de la période choisie ci-dessus,
   // toujours sur 24h réelles) + abonnements dont l'échéance approche, pour une lecture immédiate.
+  // H2 (cahier des charges consolidé 2026-09-20) : élargi aux paiements bloqués, aux demandes de
+  // remboursement en attente et aux soirées sous le seuil de participants — chaque compteur est un
+  // simple instantané recalculé à chaque appel (jamais une notification répétée), pour éviter tout
+  // doublon ou bruit d'alerte.
   const alertSince = new Date(Date.now() - 24 * 60 * 60_000);
-  const [confirmed24h, cancelled24h, expiringSoonCount] = await Promise.all([
+  const [confirmed24h, cancelled24h, expiringSoonCount, blockedPayments24h, pendingRefundRequests, underfilledEventsPending] = await Promise.all([
     prisma.reservation.count({ where: { confirmedAt: { gte: alertSince } } }),
     prisma.reservation.count({ where: { confirmedAt: { not: null }, cancelledAt: { gte: alertSince } } }),
-    prisma.restaurantSubscription.count({ where: { status: { in: ["ACTIVE", "TRIALING"] }, currentPeriodEnd: { lte: new Date(Date.now() + getSetting("SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE") * 24 * 60 * 60_000) } } })
+    prisma.restaurantSubscription.count({ where: { status: { in: ["ACTIVE", "TRIALING"] }, currentPeriodEnd: { lte: new Date(Date.now() + getSetting("SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE") * 24 * 60 * 60_000) } } }),
+    prisma.payment.count({ where: { status: PaymentStatus.FAILED, createdAt: { gte: alertSince } } }),
+    prisma.payment.count({ where: { refundRequestedAt: { not: null }, refundedAt: null } }),
+    prisma.event.count({ where: { status: EventStatus.PUBLISHED, minParticipantsNotifiedAt: { not: null }, minParticipantsOutcome: null } })
   ]);
   const cancellationRate24h = confirmed24h > 0 ? Math.round((cancelled24h / confirmed24h) * 100) : 0;
   return {
     range: { since, until }, ...current, previous,
-    alerts: { cancellationRate24h, cancellationThreshold: getSetting("CANCELLATION_ALERT_THRESHOLD_PERCENT"), subscriptionsExpiringSoon: expiringSoonCount },
+    alerts: { cancellationRate24h, cancellationThreshold: getSetting("CANCELLATION_ALERT_THRESHOLD_PERCENT"), subscriptionsExpiringSoon: expiringSoonCount, blockedPayments24h, pendingRefundRequests, underfilledEventsPending },
     analyticsEnabled: getSetting("ANALYTICS_ENABLED")
   };
 });

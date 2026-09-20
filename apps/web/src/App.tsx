@@ -1423,9 +1423,12 @@ function AdminStats() {
       <button type="button" className="button small secondary" onClick={()=>exportFile("csv")}>Exporter les ventes (CSV)</button>
       <button type="button" className="button small secondary" onClick={()=>exportFile("xlsx")}>Exporter tout (Excel)</button>
     </div>
-    {(stats.alerts.cancellationRate24h>=stats.alerts.cancellationThreshold||stats.alerts.subscriptionsExpiringSoon>0)&&<Notice kind="error">
+    {(stats.alerts.cancellationRate24h>=stats.alerts.cancellationThreshold||stats.alerts.subscriptionsExpiringSoon>0||stats.alerts.blockedPayments24h>0||stats.alerts.pendingRefundRequests>0||stats.alerts.underfilledEventsPending>0)&&<Notice kind="error">
       {stats.alerts.cancellationRate24h>=stats.alerts.cancellationThreshold&&<>Taux d’annulation sur 24h : {stats.alerts.cancellationRate24h}% (seuil {stats.alerts.cancellationThreshold}%). </>}
-      {stats.alerts.subscriptionsExpiringSoon>0&&<>{stats.alerts.subscriptionsExpiringSoon} abonnement{stats.alerts.subscriptionsExpiringSoon>1?"s":""} restaurateur{stats.alerts.subscriptionsExpiringSoon>1?"s":""} arrivent à échéance bientôt.</>}
+      {stats.alerts.subscriptionsExpiringSoon>0&&<>{stats.alerts.subscriptionsExpiringSoon} abonnement{stats.alerts.subscriptionsExpiringSoon>1?"s":""} restaurateur{stats.alerts.subscriptionsExpiringSoon>1?"s":""} arrivent à échéance bientôt. </>}
+      {stats.alerts.blockedPayments24h>0&&<>{stats.alerts.blockedPayments24h} paiement{stats.alerts.blockedPayments24h>1?"s":""} bloqué{stats.alerts.blockedPayments24h>1?"s":""} sur 24h. </>}
+      {stats.alerts.pendingRefundRequests>0&&<>{stats.alerts.pendingRefundRequests} demande{stats.alerts.pendingRefundRequests>1?"s":""} de remboursement en attente. </>}
+      {stats.alerts.underfilledEventsPending>0&&<>{stats.alerts.underfilledEventsPending} soirée{stats.alerts.underfilledEventsPending>1?"s":""} sous le seuil de participants, décision attendue.</>}
     </Notice>}
     {!stats.analyticsEnabled&&<Notice kind="info">Mesure d’audience désactivée (visiteurs, sources, entonnoir haut) : à activer dans Réglages après mise en place d’un consentement conforme.</Notice>}
 
