@@ -1955,7 +1955,7 @@ app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN, UserRole.O
   // paidOut ci-dessous restent donc corrects pour l'historique sous l'ancien modèle 30/70, mais
   // resteraient figés à zéro pour toute vente récente si on s'y fiait seul — d'où ce calcul séparé,
   // toujours à jour, qui ne mélange jamais le CA propre de Nour avec l'argent encaissé pour un tiers.
-  const [gross, commission, due, paidOut, refunded, grossTicketVolume] = await Promise.all([
+  const [gross, commission, due, paidOut, refunded, grossTicketVolume, fees] = await Promise.all([
     prisma.ledgerEntry.aggregate({ where, _sum: { grossAmountCents: true } }),
     prisma.ledgerEntry.aggregate({ where, _sum: { commissionAmountCents: true } }),
     prisma.ledgerEntry.aggregate({ where, _sum: { restaurantDueCents: true } }),
@@ -1964,7 +1964,11 @@ app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN, UserRole.O
     prisma.payment.aggregate({
       where: { status: PaymentStatus.SUCCEEDED, reservation: { event: { controllerRestaurantId: restaurant ? restaurant.id : { not: null } } } },
       _sum: { amountCents: true }
-    })
+    }),
+    // H2/§14 (cahier des charges consolidé 2026-09-20) : frais Stripe déjà connus (voir la
+    // synchronisation en tâche de fond ci-dessous, LedgerEntry.stripeFeeCents), jamais mélangés au
+    // chiffre d'affaires brut ni à la commission.
+    prisma.ledgerEntry.aggregate({ where, _sum: { stripeFeeCents: true } })
   ]);
   const summary = {
     grossCents: gross._sum.grossAmountCents ?? 0,
@@ -1973,19 +1977,35 @@ app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN, UserRole.O
     paidOutCents: paidOut._sum.restaurantDueCents ?? 0,
     refundedCents: refunded._sum.refundedAmountCents ?? 0,
     grossTicketVolumeCents: grossTicketVolume._sum.amountCents ?? 0,
+    feesCents: fees._sum.stripeFeeCents ?? 0,
     commissionLedgerEnabled: getSetting("ENABLE_COMMISSION_LEDGER")
   };
   if (restaurant) return summary;
   // Le reste n'a de sens qu'à l'échelle de la plateforme, jamais restreint à un seul restaurateur.
-  const [nourOwnRevenue, activeSubscriptions] = await Promise.all([
+  // Le revenu récurrent d'abonnement ne compte que les abonnements ACTIVE (jamais TRIALING, qui
+  // n'ont encore rien payé) : chez Stripe, ACTIVE signifie précisément que la dernière facture de
+  // la période en cours a été réglée — ce chiffre reflète donc déjà un revenu réellement encaissé,
+  // jamais une simple projection sur des abonnements non facturés.
+  const [nourOwnRevenue, activeSubscriptions, balance, disputes] = await Promise.all([
     prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED, reservation: { event: { controllerRestaurantId: null } } }, _sum: { amountCents: true } }),
-    prisma.restaurantSubscription.findMany({ where: { status: "ACTIVE" }, include: { plan: true } })
+    prisma.restaurantSubscription.findMany({ where: { status: "ACTIVE" }, include: { plan: true } }),
+    stripe ? stripe.balance.retrieve().catch(() => null) : Promise.resolve(null),
+    stripe ? stripe.disputes.list({ limit: 100 }).catch(() => null) : Promise.resolve(null)
   ]);
+  const openDisputes = disputes?.data.filter(d => !["won", "lost"].includes(d.status)) ?? [];
   return {
     ...summary,
     nourOwnRevenueCents: nourOwnRevenue._sum.amountCents ?? 0,
     subscriptionMonthlyRevenueCents: activeSubscriptions.reduce((sum, s) => sum + s.plan.monthlyPriceCents, 0),
-    activeSubscriptionsCount: activeSubscriptions.length
+    activeSubscriptionsCount: activeSubscriptions.length,
+    // Solde Stripe TEST en temps réel (disponible/en attente) : purement informatif pour la
+    // réconciliation, jamais utilisé pour déclencher un virement automatique.
+    stripeBalance: balance ? {
+      availableCents: balance.available.filter(b => b.currency === "eur").reduce((s, b) => s + b.amount, 0),
+      pendingCents: balance.pending.filter(b => b.currency === "eur").reduce((s, b) => s + b.amount, 0)
+    } : null,
+    disputesCount: openDisputes.length,
+    disputesAmountCents: openDisputes.reduce((s, d) => s + d.amount, 0)
   };
 });
 app.post("/admin/finance/ledger/:id/mark-paid", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {

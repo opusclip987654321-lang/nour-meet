@@ -1506,6 +1506,9 @@ function AdminFinance() {
       <Stat label="Dû au(x) restaurant(s) (modèle 30/70)" value={money(summary.restaurantDueCents)}/>
       <Stat label="Déjà reversé (modèle 30/70)" value={money(summary.paidOutCents)}/>
       <Stat label="Remboursé (modèle 30/70)" value={money(summary.refundedCents)}/>
+      <Stat label="Frais Stripe (modèle 30/70)" value={money(summary.feesCents)}/>
+      {summary.stripeBalance&&<Stat label="Solde Stripe (test) disponible / en attente" value={`${money(summary.stripeBalance.availableCents)} / ${money(summary.stripeBalance.pendingCents)}`}/>}
+      {summary.disputesCount!=null&&<Stat label="Litiges Stripe en cours" value={summary.disputesCount>0?`${summary.disputesCount} · ${money(summary.disputesAmountCents)}`:"Aucun"}/>}
     </div>}
     {summary&&!summary.commissionLedgerEnabled&&<p className="fine left">Le registre commission 30/70 est désactivé depuis le passage à l’abonnement mensuel : « Commission », « Dû » et « Déjà reversé » ne couvrent que les ventes historiques sous l’ancien modèle, pas les événements récents sous abonnement. Le volume brut reste, lui, toujours à jour.</p>}
     {entries.length===0?<div className="empty"><span>◇</span><h2>Aucune vente pour le moment</h2></div>:<div className="panel table">
