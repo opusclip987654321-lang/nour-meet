@@ -2258,7 +2258,7 @@ const releaseQueuedArticle = async () => {
   const next = await prisma.articleQueueEntry.findFirst({ orderBy: { position: "asc" } });
   if (!next) return;
   await prisma.$transaction([
-    prisma.article.create({ data: { title: next.title, slug: next.slug, excerpt: next.excerpt, content: next.content, category: next.category, keywords: next.keywords, metaTitle: next.metaTitle, metaDescription: next.metaDescription, status: "DRAFT" } }),
+    prisma.article.create({ data: { title: next.title, slug: next.slug, excerpt: next.excerpt, content: next.content, category: next.category, keywords: next.keywords, metaTitle: next.metaTitle, metaDescription: next.metaDescription, imageUrl: next.imageUrl, status: "DRAFT" } }),
     prisma.articleQueueEntry.delete({ where: { id: next.id } }),
     prisma.articleQueueState.update({ where: { id: "singleton" }, data: { lastReleasedAt: new Date() } })
   ]);

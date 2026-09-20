@@ -79,12 +79,29 @@ function Concept({setTab}:{setTab:(t:Tab)=>void}){
   </ScrollView>;
 }
 
-function Blog({setTab}:{setTab:(t:Tab)=>void}){
+function Blog({setTab,goToEvents}:{setTab:(t:Tab)=>void,goToEvents:(category:string)=>void}){
   const [articles,setArticles]=useState<any[]>([]);
   const [category,setCategory]=useState("");
   const [selected,setSelected]=useState<any>(null);
   useEffect(()=>{api<any[]>(`/articles${category?`?category=${encodeURIComponent(category)}`:""}`).then(setArticles).catch(()=>{})},[category]);
   const openArticle=(slug:string)=>api<any>(`/articles/${slug}`).then(setSelected).catch(()=>{});
+  // §5 (cahier des charges 2026-09) : même convention de lien "[libellé](/chemin)" que côté web
+  // (voir renderArticleParagraph dans apps/web/src/App.tsx) — un article doit pouvoir renvoyer vers
+  // une autre partie de l'app, pas seulement exister pour le SEO.
+  const renderParagraph=(text:string)=>{
+    const parts=text.split(/(\[[^\]]+\]\([^)]+\))/g);
+    return parts.map((part,i)=>{
+      const match=part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if(!match)return <Text key={i}>{part}</Text>;
+      const [,label,url]=match;
+      const onPress=()=>{
+        if(url.startsWith("/events")){const m=url.match(/category=([^&]+)/);goToEvents(m?decodeURIComponent(m[1]):"")}
+        else if(url.startsWith("/concept"))setTab("concept");
+        else if(url.startsWith("/blog"))setSelected(null);
+      };
+      return <Text key={i} onPress={onPress} style={s.link}>{label}</Text>;
+    });
+  };
 
   if(selected)return <ScrollView contentContainerStyle={s.content}>
     <Pressable onPress={()=>setSelected(null)}><Text style={s.back}>‹ Retour</Text></Pressable>
@@ -92,7 +109,7 @@ function Blog({setTab}:{setTab:(t:Tab)=>void}){
     <Text style={s.detailTitle}>{selected.title}</Text>
     {selected.author&&<Text style={s.meta}>Par {selected.author.displayName} · {new Date(selected.publishedAt).toLocaleDateString("fr-FR")}</Text>}
     {selected.imageUrl&&<Image source={{uri:imgUrl(selected.imageUrl)}} style={{width:"100%",height:220,borderRadius:14,marginVertical:16}}/>}
-    {selected.content.split("\n\n").map((p:string,i:number)=><Text key={i} style={[s.paragraph,{marginBottom:14}]}>{p}</Text>)}
+    {selected.content.split("\n\n").map((p:string,i:number)=><Text key={i} style={[s.paragraph,{marginBottom:14}]}>{renderParagraph(p)}</Text>)}
     {selected.keywords?.length>0&&<View style={s.chips}>{selected.keywords.map((k:string)=><Text key={k} style={s.chip}>{k}</Text>)}</View>}
   </ScrollView>;
 
@@ -114,10 +131,12 @@ function Blog({setTab}:{setTab:(t:Tab)=>void}){
   </ScrollView>;
 }
 
-function Events({user}:{user:any}){
+function Events({user,initialCategory}:{user:any,initialCategory?:string}){
   const [events,setEvents]=useState<any[]>([]),[selected,setSelected]=useState<any>(null),[application,setApplication]=useState<any>(null),[message,setMessage]=useState(""),[showForm,setShowForm]=useState(false),[answers,setAnswers]=useState<Record<string,string>>({}),[submitting,setSubmitting]=useState(false);
   const [waitlistEntry,setWaitlistEntry]=useState<any>(null),[altOffer,setAltOffer]=useState<any>(null);
-  const [q,setQ]=useState(""),[category,setCategory]=useState("");
+  // §5 (cahier des charges 2026-09) : un lien depuis le blog (ex. « nos soirées speed dating »)
+  // arrive ici déjà filtré sur la bonne catégorie, voir App() et Blog() plus bas.
+  const [q,setQ]=useState(""),[category,setCategory]=useState(initialCategory??"");
   useEffect(()=>{const params=new URLSearchParams({...(q?{q}:{}),...(category?{category}:{})});api<any[]>(`/events?${params}`).then(setEvents)},[q,category]);
   const loadApplication=(eventId:string)=>api<any>(`/events/${eventId}/my-application`).then(setApplication).catch(()=>setApplication(null));
   const loadWaitlist=(eventId:string)=>api<any>(`/events/${eventId}/waitlist/me`).then(setWaitlistEntry).catch(()=>setWaitlistEntry(null));
@@ -653,13 +672,14 @@ export default function App(){
   // aucun moyen d'atterrir sur le formulaire, puisque user.hasRestaurant reste faux jusqu'à l'envoi
   // de sa demande (même logique que le navigate("/restaurant") du web, voir Login() sur le web).
   const [forceRestaurantSpace,setForceRestaurantSpace]=useState(false);
+  const [eventsCategory,setEventsCategory]=useState("");
   const load=async()=>{setLoading(true);try{if(await getToken())setUser(await api("/me"));else setUser(null)}catch{await setToken(null);setUser(null)}finally{setLoading(false)}};useEffect(()=>{load()},[]);
   const logout=async()=>{await setToken(null);setUser(null);setForceRestaurantSpace(false)};
   if(loading)return <SafeAreaView style={[s.safe,s.center]}><ActivityIndicator color={C.gold}/></SafeAreaView>;
   if(!user)return <Login onLogin={opts=>{if(opts?.restaurateur){setForceRestaurantSpace(true);setTab("profile")}load()}}/>;
   if(["ADMIN","MODERATOR","RECEPTION"].includes(user.role))return <StaffHome user={user} onLogout={logout}/>;
   const showRestaurantSpace=user.hasRestaurant||forceRestaurantSpace;
-  return <SafeAreaView style={s.safe}><StatusBar style="light"/><View style={s.app}>{tab==="home"&&<Home user={user} setTab={setTab}/>} {tab==="events"&&<Events user={user}/>}{tab==="concept"&&<Concept setTab={setTab}/>}{tab==="blog"&&<Blog setTab={setTab}/>}{tab==="scan"&&<Scanner/>}{tab==="messages"&&<Messages user={user}/>} {tab==="profile"&&(showRestaurantSpace?<RestaurantSpace onLogout={logout}/>:<Espace user={user} onSaved={load} onLogout={logout}/>)}</View><TabBar tab={tab} setTab={setTab} profileLabel={showRestaurantSpace?"Mon établissement":"Mon espace"}/></SafeAreaView>
+  return <SafeAreaView style={s.safe}><StatusBar style="light"/><View style={s.app}>{tab==="home"&&<Home user={user} setTab={setTab}/>} {tab==="events"&&<Events user={user} initialCategory={eventsCategory}/>}{tab==="concept"&&<Concept setTab={setTab}/>}{tab==="blog"&&<Blog setTab={setTab} goToEvents={(category:string)=>{setEventsCategory(category);setTab("events")}}/>}{tab==="scan"&&<Scanner/>}{tab==="messages"&&<Messages user={user}/>} {tab==="profile"&&(showRestaurantSpace?<RestaurantSpace onLogout={logout}/>:<Espace user={user} onSaved={load} onLogout={logout}/>)}</View><TabBar tab={tab} setTab={setTab} profileLabel={showRestaurantSpace?"Mon établissement":"Mon espace"}/></SafeAreaView>
 }
 
 const s=StyleSheet.create({

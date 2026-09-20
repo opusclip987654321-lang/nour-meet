@@ -784,6 +784,7 @@ model ArticleQueueEntry {
   keywords        String[]
   metaTitle       String
   metaDescription String
+  imageUrl        String?
   createdAt       DateTime @default(now())
 }
 

@@ -152,6 +152,20 @@ function Blog() {
   </section></Layout>;
 }
 
+// §5 (cahier des charges 2026-09) : les articles doivent pouvoir renvoyer vers d'autres parties
+// du site (ex. réserver une soirée), pas seulement exister pour le SEO. Convention légère de type
+// Markdown "[libellé](/chemin)" dans le texte : un chemin commençant par "/" devient un lien interne
+// (react-router, jamais de rechargement de page), tout le reste un lien externe classique.
+const renderArticleParagraph = (text: string) => {
+  const parts = text.split(/(\[[^\]]+\]\([^)]+\))/g);
+  return parts.map((part, i) => {
+    const match = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (!match) return part;
+    const [, label, url] = match;
+    return url.startsWith("/") ? <Link key={i} to={url} className="link-button" style={{display:"inline"}}>{label}</Link> : <a key={i} href={url} target="_blank" rel="noreferrer">{label}</a>;
+  });
+};
+
 function ArticlePage() {
   const {id}=useParams();
   const [article,setArticle]=useState<any>(null);
@@ -172,13 +186,16 @@ function ArticlePage() {
     <h1>{article.title}</h1>
     {article.author&&<p className="fine">Par {article.author.displayName} · {new Date(article.publishedAt).toLocaleDateString("fr-FR")}</p>}
     {article.imageUrl&&<img src={imgUrl(article.imageUrl)} alt="" style={{width:"100%",borderRadius:14,margin:"20px 0"}}/>}
-    <div className="article-body">{article.content.split("\n\n").map((p:string,i:number)=><p key={i}>{p}</p>)}</div>
+    <div className="article-body">{article.content.split("\n\n").map((p:string,i:number)=><p key={i}>{renderArticleParagraph(p)}</p>)}</div>
     {article.keywords?.length>0&&<div className="chips" style={{marginTop:30}}>{article.keywords.map((k:string)=><span key={k}>{k}</span>)}</div>}
   </section></Layout>;
 }
 
 function Events() {
-  const [events,setEvents]=useState<PublicEvent[]>([]),[q,setQ]=useState(""),[category,setCategory]=useState("");
+  const [searchParams]=useSearchParams();
+  // §5 (cahier des charges 2026-09) : permet au blog (et à tout autre lien externe) de renvoyer
+  // directement vers les événements d'une catégorie précise, ex. /events?category=Speed%20dating.
+  const [events,setEvents]=useState<PublicEvent[]>([]),[q,setQ]=useState(""),[category,setCategory]=useState(searchParams.get("category")??"");
   useEffect(()=>{api<PublicEvent[]>(`/events?${new URLSearchParams({...(q?{q}:{}),...(category?{category}:{})})}`).then(setEvents)},[q,category]);
   return <Layout><section className="page"><span className="eyebrow">CALENDRIER</span><h1>Trouvez la rencontre qui vous ressemble.</h1><div className="filters"><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Rechercher un événement"/><select value={category} onChange={e=>setCategory(e.target.value)}><option value="">Toutes les catégories</option>{EVENT_CATEGORIES.map(c=><option key={c.name}>{c.name}</option>)}</select></div>{events.length?<div className="event-grid">{events.map(e=><EventCard key={e.id} event={e}/>)}</div>:<div className="empty"><span>◇</span><h2>Aucun événement disponible</h2><p>Modifiez vos filtres ou revenez prochainement.</p></div>}</section></Layout>;
 }
@@ -1501,7 +1518,8 @@ function AdminArticleEditor() {
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     {preview?<div className="panel" style={{maxWidth:760}}>
       <span className="eyebrow">{form.category.toUpperCase()}</span><h2 style={{fontFamily:"'Playfair Display',serif"}}>{form.title}</h2>
-      <div className="article-body">{form.content.split("\n\n").map((p,i)=><p key={i}>{p}</p>)}</div>
+      {article.imageUrl&&<img src={imgUrl(article.imageUrl)} alt="" style={{width:"100%",borderRadius:14,margin:"20px 0"}}/>}
+      <div className="article-body">{form.content.split("\n\n").map((p,i)=><p key={i}>{renderArticleParagraph(p)}</p>)}</div>
     </div>:<form className="panel form-grid" onSubmit={save}>
       <label>Titre<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
       <label>Identifiant (slug)<input required pattern="[a-z0-9-]+" value={form.slug} onChange={e=>setForm({...form,slug:e.target.value})}/></label>
@@ -1511,7 +1529,7 @@ function AdminArticleEditor() {
       <label className="wide">Contenu (un paragraphe par ligne vide)<textarea required style={{minHeight:260}} value={form.content} onChange={e=>setForm({...form,content:e.target.value})}/></label>
       <label>Titre SEO (facultatif)<input value={form.metaTitle} onChange={e=>setForm({...form,metaTitle:e.target.value})}/></label>
       <label>Méta-description SEO (facultatif)<input value={form.metaDescription} onChange={e=>setForm({...form,metaDescription:e.target.value})}/></label>
-      <label className="fine">Image principale<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>e.target.files?.[0]&&uploadImage(e.target.files[0])}/></label>
+      <label className="fine wide">Image principale{article.imageUrl&&<img src={imgUrl(article.imageUrl)} alt="" style={{width:220,borderRadius:8,display:"block",margin:"8px 0"}}/>}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>e.target.files?.[0]&&uploadImage(e.target.files[0])}/></label>
       <button className="button" disabled={busy==="save"}>Enregistrer</button>
     </form>}
     <div className="panel" style={{marginTop:20}}>
