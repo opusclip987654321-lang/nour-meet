@@ -1,5 +1,5 @@
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import jsQR from "jsqr";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
@@ -48,38 +48,49 @@ function Header() {
 }
 function Layout({ children }: {children: ReactNode}) { return <><Header/><main>{children}</main><footer><Logo/><p>Paris et Île-de-France · Expérience privée · Données protégées</p></footer></>; }
 function Loading() { return <div className="state-page"><div className="spinner"/><h2>Chargement…</h2></div>; }
+// C13/C14 (ordre correctif 2026-09-20) : liste de notifications partagée (participant, restaurateur,
+// admin) — chronologique, lu/non lu, cliquable vers la destination métier exacte (linkPath), jamais
+// un lien générique. Un clic marque lu puis navigue ; une notification sans linkPath reste affichée
+// mais non cliquable plutôt que de pointer vers un lien mort.
+function NotificationList({ items, onRead }: { items: any[]; onRead: (id: string) => void }) {
+  const navigate = useNavigate();
+  const open = async (n: any) => {
+    if (!n.readAt) { try { await api(`/notifications/${n.id}/read`, { method: "POST" }); onRead(n.id); } catch { /* déjà lue ou introuvable */ } }
+    if (n.linkPath) navigate(n.linkPath);
+  };
+  if (items.length === 0) return <div className="empty small"><span>◇</span><p>Aucune notification pour le moment.</p></div>;
+  return <div className="stack">{items.map(n => {
+    const Tag = n.linkPath ? "button" : "div";
+    return <Tag key={n.id} type={n.linkPath ? "button" : undefined} className={`notification ${n.readAt ? "read" : "unread"}`} onClick={n.linkPath ? () => open(n) : undefined} style={n.linkPath ? { cursor: "pointer", textAlign: "left", border: 0, width: "100%", font: "inherit" } : undefined}>
+      <i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div>
+    </Tag>;
+  })}</div>;
+}
 function Notice({ kind="info", children }: {kind?: "info"|"error"|"success", children: ReactNode}) { return <div className={`notice ${kind}`}>{children}</div>; }
 
-// « J'y vais, viens avec moi » (§12) : Web Share API sur appareils compatibles, sinon copie du
-// lien et boutons Facebook/Instagram/TikTok là où techniquement possible (Instagram et TikTok
-// n'offrant pas d'intention de partage par URL, seule la copie du lien fonctionne pour eux).
+// C23 (ordre correctif 2026-09-20) : un seul bouton principal, libellé 2-3 mots ("Invite un ami"),
+// qui ouvre la feuille de partage native (WhatsApp, SMS, apps installées) si disponible, sinon
+// retombe sur la copie du lien — jamais de boutons séparés Facebook/Instagram/TikTok, dont
+// certains ne pouvaient de toute façon pas déclencher un vrai partage direct par URL.
 function ShareButton({ event }: { event: PublicEvent }) {
   const { user } = useAuth();
-  const [url, setUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const resolveUrl = async () => {
-    if (url) return url;
     let resolved = `${window.location.origin}/events/${event.slug}`;
     if (user) { try { resolved = (await api<{ url: string }>(`/events/${event.id}/share-link`, { method: "POST" })).url; } catch { /* lien public par défaut */ } }
-    setUrl(resolved); return resolved;
+    return resolved;
   };
   const share = async () => {
     setError("");
     const shareUrl = await resolveUrl();
-    const text = `J’y vais, viens avec moi : « ${event.title} » sur Nūr Meet.`;
+    const text = `« ${event.title} » sur Nūr Meet.`;
     if (navigator.share) { try { await navigator.share({ title: event.title, text, url: shareUrl }); return; } catch { /* annulé ou indisponible, on retombe sur la copie */ } }
     try { await navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2500); }
     catch { setError("Impossible de copier le lien automatiquement."); }
   };
-  const copyForInstagramOrTikTok = async () => { const shareUrl = await resolveUrl(); try { await navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { setError("Impossible de copier le lien."); } };
-  const facebookUrl = url ? `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}` : null;
   return <div className="share-block">
-    <button type="button" className="button secondary full" onClick={share}>J’y vais, viens avec moi</button>
-    <div className="share-row">
-      {facebookUrl?<a className="link-button" href={facebookUrl} target="_blank" rel="noopener noreferrer">Facebook</a>:<button type="button" className="link-button" onClick={async()=>{await resolveUrl()}}>Facebook</button>}
-      <button type="button" className="link-button" onClick={copyForInstagramOrTikTok}>Copier pour Instagram / TikTok</button>
-    </div>
+    <button type="button" className="button secondary full" onClick={share}>Inviter un ami</button>
     {copied && <p className="fine share-copied">Lien copié !</p>}
     {error && <p className="fine share-copied">{error}</p>}
   </div>;
@@ -108,7 +119,7 @@ function CategoryBadge({ category, className }: {category: string; className?: s
 function EventCard({ event }: {event: PublicEvent}) {
   const full=event.confirmedCount>=event.capacity;
   const priceLabel=event.priceTiers.length>0?`À partir de ${money(Math.min(...event.priceTiers.map(t=>t.amountCents)))}`:money(event.priceCents);
-  return <article className="event-card"><Link to={`/events/${event.slug}`} className="event-art"><img src={imgUrl(event.imageUrl)} alt={event.title} loading="lazy"/><CategoryBadge category={event.category}/>{full&&<span className="full-badge">Complet</span>}</Link><div className="event-copy"><small>{dateTime(event.startsAt).toUpperCase()}</small><h3>{event.title}</h3><p>{event.district} · {full?"Complet":`${event.capacity-event.confirmedCount} places restantes`}</p><div><strong>{priceLabel}</strong><Link to={`/events/${event.slug}`}>Découvrir →</Link></div></div></article>;
+  return <article className="event-card"><Link to={`/events/${event.slug}`} className="event-art"><img src={imgUrl(event.imageUrl)} alt={event.title} loading="lazy"/><CategoryBadge category={event.category}/>{event.highlightTier==="priority"&&<span className="verified-badge" style={{position:"absolute",top:16,right:16}}>★ Mise en avant</span>}{event.highlightTier==="simple"&&<span className="category-badge" style={{position:"absolute",top:16,right:16,color:"#ddd",borderColor:"#555"}}>Partenaire</span>}{full&&<span className="full-badge">Complet</span>}</Link><div className="event-copy"><small>{dateTime(event.startsAt).toUpperCase()}</small><h3>{event.title}</h3><p>{event.district} · {full?"Complet":`${event.capacity-event.confirmedCount} places restantes`}</p><div><strong>{priceLabel}</strong><Link to={`/events/${event.slug}`}>Découvrir →</Link></div></div></article>;
 }
 function TestimonialsSection({ eventType }: { eventType?: string }) {
   const [items,setItems]=useState<any[]>([]);
@@ -140,13 +151,15 @@ function Concept() {
   </section></Layout>;
 }
 
-const BLOG_CATEGORIES=["Couple","Rencontre","Solitude","Mariage","Communication","Vie relationnelle"];
+// Architecture éditoriale (instructions définitives 2026-09-20) : couvre explicitement les
+// rencontres amoureuses, l'amitié, la solitude et le networking professionnel.
+const BLOG_CATEGORIES=["Rencontres amoureuses","Amitié","Solitude et vie sociale","Networking professionnel"];
 
 function Blog() {
   const [articles,setArticles]=useState<any[]>([]);
   const [category,setCategory]=useState("");
   useEffect(()=>{api<any[]>(`/articles${category?`?category=${encodeURIComponent(category)}`:""}`).then(setArticles).catch(()=>{})},[category]);
-  return <Layout><section className="page"><span className="eyebrow">LE BLOG</span><h1>Couple, rencontre et vie relationnelle.</h1>
+  return <Layout><section className="page"><span className="eyebrow">LE BLOG</span><h1>Rencontres, amitié et vie sociale.</h1>
     <div className="filters"><select value={category} onChange={e=>setCategory(e.target.value)}><option value="">Tous les thèmes</option>{BLOG_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
     {articles.length===0?<div className="empty"><span>◇</span><h2>Aucun article pour le moment</h2></div>:<div className="event-grid">{articles.map(a=><Link key={a.id} to={`/blog/${a.slug}`} className="event-card"><div className="event-art">{a.imageUrl?<img src={imgUrl(a.imageUrl)} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span className="eyebrow">{a.category.toUpperCase()}</span>}</div><div className="event-copy"><small>{a.category.toUpperCase()}</small><h3>{a.title}</h3><p>{a.excerpt}</p></div></Link>)}</div>}
   </section></Layout>;
@@ -435,7 +448,7 @@ function EventDetail() {
   };
 
   const perkLabels=[event.perks.drink&&"Boisson incluse",event.perks.starter&&"Entrée incluse",event.perks.main&&"Plat inclus",event.perks.dessert&&"Dessert inclus"].filter(Boolean) as string[];
-  return <Layout><section className="event-hero" style={{backgroundImage:`linear-gradient(180deg,#0b0b0cb0,#0b0b0ce6),url(${imgUrl(event.imageUrl)})`}}><CategoryBadge category={event.category} className="inline"/> <span className={`flow-badge ${requiresScreening?"screening":"direct"}`}>{requiresScreening?"◆ Sélection":"● Accès direct"}</span><h1>{event.title}</h1><p>{event.description}</p></section>{event.photos.length>0&&<section className="event-gallery">{event.photos.map((url,i)=><img key={i} src={imgUrl(url)} alt=""/>)}</section>}<section className="event-layout"><article><div className="facts"><div><small>DATE</small><b>{dateTime(event.startsAt)}</b></div><div><small>LIEU</small><b>{event.district}</b></div><div><small>CAPACITÉ</small><b>{event.capacity} participants</b></div>{(event.minAge||event.maxAge)&&<div><small>TRANCHE D’ÂGE</small><b>{event.minAge&&event.maxAge?`${event.minAge}-${event.maxAge} ans`:event.minAge?`${event.minAge} ans et plus`:`Jusqu’à ${event.maxAge} ans`}</b></div>}<div><small>ORGANISATEUR</small><b>{event.organizer.name}</b></div></div>{event.quotas.length>0&&<div className="quota-breakdown"><small>PLACES PAR CATÉGORIE</small><div className="quota-rows">{event.quotas.map(q=><div key={q.category} className="quota-row"><span>{q.category==="HOMME"?"Hommes":"Femmes"}</span><b>{q.heldCount>=q.capacity?"Complet":`${q.capacity-q.heldCount} places`}</b></div>)}</div></div>}<h2>Une expérience pensée pour de vraies rencontres</h2><p>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité.</p>{(perkLabels.length>0||event.perks.description)&&<div className="event-perks">{perkLabels.map(l=><span key={l}>{l}</span>)}{event.perks.description&&<span>{event.perks.description}</span>}</div>}<ul><li>{requiresScreening?"Profils sélectionnés":"Inscription directe"}</li><li>QR code d’entrée unique</li><li>Code de contact privé</li><li>Équipe présente sur place</li></ul><div className="cancellation-policy"><small>POLITIQUE D’ANNULATION</small><p>Annulation gratuite jusqu’à 24 heures avant l’événement : remboursement intégral automatique. Passé ce délai, aucun remboursement n’est possible de plein droit (une exception peut être accordée par l’administration selon les circonstances).</p></div></article><aside className="booking"><ShareButton event={event}/><small>{event.priceTiers.length>0?"TARIFS":"À PARTIR DE"}</small>{event.priceTiers.length>0?<div className="quota-rows">{event.priceTiers.map(t=><div key={t.category} className="quota-row"><span>{t.category==="HOMME"?"Hommes":"Femmes"}</span><b>{money(t.amountCents)}</b></div>)}</div>:<strong>{money(event.priceCents)}</strong>}<div><span>Disponibilité</span><b>{event.quotas.length>0?(myQuota?(bucketFull?"Complet pour votre catégorie":`${myQuota.capacity-myQuota.heldCount} places pour vous`):"Places selon catégorie"):(bucketFull?"Complet":`${event.capacity-event.confirmedCount} places`)}</b></div>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
+  return <Layout><section className="event-hero" style={{backgroundImage:`linear-gradient(180deg,#0b0b0cb0,#0b0b0ce6),url(${imgUrl(event.imageUrl)})`}}><CategoryBadge category={event.category} className="inline"/> <span className={`flow-badge ${requiresScreening?"screening":"direct"}`}>{requiresScreening?"◆ Sélection":"● Accès direct"}</span><h1>{event.title}</h1><p>{event.description}</p></section>{event.photos.length>0&&<section className="event-gallery">{event.photos.map((url,i)=><img key={i} src={imgUrl(url)} alt=""/>)}</section>}<section className="event-layout"><article><div className="facts"><div><small>DATE</small><b>{dateTime(event.startsAt)}</b></div><div><small>LIEU</small><b>{event.district}</b></div><div><small>CAPACITÉ</small><b>{event.capacity} participants</b></div>{(event.minAge||event.maxAge)&&<div><small>TRANCHE D’ÂGE</small><b>{event.minAge&&event.maxAge?`${event.minAge}-${event.maxAge} ans`:event.minAge?`${event.minAge} ans et plus`:`Jusqu’à ${event.maxAge} ans`}</b></div>}<div><small>ORGANISATEUR</small><b>{event.organizer.name}</b></div></div>{event.quotas.length>0&&<div className="quota-breakdown"><small>PLACES PAR CATÉGORIE</small><div className="quota-rows">{event.quotas.map(q=><div key={q.category} className="quota-row"><span>{q.category==="HOMME"?"Hommes":"Femmes"}</span><b>{q.heldCount>=q.capacity?"Complet":`${q.capacity-q.heldCount} places`}</b></div>)}</div></div>}<h2>Une expérience pensée pour de vraies rencontres</h2><p>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité.</p>{(perkLabels.length>0||event.perks.description)&&<div className="event-perks">{perkLabels.map(l=><span key={l}>{l}</span>)}{event.perks.description&&<span>{event.perks.description}</span>}</div>}<ul><li>{requiresScreening?"Profils sélectionnés":"Inscription directe"}</li><li>QR code d’entrée unique</li><li>Code de contact privé</li><li>Équipe présente sur place</li></ul><div className="cancellation-policy"><small>POLITIQUE D’ANNULATION</small><p>Annulation gratuite jusqu’à 24 heures avant l’événement : remboursement intégral automatique. Passé ce délai, aucun remboursement n’est possible de plein droit.</p></div></article><aside className="booking"><ShareButton event={event}/><small>{event.priceTiers.length>0?"TARIFS":"À PARTIR DE"}</small>{event.priceTiers.length>0?<div className="quota-rows">{event.priceTiers.map(t=><div key={t.category} className="quota-row"><span>{t.category==="HOMME"?"Hommes":"Femmes"}</span><b>{money(t.amountCents)}</b></div>)}</div>:<strong>{money(event.priceCents)}</strong>}<div><span>Disponibilité</span><b>{event.quotas.length>0?(myQuota?(bucketFull?"Complet pour votre catégorie":`${myQuota.capacity-myQuota.heldCount} places pour vous`):"Places selon catégorie"):(bucketFull?"Complet":`${event.capacity-event.confirmedCount} places`)}</b></div>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
     {altOffer&&<div className="alt-offer"><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{altOffer.alternativeEvent.title}</h3><p>{dateTime(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</p><p><b>{money(altOffer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busy} onClick={()=>respondAltOffer(true)}>Accepter</button><button className="button secondary" disabled={busy} onClick={()=>respondAltOffer(false)}>Refuser</button></div></div>}
     {!user?<Link className="button full" to="/login">Se connecter pour vous inscrire</Link>
     :loadingApplication?<div className="calendar-state"><div className="spinner small"/><span>Chargement…</span></div>
@@ -650,8 +663,99 @@ function RestaurantApplication() {
 // du dashboard participant (§5), car un restaurateur n'a plus le droit d'y accéder aux fonctions de
 // participation. Un compte en attente d'approbation garde par ailleurs un accès normal au reste du
 // site public (événements, concept, blog) ; seule la participation elle-même est bloquée côté serveur.
+// C01/C13 (ordre correctif 2026-09-20) : cette page reste accessible AUSSI après approbation (rôle
+// ORGANIZER) — jusqu'ici /restaurant n'acceptait que PARTICIPANT et redirigeait tout restaurateur
+// déjà approuvé vers /admin, le laissant sans aucun moyen d'atteindre son abonnement ou ses
+// notifications propres. Onglets Abonnement/Notifications pilotables par ?tab= (ex. depuis une
+// notification cliquable) une fois qu'un dossier restaurateur existe (en attente ou approuvé).
 function RestaurantSpace() {
-  return <Layout><section className="page"><span className="eyebrow">ESPACE RESTAURATEUR</span><h1>Mon établissement</h1><RestaurantApplication/></section></Layout>;
+  const [searchParams]=useSearchParams();
+  const [restaurant,setRestaurant]=useState<any>(undefined);
+  const [tab,setTab]=useState(searchParams.get("tab")??"establishment");
+  const [unread,setUnread]=useState(0);
+  const loadRestaurant=()=>api<any>("/restaurants/me").then(setRestaurant).catch(()=>setRestaurant(null));
+  useEffect(()=>{loadRestaurant()},[]);
+  // C14 : une notification cliquée navigue vers /restaurant?tab=X sans démonter ce composant (même
+  // route) — sans cette synchronisation, l'onglet affiché resterait celui d'avant le clic.
+  useEffect(()=>{const t=searchParams.get("tab");if(t)setTab(t)},[searchParams]);
+  useEffect(()=>{if(restaurant)api<{count:number}>("/notifications/unread-count").then(r=>setUnread(r.count)).catch(()=>{})},[restaurant,tab]);
+  if(restaurant===undefined)return <Layout><Loading/></Layout>;
+  const hasTabs=restaurant&&(restaurant.status==="PENDING"||restaurant.status==="APPROVED");
+  return <Layout><section className="page"><span className="eyebrow">ESPACE RESTAURATEUR</span><h1>Mon établissement</h1>
+    {hasTabs&&<div className="filters">
+      <button type="button" className={tab==="establishment"?"button small":"button small secondary"} onClick={()=>setTab("establishment")}>Mon établissement</button>
+      <button type="button" className={tab==="subscription"?"button small":"button small secondary"} onClick={()=>setTab("subscription")}>Abonnement</button>
+      <button type="button" className={tab==="notifications"?"button small":"button small secondary"} onClick={()=>setTab("notifications")}>🔔 Notifications{unread>0?` (${unread})`:""}</button>
+    </div>}
+    {(!hasTabs||tab==="establishment")&&<RestaurantApplication/>}
+    {hasTabs&&tab==="subscription"&&<RestaurantSubscriptionPanel restaurant={restaurant} onChanged={loadRestaurant}/>}
+    {hasTabs&&tab==="notifications"&&<RestaurantNotificationsPanel onUnreadChange={setUnread}/>}
+  </section></Layout>;
+}
+// C01-C09 (instructions définitives 2026-09-20) : vraie page abonnement — deux formules, bascule
+// mensuel/annuel, tunnel Stripe Checkout réel (carte obligatoire, essai 7 jours géré par Stripe),
+// résiliation programmée en fin de période, portail de facturation. Accessible dès PENDING.
+function RestaurantSubscriptionPanel({restaurant,onChanged}:{restaurant:any;onChanged:()=>void}){
+  const [searchParams]=useSearchParams();
+  const [plans,setPlans]=useState<any[]>([]);
+  const [period,setPeriod]=useState<"MONTHLY"|"ANNUAL">("MONTHLY");
+  const [busy,setBusy]=useState<string|null>(null);
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(
+    searchParams.get("checkout")==="success"?{kind:"success",text:"Moyen de paiement enregistré. Votre essai de 7 jours a commencé."}:
+    searchParams.get("checkout")==="cancel"?{kind:"error",text:"Souscription annulée avant la fin du paiement."}:null
+  );
+  useEffect(()=>{api<any[]>("/plans").then(setPlans).catch(()=>{})},[]);
+  const subscription=restaurant.subscription;
+  const checkout=async(planId:string)=>{
+    setBusy(planId);setNotice(null);
+    try{const {url}=await api<{url:string}>("/restaurants/me/subscription/checkout",{method:"POST",body:JSON.stringify({planId,billingPeriod:period})});window.location.href=url}
+    catch(err){setNotice({kind:"error",text:(err as Error).message});setBusy(null)}
+  };
+  const cancel=async()=>{
+    setBusy("cancel");setNotice(null);
+    try{await api("/restaurants/me/subscription/cancel",{method:"POST"});setNotice({kind:"success",text:"Résiliation programmée : vos avantages restent actifs jusqu’à la fin de la période déjà payée."});onChanged()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+  const openPortal=async()=>{
+    setBusy("portal");setNotice(null);
+    try{const {url}=await api<{url:string}>("/restaurants/me/subscription/portal",{method:"POST"});window.location.href=url}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+  return <div className="stack">
+    {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    {subscription?<div className="panel">
+      <div className="panel-title"><h2>Mon abonnement</h2><span>{SUBSCRIPTION_STATUS_LABEL[subscription.status]??subscription.status}</span></div>
+      <p className="fine left">Formule <b>{subscription.plan.name}</b> ({subscription.billingPeriod==="ANNUAL"?"annuel":"mensuel"}) — {subscription.cancelAtPeriodEnd?"résiliation programmée, ":""}
+        {subscription.status==="CANCELLED"?"résilié":`échéance le ${new Date(subscription.currentPeriodEnd).toLocaleDateString("fr-FR")}`}.</p>
+      <p className="fine left">Quota ce mois-ci : {restaurant.currentMonthEventsPublished}{subscription.plan.monthlyEventQuota==null?" événements publiés (illimité)":`/${subscription.plan.monthlyEventQuota} événements publiés`}.</p>
+      <div className="decision-buttons">
+        {subscription.stripeCustomerId&&<button type="button" className="button secondary" disabled={!!busy} onClick={openPortal}>Gérer mon moyen de paiement</button>}
+        {!subscription.cancelAtPeriodEnd&&subscription.status!=="CANCELLED"&&<button type="button" className="button danger" disabled={!!busy} onClick={cancel}>Résilier</button>}
+      </div>
+    </div>:<>
+      <div className="filters"><button type="button" className={period==="MONTHLY"?"button small":"button small secondary"} onClick={()=>setPeriod("MONTHLY")}>Mensuel</button><button type="button" className={period==="ANNUAL"?"button small":"button small secondary"} onClick={()=>setPeriod("ANNUAL")}>Annuel (2 mois offerts)</button></div>
+      <div className="feature-grid">{plans.map(p=><div key={p.id}>
+        <b style={{color:"var(--gold)"}}>{p.name}</b>
+        <h3>{money(period==="ANNUAL"?p.annualPriceCents:p.monthlyPriceCents)}{period==="ANNUAL"?"/an":"/mois"}</h3>
+        <p>{p.monthlyEventQuota==null?"Événements illimités":`${p.monthlyEventQuota} événements publiés par mois`}</p>
+        <p>{p.highlightTier==="priority"?"Mise en avant prioritaire des soirées et de l’établissement":p.highlightTier==="simple"?"Mise en avant simple des soirées et de l’établissement":""}</p>
+        <p className="fine">Essai gratuit de 7 jours, carte requise, résiliable avant l’échéance.</p>
+        <button type="button" className="button full" disabled={!!busy} onClick={()=>checkout(p.id)}>{busy===p.id?"…":"Choisir cette formule"}</button>
+      </div>)}</div>
+      <p className="fine">Le choix de la formule est indépendant de la publication de vos soirées, qui reste soumise à validation admin.</p>
+    </>}
+  </div>;
+}
+const SUBSCRIPTION_STATUS_LABEL:Record<string,string>={TRIALING:"Essai en cours",ACTIVE:"Actif",PAST_DUE:"Paiement en échec",CANCELLED:"Résilié",INCOMPLETE:"Incomplet"};
+function RestaurantNotificationsPanel({onUnreadChange}:{onUnreadChange:(n:number)=>void}){
+  const [items,setItems]=useState<any[]>([]);
+  const load=()=>api<any[]>("/notifications").then(setItems);
+  useEffect(()=>{load()},[]);
+  return <div className="panel"><div className="panel-title"><h2>Notifications</h2></div>
+    <NotificationList items={items} onRead={id=>{setItems(items.map(n=>n.id===id?{...n,readAt:new Date().toISOString()}:n));onUnreadChange(items.filter(n=>!n.readAt&&n.id!==id).length)}}/>
+  </div>;
 }
 
 function GlobalInterviewPanel() {
@@ -713,8 +817,12 @@ function GlobalInterviewPanel() {
 }
 
 function Dashboard() {
-  const {user,refresh}=useAuth(); const [apps,setApps]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]),[offers,setOffers]=useState<any[]>([]),[tab,setTab]=useState("reservations"),[payingFor,setPayingFor]=useState<{applicationId:string;eventId:string;amountCents:number}|null>(null),[busyId,setBusyId]=useState<string|null>(null),[message,setMessage]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const {user,refresh}=useAuth(); const [searchParams]=useSearchParams();
+  // C14 (ordre correctif 2026-09-20) : permet aux notifications de renvoyer vers un onglet précis,
+  // ex. /dashboard?tab=tickets, plutôt qu'un lien générique vers l'espace participant.
+  const [apps,setApps]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]),[offers,setOffers]=useState<any[]>([]),[tab,setTab]=useState(searchParams.get("tab")??"reservations"),[payingFor,setPayingFor]=useState<{applicationId:string;eventId:string;amountCents:number}|null>(null),[busyId,setBusyId]=useState<string|null>(null),[message,setMessage]=useState<{kind:"error"|"success";text:string}|null>(null);
   const load=()=>Promise.all([api<any[]>("/me/applications"),api<any[]>("/me/tickets"),api<any[]>("/notifications"),api<any[]>("/me/alternative-offers")]).then(([a,t,n,o])=>{setApps(a);setTickets(t);setNotifications(n);setOffers(o)}); useEffect(()=>{load()},[]);
+  useEffect(()=>{const t=searchParams.get("tab");if(t)setTab(t)},[searchParams]);
   // Un compte restaurateur n'a rien à faire dans l'espace participant (§5) : on le renvoie vers sa
   // propre fiche établissement plutôt que de lui laisser voir un tableau de bord vide. Ce contrôle
   // vient après tous les hooks du composant : jamais avant, pour ne pas en varier le nombre au fil des
@@ -743,7 +851,7 @@ function Dashboard() {
   const ticketsLabel=tickets.length===1?"Mon billet":"Mes billets";
   const tabs=[["interview",user?.profile?.validatedAt?"Entretien ✓":"Entretien"],["reservations","Réservations"],["tickets",ticketsLabel],["profile","Profil"],["notifications","Notifications"]];
   const titles:Record<string,string>={interview:"Entretien de validation",reservations:"Mes événements",tickets:ticketsLabel,profile:"Mon profil",notifications:"Notifications"};
-  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><span>◇</span><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=>{const offersForEvent=pendingOffers.filter(o=>o.originalEventId===a.eventId);return <article className="reservation" key={a.id}><img className="reservation-photo" src={imgUrl(a.event.imageUrl)} alt=""/><div><div className="admin-event-meta"><CategoryBadge category={a.event.category} className="inline"/><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small></div><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}{offersForEvent.map(offer=><article className="alt-offer nested" key={offer.id}><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{offer.alternativeEvent.title}</h3><p>{dateTime(offer.alternativeEvent.startsAt)} · {offer.alternativeEvent.district}</p><p><b>{money(offer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,false)}>Pas intéressé</button></div></article>)}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler ma participation</button>}</div></article>;})}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{t.reservation.event.controllerRestaurant&&<p>{t.reservation.event.controllerRestaurant.name}</p>}<p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/><PrivacyPanel/></div>}{tab==="notifications"&&<div className="stack">{notifications.map(n=><article className={`notification ${n.readAt?"read":"unread"}`} key={n.id}><i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div></article>)}</div>}</div></section>
+  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><span>◇</span><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=>{const offersForEvent=pendingOffers.filter(o=>o.originalEventId===a.eventId);return <article className="reservation" key={a.id}><img className="reservation-photo" src={imgUrl(a.event.imageUrl)} alt=""/><div><div className="admin-event-meta"><CategoryBadge category={a.event.category} className="inline"/><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small></div><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}{offersForEvent.map(offer=><article className="alt-offer nested" key={offer.id}><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{offer.alternativeEvent.title}</h3><p>{dateTime(offer.alternativeEvent.startsAt)} · {offer.alternativeEvent.district}</p><p><b>{money(offer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,false)}>Pas intéressé</button></div></article>)}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler ma participation</button>}</div></article>;})}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{t.reservation.event.controllerRestaurant&&<p>{t.reservation.event.controllerRestaurant.name}</p>}<p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/><PrivacyPanel/></div>}{tab==="notifications"&&<NotificationList items={notifications} onRead={id=>setNotifications(notifications.map(n=>n.id===id?{...n,readAt:new Date().toISOString()}:n))}/>}</div></section>
   {payingFor&&<PaymentModal applicationId={payingFor.applicationId} eventId={payingFor.eventId} amountCents={payingFor.amountCents} onClose={()=>setPayingFor(null)} onConfirmed={()=>{setPayingFor(null);load()}} onWaitlisted={()=>{setPayingFor(null);load()}}/>}
   </Layout>;
 }
@@ -805,15 +913,25 @@ function Stat({label,value}:{label:string;value:string|number}){return <div clas
 function AdminNav(){
   const {user}=useAuth(); const role=user?.role;
   const manages = role==="ADMIN"||role==="ORGANIZER";
+  const [unread,setUnread]=useState(0);
+  const [searchParams]=useSearchParams();
+  const location=useLocation();
+  useEffect(()=>{if(role==="ORGANIZER")api<{count:number}>("/notifications/unread-count").then(r=>setUnread(r.count)).catch(()=>{})},[role]);
+  // Deux liens partagent le même chemin ("/restaurant") avec un ?tab= différent : NavLink ne
+  // distingue pas les search params (bug identique à C18 sinon), donc l'état actif se calcule ici.
+  const onRestaurant=location.pathname==="/restaurant";
+  const restaurantTab=searchParams.get("tab");
   return <aside className="admin-nav"><Logo/>
     {manages&&<NavLink end to="/admin">Vue générale</NavLink>}
     {role==="ADMIN"&&<NavLink to="/admin/applications">Entretiens</NavLink>}
     {role==="ADMIN"&&<NavLink to="/admin/availability">Agenda</NavLink>}
-    {manages&&<NavLink to="/admin/events/new">Créer une soirée</NavLink>}
-    {manages&&<NavLink to="/admin/events">Mes événements</NavLink>}
+    {manages&&<NavLink end to="/admin/events/new">Créer une soirée</NavLink>}
+    {manages&&<NavLink end to="/admin/events">Mes événements</NavLink>}
     {manages&&<NavLink to="/admin/attendees">Participants</NavLink>}
     {manages&&<NavLink to="/admin/finance">Finances</NavLink>}
     {manages&&<NavLink to="/admin/staff">Personnel d’accueil</NavLink>}
+    {role==="ORGANIZER"&&<Link className={onRestaurant&&restaurantTab==="subscription"?"active":undefined} to="/restaurant?tab=subscription">Abonnement</Link>}
+    {role==="ORGANIZER"&&<Link className={onRestaurant&&restaurantTab==="notifications"?"active":undefined} to="/restaurant?tab=notifications">🔔 Notifications{unread>0?` (${unread})`:""}</Link>}
     <NavLink to="/admin/scanner">Scanner les billets</NavLink>
     {role==="ADMIN"&&<NavLink to="/admin/restaurants">Demandes restaurateurs</NavLink>}
     {role==="ADMIN"&&<NavLink to="/admin/stats">Statistiques</NavLink>}
@@ -1665,4 +1783,4 @@ function Scanner() {
   </div><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b>✓</b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b>×</b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Présentez le QR code du billet devant la caméra, ou saisissez le code manuellement.</p></>}</aside></div></div></section></Layout>;
 }
 
-export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/concept" element={<Concept/>}/><Route path="/blog" element={<Blog/>}/><Route path="/blog/:id" element={<ArticlePage/>}/><Route path="/login" element={<Login/>}/><Route path="/pay/:applicationId" element={<PayStandalone/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/restaurant" element={<Protected roles={["PARTICIPANT"]}><RestaurantSpace/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/settings" element={<Protected roles={["ADMIN"]}><AdminSettings/></Protected>}/><Route path="/admin/testimonials" element={<Protected roles={["ADMIN"]}><AdminTestimonials/></Protected>}/><Route path="/admin/blog" element={<Protected roles={["ADMIN"]}><AdminBlog/></Protected>}/><Route path="/admin/blog/:id" element={<Protected roles={["ADMIN"]}><AdminArticleEditor/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/stats" element={<Protected roles={["ADMIN"]}><AdminStats/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}
+export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/concept" element={<Concept/>}/><Route path="/blog" element={<Blog/>}/><Route path="/blog/:id" element={<ArticlePage/>}/><Route path="/login" element={<Login/>}/><Route path="/pay/:applicationId" element={<PayStandalone/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/restaurant" element={<Protected roles={["PARTICIPANT","ORGANIZER"]}><RestaurantSpace/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/settings" element={<Protected roles={["ADMIN"]}><AdminSettings/></Protected>}/><Route path="/admin/testimonials" element={<Protected roles={["ADMIN"]}><AdminTestimonials/></Protected>}/><Route path="/admin/blog" element={<Protected roles={["ADMIN"]}><AdminBlog/></Protected>}/><Route path="/admin/blog/:id" element={<Protected roles={["ADMIN"]}><AdminArticleEditor/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/stats" element={<Protected roles={["ADMIN"]}><AdminStats/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}

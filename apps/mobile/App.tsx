@@ -16,7 +16,7 @@ const APPLICATION_STATUS_LABEL: Record<string,string> = { PENDING_CALL: "En atte
 
 const C={bg:"#0B0B0C",panel:"#171718",line:"#34322E",gold:"#C9A765",cream:"#F6F0E5",muted:"#918C82",green:"#62D89A",red:"#F0747C"};
 type Tab="home"|"events"|"scan"|"messages"|"profile"|"concept"|"blog";
-const BLOG_CATEGORIES=["Couple","Rencontre","Solitude","Mariage","Communication","Vie relationnelle"];
+const BLOG_CATEGORIES=["Rencontres amoureuses","Amitié","Solitude et vie sociale","Networking professionnel"];
 // Stripe n'a pas de module natif installable dans Expo Go (seuls les modules Expo officiels le
 // sont) : plutôt que de dupliquer PaymentModal en React Native derrière un client de développement
 // natif, le paiement carte ouvre la page web déjà testée (voir PayStandalone dans
@@ -115,7 +115,7 @@ function Blog({setTab,goToEvents}:{setTab:(t:Tab)=>void,goToEvents:(category:str
 
   return <ScrollView contentContainerStyle={s.content}>
     <Pressable onPress={()=>setTab("home")}><Text style={s.back}>‹ Retour</Text></Pressable>
-    <ScreenTitle eyebrow="LE BLOG" title="Couple, rencontre et vie relationnelle."/>
+    <ScreenTitle eyebrow="LE BLOG" title="Rencontres, amitié et vie sociale."/>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:16}} contentContainerStyle={{gap:8}}>
       <Pressable onPress={()=>setCategory("")} style={[s.choiceChip,!category&&s.choiceChipActive]}><Text style={[s.choiceChipText,!category&&{color:"#111"}]}>Tous les thèmes</Text></Pressable>
       {BLOG_CATEGORIES.map(c=><Pressable key={c} onPress={()=>setCategory(c)} style={[s.choiceChip,category===c&&s.choiceChipActive]}><Text style={[s.choiceChipText,category===c&&{color:"#111"}]}>{c}</Text></Pressable>)}
@@ -195,7 +195,7 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
   const share=async()=>{
     try{
       const link=await api<{url:string}>(`/events/${selected.id}/share-link`,{method:"POST"});
-      await Share.share({message:`Je vais à « ${selected.title} », viens avec moi : ${link.url}`});
+      await Share.share({message:`« ${selected.title} » sur Nūr Meet : ${link.url}`});
     }catch(e){setMessage((e as Error).message)}
   };
   if(selected){
@@ -214,7 +214,7 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
     {(perkLabels.length>0||selected.perks?.description)&&<View style={s.chips}>{perkLabels.map(l=><Text key={l} style={s.chip}>{l}</Text>)}{selected.perks?.description&&<Text style={s.chip}>{selected.perks.description}</Text>}</View>}
     <Text style={[s.meta,{marginTop:14}]}>{requiresScreening?"Profils sélectionnés":"Inscription directe"} · QR code d’entrée unique · Code de contact privé · Équipe présente sur place</Text>
     <View style={{marginTop:20}}><Text style={s.label}>POLITIQUE D’ANNULATION</Text><Text style={s.paragraph}>Annulation gratuite jusqu’à 24 heures avant l’événement : remboursement intégral automatique. Passé ce délai, aucun remboursement n’est possible de plein droit.</Text></View>
-    <GoldButton title="J’y vais, viens avec moi" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
+    <GoldButton title="Inviter un ami" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
     {altOffer&&<View style={s.altOffer}><Text style={s.eyebrow}>ÉVÉNEMENT ALTERNATIF PROPOSÉ</Text><Text style={s.sectionTitle}>{altOffer.alternativeEvent.title}</Text><Text style={s.meta}>{when(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</Text><Text style={s.bodyStrong}>{money(altOffer.alternativeEvent.priceCents)}</Text><View style={{flexDirection:"row",gap:10,marginTop:10}}><View style={{flex:1}}><GoldButton title={submitting?"…":"Accepter"} onPress={()=>respondAltOffer(true)} disabled={submitting}/></View><View style={{flex:1}}><GoldButton title={submitting?"…":"Refuser"} secondary onPress={()=>respondAltOffer(false)} disabled={submitting}/></View></View></View>}
     {application?<View>
       {application.status==="PAYMENT_PENDING"&&<View style={s.reservationCard}><Text style={s.meta}>{application.reservation?`Votre place est retenue quelques minutes (jusqu’au ${when(application.reservation.expiresAt)}) : finalisez votre paiement.`:"Vous pouvez régler votre billet dès maintenant."}</Text><GoldButton title={`Payer par carte · ${money(selected.priceCents)}`} onPress={async()=>{await payByCard(application.id,selected.id,selected.priceCents);await loadApplication(selected.id)}}/></View>}

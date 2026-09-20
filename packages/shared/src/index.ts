@@ -124,6 +124,7 @@ export interface PublicEvent {
   organizer: {id: string | null; name: string};
   venue: {id: string; name: string} | null;
   quotas: {category: QuotaCategory; capacity: number; heldCount: number}[];
+  highlightTier: "simple" | "priority" | null;
 }
 
 export interface ApiError { error: string; details?: unknown }
