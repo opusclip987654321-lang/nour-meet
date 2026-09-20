@@ -20,7 +20,16 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Autoriser Nūr Meet à scanner les QR codes personnels."
+          "cameraPermission": "Autoriser Nūr Meet à scanner les QR codes personnels.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Autoriser Nūr Meet à accéder à vos photos pour changer votre photo de profil.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
       "expo-web-browser",
