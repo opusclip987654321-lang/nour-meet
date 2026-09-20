@@ -436,6 +436,9 @@ model Reservation {
   // §13 : posé au moment où le rappel avant événement est envoyé, jamais avant — garantit l'envoi
   // une seule fois par réservation confirmée (voir sendEventReminders côté API).
   reminderSentAt DateTime?
+  // §3 (cahier des charges 2026-09) : second rappel, plus proche de l'événement, en plus du rappel
+  // J-1 ci-dessus (reminderSentAt) — les deux sont indépendants et idempotents.
+  reminderH2SentAt DateTime?
   payment       Payment?
   ticket        Ticket?
   alternativeOffer AlternativeOffer?
@@ -655,7 +658,9 @@ model Plan {
   id                String                   @id @default(cuid())
   name              String
   monthlyPriceCents Int
-  monthlyEventQuota Int
+  // §7 (cahier des charges 2026-09) : null = illimité (formule Premium). Le tarif annuel n'est pas
+  // stocké : c'est une valeur dérivée (12 × mensuel × 0,8) calculée à l'affichage, jamais persistée.
+  monthlyEventQuota Int?
   active            Boolean                  @default(true)
   createdAt         DateTime                 @default(now())
   subscriptions     RestaurantSubscription[]
@@ -683,6 +688,10 @@ model RestaurantSubscription {
   // (voir cahier des charges §2 : aucun encaissement réel sans autorisation explicite). Le statut
   // est aujourd'hui géré manuellement par l'administration.
   stripeSubscriptionId String?
+  // §3 (cahier des charges 2026-09) : rappel envoyé une seule fois par période avant l'échéance de
+  // l'abonnement. Comparé à currentPeriodStart (pas seulement non-null) pour redevenir envoyable dès
+  // qu'une nouvelle période démarre.
+  expiryReminderSentAt DateTime?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 }
