@@ -19,7 +19,12 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: optionalEnvironmentSecret,
   STRIPE_WEBHOOK_SECRET: optionalEnvironmentSecret,
   RESEND_API_KEY: optionalEnvironmentSecret,
-  RESEND_FROM_EMAIL: z.string().email().optional(),
+  // Une chaîne vide (ex. une variable Docker forwardée avec `${RESEND_FROM_EMAIL:-}` mais non
+  // renseignée) doit être traitée comme absente, jamais comme un e-mail invalide à rejeter.
+  RESEND_FROM_EMAIL: z.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().email().optional()
+  ),
   // Surveillance d'erreurs (Sentry) : désactivée tant qu'aucun DSN n'est fourni, jamais activée
   // par défaut — voir sentry.ts pour le filtrage des données personnelles avant tout envoi.
   SENTRY_DSN: optionalEnvironmentSecret
