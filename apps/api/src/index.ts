@@ -79,6 +79,10 @@ const loadCurrentUser = async (request: FastifyRequest) => {
   token.role = current.role;
 };
 const auth = async (request: FastifyRequest) => { await loadCurrentUser(request); };
+// C24 : les fiches publiques restent consultables sans compte, mais un visiteur connecté doit voir
+// le solde de SA catégorie plutôt qu'un état générique — jamais d'erreur si le jeton est absent ou
+// invalide, contrairement à `auth`.
+const optionalAuth = async (request: FastifyRequest) => { try { await loadCurrentUser(request); } catch { /* visiteur anonyme */ } };
 const roles = (...allowed: UserRole[]) => async (request: FastifyRequest) => {
   await loadCurrentUser(request);
   if (!allowed.includes((request.user as TokenUser).role)) throw httpError(403, "Accès non autorisé");
@@ -322,7 +326,24 @@ const defaultCategoryImage = (category: string) => EVENT_CATEGORIES.find(c => c.
 // Fenêtre d'offre de liste d'attente (voir AppSetting WAITLIST_OFFER_WINDOW_HOURS) : la durée
 // exacte est configurable, jamais supposée fixe dans le message envoyé au participant.
 const formatPaymentDeadline = (expiresAt: Date) => `jusqu’au ${expiresAt.toLocaleString("fr-FR")}`;
-const publicEvent = (event: any, revealAddress = false) => ({
+// C24 (ordre correctif 2026-09-20) : ne jamais exposer capacité, quotas ou compteurs internes bruts
+// au participant — seulement une disponibilité pertinente pour LUI. "category" = solde de sa propre
+// catégorie (jamais celui de l'autre catégorie) ; "general" = places pour un événement sans quota
+// (networking) ; "unknown" = événement à quota mais catégorie du visiteur inconnue (anonyme ou profil
+// incomplet) : aucun chiffre interne n'est alors divulgué, seulement un état neutre.
+const eventAvailability = (event: any, viewerQuotaCategory: string | null) => {
+  const quotas: { category: string; capacity: number; heldCount: number }[] = event.quotas ?? [];
+  if (quotas.length > 0) {
+    if (!viewerQuotaCategory) return { kind: "unknown" as const };
+    const bucket = quotas.find(q => q.category === viewerQuotaCategory);
+    if (!bucket) return { kind: "unknown" as const };
+    const remaining = Math.max(0, bucket.capacity - bucket.heldCount);
+    return { kind: "category" as const, remaining, full: remaining <= 0 };
+  }
+  const remaining = Math.max(0, event.capacity - (event._count?.reservations ?? 0));
+  return { kind: "general" as const, remaining, full: remaining <= 0 };
+};
+const publicEvent = (event: any, revealAddress = false, viewerQuotaCategory: string | null = null) => ({
   id: event.id, slug: event.slug, title: event.title, category: event.category, flow: event.flow, description: event.description,
   startsAt: event.startsAt, endsAt: event.endsAt, district: event.district, address: revealAddress ? event.address : null,
   zone: event.zone ?? null,
@@ -330,7 +351,7 @@ const publicEvent = (event: any, revealAddress = false) => ({
   photos: (event.photos ?? []).map((p: any) => p.url),
   perks: { drink: event.includesDrink, starter: event.includesStarter, main: event.includesMain, dessert: event.includesDessert, description: event.perksDescription ?? null },
   minAge: event.minAge ?? null, maxAge: event.maxAge ?? null,
-  capacity: event.capacity, confirmedCount: event._count?.reservations ?? 0, priceCents: event.priceCents, status: event.status,
+  availability: eventAvailability(event, viewerQuotaCategory), priceCents: event.priceCents, status: event.status,
   // Jamais exposés publiquement tant que ENABLE_GENDER_PRICING est désactivé (§6) : sinon le web
   // afficherait un tarif différencié que resolvePriceCents n'appliquerait pas réellement au paiement.
   priceTiers: getSetting("ENABLE_GENDER_PRICING") ? (event.priceTiers ?? []).map((t: any) => ({ category: t.category, amountCents: t.amountCents })) : [],
@@ -340,7 +361,7 @@ const publicEvent = (event: any, revealAddress = false) => ({
   // le tri chronologique de la page Événements — seulement un badge visuel, jamais un ré-ordonnancement.
   highlightTier: event.controllerRestaurant?.subscription?.status === "ACTIVE" || event.controllerRestaurant?.subscription?.status === "TRIALING" ? event.controllerRestaurant.subscription.plan.highlightTier ?? null : null,
   venue: event.venueRestaurant ? { id: event.venueRestaurant.id, name: event.venueRestaurant.name } : null,
-  quotas: (event.quotas ?? []).map((q: any) => ({ category: q.category, capacity: q.capacity, heldCount: q.heldCount }))
+  hasQuotas: (event.quotas ?? []).length > 0
 });
 
 app.setErrorHandler((error, _request, reply) => {
@@ -477,16 +498,18 @@ app.post("/me/request-deletion", { preHandler: auth }, async (request, reply) =>
   return { deleted: true };
 });
 
-app.get("/events", async (request) => {
+app.get("/events", { preHandler: optionalAuth }, async (request) => {
   const query = z.object({ category: z.string().optional(), q: z.string().optional() }).parse(request.query);
   const events = await prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" } }, { description: { contains: query.q, mode: "insensitive" } }] : undefined }, include: { controllerRestaurant: { include: { subscription: { include: { plan: true } } } }, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" } });
-  return events.map(e => publicEvent(e));
+  const viewerCategory = request.user ? (await prisma.profile.findUnique({ where: { userId: currentId(request) } }))?.quotaCategory ?? null : null;
+  return events.map(e => publicEvent(e, false, viewerCategory));
 });
 
-app.get("/events/:id", async (request) => {
+app.get("/events/:id", { preHandler: optionalAuth }, async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const event = await prisma.event.findFirstOrThrow({ where: { OR: [{ id }, { slug: id }] }, include: { controllerRestaurant: true, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } } });
-  return publicEvent(event);
+  const viewerCategory = request.user ? (await prisma.profile.findUnique({ where: { userId: currentId(request) } }))?.quotaCategory ?? null : null;
+  return publicEvent(event, false, viewerCategory);
 });
 
 app.get("/events/:id/my-application", { preHandler: auth }, async (request, reply) => {

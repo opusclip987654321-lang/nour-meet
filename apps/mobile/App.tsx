@@ -49,9 +49,12 @@ function Login({onLogin}:{onLogin:(opts?:{restaurateur?:boolean})=>void}){
   return <SafeAreaView style={s.safe}><StatusBar style="light"/><KeyboardAvoidingView style={s.login} behavior={Platform.OS==="ios"?"padding":undefined}><Logo/><View style={s.loginHero}><Text style={s.eyebrow}>BIENVENUE</Text><Text style={s.loginTitle}>{step===1?"Votre numéro\nouvre la porte.":"Entrez le code\nreçu par SMS."}</Text><Text style={s.paragraph}>{step===1?"Connexion rapide et sécurisée, sans mot de passe.":`Code envoyé au ${phone}`}</Text></View>{error?<Notice text={error} error/>:null}<Text style={s.label}>{step===1?"NUMÉRO DE TÉLÉPHONE":"CODE À SIX CHIFFRES"}</Text><TextInput style={[s.input,step===2&&s.otp]} value={step===1?phone:code} onChangeText={step===1?setPhone:v=>setCode(v.replace(/\D/g,"").slice(0,6))} keyboardType="phone-pad" textContentType={step===2?"oneTimeCode":"telephoneNumber"} placeholderTextColor="#666" placeholder={step===1?"+33612345678":"••••••"}/><GoldButton title={busy?"Patientez…":step===1?"Recevoir mon code":"Vérifier"} onPress={submit} disabled={busy}/>{devCode?<View style={s.demo}><Text style={s.demoTitle}>MODE LOCAL — AUCUN SMS FACTURÉ</Text><Text style={s.meta}>Code de développement : {devCode}</Text></View>:null}</KeyboardAvoidingView></SafeAreaView>
 }
 
+// C24 (ordre correctif 2026-09-20) : jamais de capacité/quota brut affiché — seulement la
+// disponibilité déjà réduite par le serveur à ce qui concerne ce visiteur (event.availability).
+const availabilityLabel=(a:any)=>a.kind==="unknown"?"Places selon catégorie":a.full?"Complet":`${a.remaining} place${a.remaining>1?"s":""}`;
 function EventCard({event,onPress}:{event:any,onPress:()=>void}){
   const priceLabel=event.priceTiers?.length>0?`À partir de ${money(Math.min(...event.priceTiers.map((t:any)=>t.amountCents)))}`:money(event.priceCents);
-  return <Pressable onPress={onPress} style={s.eventCard}><View style={s.eventArt}><Text style={s.eventDay}>{new Date(event.startsAt).getDate()}</Text><Text style={s.eventMonth}>{new Date(event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</Text></View><View style={s.eventCopy}><Text style={[s.eyebrow,{color:categoryColor(event.category)}]}>{event.category.toUpperCase()} · {when(event.startsAt)}</Text><Text style={s.eventTitle}>{event.title}</Text><Text style={s.meta}>{event.district} · {event.capacity-event.confirmedCount} places</Text><Text style={s.price}>{priceLabel}</Text></View></Pressable>;
+  return <Pressable onPress={onPress} style={s.eventCard}><View style={s.eventArt}><Text style={s.eventDay}>{new Date(event.startsAt).getDate()}</Text><Text style={s.eventMonth}>{new Date(event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</Text></View><View style={s.eventCopy}><Text style={[s.eyebrow,{color:categoryColor(event.category)}]}>{event.category.toUpperCase()} · {when(event.startsAt)}</Text><Text style={s.eventTitle}>{event.title}</Text><Text style={s.meta}>{event.district} · {availabilityLabel(event.availability)}</Text><Text style={s.price}>{priceLabel}</Text></View></Pressable>;
 }
 
 function Home({user,setTab}:{user:any,setTab:(t:Tab)=>void}){
@@ -147,8 +150,8 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
   };
   const requiresScreening=selected?eventRequiresScreening(selected):false;
   const questions=requiresScreening?SCREENING_QUESTIONS:NETWORKING_QUESTIONS;
-  const full=selected?selected.confirmedCount>=selected.capacity:false;
-  const categoryUnknown=selected?selected.quotas?.length>0&&!user.profile?.quotaCategory:false;
+  const full=selected?(selected.availability.kind!=="unknown"&&selected.availability.full):false;
+  const categoryUnknown=selected?selected.availability.kind==="unknown":false;
   const canCancel=application&&!["REFUSED","CANCELLED"].includes(application.status);
   // La candidature ne garantit jamais de place (elle enregistre le questionnaire et autorise
   // seulement à tenter le paiement) : c'est le clic sur "Payer par carte" ci-dessous qui pose
@@ -206,9 +209,8 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
     <Text style={s.paragraph}>{selected.description}</Text>
     {selected.photos?.length>0&&<ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginVertical:14}} contentContainerStyle={{gap:10}}>{selected.photos.map((url:string,i:number)=><Image key={i} source={{uri:imgUrl(url)}} style={{width:220,height:140,borderRadius:10}}/>)}</ScrollView>}
     <View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View>
-    <View style={s.detailFacts}><View><Text style={s.label}>CAPACITÉ</Text><Text style={s.bodyStrong}>{selected.capacity} participants</Text></View>{(selected.minAge||selected.maxAge)&&<View><Text style={s.label}>TRANCHE D’ÂGE</Text><Text style={s.bodyStrong}>{selected.minAge&&selected.maxAge?`${selected.minAge}-${selected.maxAge} ans`:selected.minAge?`${selected.minAge} ans et plus`:`Jusqu’à ${selected.maxAge} ans`}</Text></View>}</View>
+    <View style={s.detailFacts}><View><Text style={s.label}>DISPONIBILITÉ</Text><Text style={s.bodyStrong}>{availabilityLabel(selected.availability)}</Text></View>{(selected.minAge||selected.maxAge)&&<View><Text style={s.label}>TRANCHE D’ÂGE</Text><Text style={s.bodyStrong}>{selected.minAge&&selected.maxAge?`${selected.minAge}-${selected.maxAge} ans`:selected.minAge?`${selected.minAge} ans et plus`:`Jusqu’à ${selected.maxAge} ans`}</Text></View>}</View>
     {selected.organizer?.name&&<View style={s.detailFacts}><View><Text style={s.label}>ORGANISATEUR</Text><Text style={s.bodyStrong}>{selected.organizer.name}</Text></View></View>}
-    {selected.quotas?.length>0&&<View style={{marginTop:6,marginBottom:14}}><Text style={s.label}>PLACES PAR CATÉGORIE</Text>{selected.quotas.map((qt:any)=><View key={qt.category} style={{flexDirection:"row",justifyContent:"space-between",marginTop:6}}><Text style={s.meta}>{qt.category==="HOMME"?"Hommes":"Femmes"}</Text><Text style={s.bodyStrong}>{qt.heldCount>=qt.capacity?"Complet":`${qt.capacity-qt.heldCount} places`}</Text></View>)}</View>}
     <Text style={s.sectionTitle}>Une expérience pensée pour de vraies rencontres</Text>
     <Text style={s.paragraph}>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité.</Text>
     {(perkLabels.length>0||selected.perks?.description)&&<View style={s.chips}>{perkLabels.map(l=><Text key={l} style={s.chip}>{l}</Text>)}{selected.perks?.description&&<Text style={s.chip}>{selected.perks.description}</Text>}</View>}
