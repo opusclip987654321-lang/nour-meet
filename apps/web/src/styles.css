@@ -86,6 +86,9 @@ button,.button,.link-button,.event-card,.feature-grid>div,.testimonial-card,.sta
 .filters input:focus,.filters select:focus,label input:focus,label textarea:focus,.event-edit-form input:focus,.event-edit-form textarea:focus,.reject-note input:focus{border-color:var(--gold);box-shadow:0 0 0 3px #cba96925;outline:none}
 .category-badge,.full-badge{backdrop-filter:blur(6px)}
 .testimonial-head{display:flex;align-items:center;gap:12px}
+.chip-toggle{display:flex;gap:8px;margin-top:6px}.chip{background:#121213;color:#ddd;border:1px solid #3b3934;border-radius:20px;padding:8px 16px;font-size:13px;cursor:pointer}.chip:hover{border-color:var(--gold)}.chip.active{background:var(--gold);color:#111;border-color:var(--gold);font-weight:700}
+.verified-badge{display:inline-flex;align-items:center;gap:4px;background:#1a3325;color:#7fe0a8;border:1px solid #2f6b47;border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700}
+.avatar-wrap{position:relative;display:inline-block}.avatar-wrap .verified-badge{position:absolute;bottom:-4px;right:-6px;padding:1px 6px;font-size:9px}
 .testimonial-avatar{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#d2b168,#74562d);color:#111;display:grid;place-items:center;font-weight:900;font-size:14px;flex:0 0 auto}
 .testimonial-head .eyebrow{display:block;margin-top:2px}
 @media (prefers-reduced-motion: no-preference){

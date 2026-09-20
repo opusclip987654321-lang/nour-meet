@@ -258,34 +258,47 @@ const hasAvailableSpace = async (event: { id: string; capacity: number }, quotaC
   const occupied = await prisma.reservation.count({ where: { eventId: event.id, cancelledAt: null } });
   return occupied < event.capacity;
 };
-// Propose automatiquement un événement alternatif lorsqu'un participant ne peut pas obtenir de
-// place, selon trois critères : même thème (catégorie), même région géographique (ex. Île-de-France
-// — pas la zone précise, pour élargir les possibilités), et une place réellement disponible pour sa
-// catégorie (sinon il se retrouverait aussitôt de nouveau sur liste d'attente). Un restaurateur ne
-// propose jamais l'événement d'un concurrent, et Nour ne propose que ses propres événements :
-// l'alternative doit avoir le même controllerRestaurantId (y compris null pour les événements
-// organisés directement par Nour). Ne crée jamais deux propositions actives pour le même événement
-// d'origine. Entièrement automatique : aucune proposition manuelle pour l'instant.
-const createAlternativeOfferIfPossible = async (userId: string, originalEvent: { id: string; category: string; zone: string | null; controllerRestaurantId: string | null }) => {
-  if (!originalEvent.zone) return null;
-  const existingPending = await prisma.alternativeOffer.findFirst({ where: { userId, originalEventId: originalEvent.id, status: AlternativeOfferStatus.PENDING } });
-  if (existingPending) return null;
+// Propose automatiquement jusqu'à 3 événements alternatifs lorsqu'un participant ne peut pas obtenir
+// de place, selon : même thème (catégorie), même région géographique (ex. Île-de-France — pas la zone
+// précise, pour élargir les possibilités), une tranche d'âge compatible si l'événement en définit une,
+// et une place réellement disponible pour sa catégorie (sinon il se retrouverait aussitôt de nouveau
+// sur liste d'attente). §4 : contrairement à la version précédente, l'alternative n'est plus restreinte
+// au même restaurateur — tous les événements Nour compatibles sont candidats. Une offre déjà refusée
+// par ce participant pour cet événement d'origine n'est jamais reproposée. Ne crée jamais de nouvelles
+// propositions tant que des propositions PENDING existent déjà pour cet événement d'origine (elles sont
+// alors simplement retournées telles quelles). Entièrement automatique : aucune proposition manuelle.
+const createAlternativeOfferIfPossible = async (userId: string, originalEvent: { id: string; category: string; zone: string | null }) => {
+  if (!originalEvent.zone) return [];
+  const existingPending = await prisma.alternativeOffer.findMany({ where: { userId, originalEventId: originalEvent.id, status: AlternativeOfferStatus.PENDING }, include: { alternativeEvent: true } });
+  if (existingPending.length > 0) return existingPending;
   const region = regionOfZone(originalEvent.zone);
   const zonesInRegion = EVENT_ZONES.filter(z => regionOfZone(z) === region);
   const profile = await prisma.profile.findUnique({ where: { userId } });
+  const age = profileAge(profile?.birthDate);
   const candidates = await prisma.event.findMany({
-    where: { id: { not: originalEvent.id }, category: originalEvent.category, zone: { in: zonesInRegion }, controllerRestaurantId: originalEvent.controllerRestaurantId, status: EventStatus.PUBLISHED, startsAt: { gt: new Date() }, applications: { none: { userId } } },
+    where: {
+      id: { not: originalEvent.id }, category: originalEvent.category, zone: { in: zonesInRegion },
+      status: EventStatus.PUBLISHED, startsAt: { gt: new Date() }, applications: { none: { userId } },
+      alternativeOffers: { none: { userId, originalEventId: originalEvent.id, status: AlternativeOfferStatus.DECLINED } }
+    },
     orderBy: { startsAt: "asc" },
-    take: 10
+    take: 20
   });
-  let alternative: (typeof candidates)[number] | undefined;
+  const offers: Prisma.AlternativeOfferGetPayload<{ include: { alternativeEvent: true } }>[] = [];
   for (const candidate of candidates) {
-    if (await hasAvailableSpace(candidate, profile?.quotaCategory ?? null)) { alternative = candidate; break; }
+    if (offers.length >= 3) break;
+    if (age != null && candidate.minAge != null && age < candidate.minAge) continue;
+    if (age != null && candidate.maxAge != null && age > candidate.maxAge) continue;
+    if (!(await hasAvailableSpace(candidate, profile?.quotaCategory ?? null))) continue;
+    const offer = await prisma.alternativeOffer.create({
+      data: { userId, originalEventId: originalEvent.id, alternativeEventId: candidate.id, respondsBy: paymentDeadline(new Date(), getSetting("ALTERNATIVE_OFFER_RESPONSE_HOURS")) },
+      include: { alternativeEvent: true }
+    });
+    offers.push(offer);
   }
-  if (!alternative) return null;
-  const offer = await prisma.alternativeOffer.create({ data: { userId, originalEventId: originalEvent.id, alternativeEventId: alternative.id, respondsBy: paymentDeadline(new Date(), getSetting("ALTERNATIVE_OFFER_RESPONSE_HOURS")) } });
-  await notify(userId, "Un événement similaire pourrait vous intéresser", `« ${alternative.title} » (${alternative.district}, ${new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" }).format(alternative.startsAt)}) a des places disponibles.`);
-  return offer;
+  if (offers.length === 0) return [];
+  await notify(userId, offers.length > 1 ? "Des événements similaires pourraient vous intéresser" : "Un événement similaire pourrait vous intéresser", offers.map(o => `« ${o.alternativeEvent.title} » (${o.alternativeEvent.district}, ${new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" }).format(o.alternativeEvent.startsAt)})`).join(" · "));
+  return offers;
 };
 
 const assertEventAccess = async (request: FastifyRequest, eventId: string) => {
@@ -1005,19 +1018,24 @@ app.post("/admin/restaurants/:id/decision", { preHandler: roles(UserRole.ADMIN) 
   const adminId = currentId(request);
   if (accept) {
     // Remplace la commission 30/70 (§8.2) : un abonnement d'essai est ouvert automatiquement sur le
-    // plan par défaut plutôt que d'exiger une action manuelle supplémentaire. Aucun prélèvement
-    // réel n'est déclenché (voir le résumé de fin de lot : Stripe Billing n'est pas câblé).
+    // plan par défaut plutôt que d'exiger une action manuelle supplémentaire. §7 (2026-09) : essai de
+    // RESTAURANT_TRIAL_DAYS jours, carte bancaire requise dès l'inscription côté restaurateur (collecte
+    // hors du périmètre de cette action serveur) ; à l'issue de l'essai, checkTrialSubscriptionsDue
+    // fait passer l'abonnement en ACTIVE sauf annulation entre-temps. Aucun prélèvement réel n'est
+    // déclenché par le serveur (Stripe Billing n'est pas câblé, voir RestaurantSubscription).
     const defaultPlan = await prisma.plan.findFirst({ where: { active: true }, orderBy: { createdAt: "asc" } });
+    const trialDays = getSetting("RESTAURANT_TRIAL_DAYS");
     const [updated] = await prisma.$transaction([
       prisma.restaurant.update({ where: { id }, data: { status: "APPROVED", verifiedAt: new Date(), reviewedBy: adminId, rejectionReason: null } }),
       prisma.user.update({ where: { id: restaurant.ownerId }, data: { role: restaurant.owner.role === UserRole.PARTICIPANT ? UserRole.ORGANIZER : restaurant.owner.role } }),
       ...(defaultPlan ? [prisma.restaurantSubscription.upsert({
         where: { restaurantId: id },
         update: {},
-        create: { restaurantId: id, planId: defaultPlan.id, status: "TRIALING", currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60_000) }
+        create: { restaurantId: id, planId: defaultPlan.id, status: "TRIALING", currentPeriodEnd: new Date(Date.now() + trialDays * 24 * 60 * 60_000) }
       })] : [])
     ]);
-    await notify(restaurant.ownerId, "Compte restaurateur approuvé", `Votre établissement est validé, vous pouvez préparer vos événements.${defaultPlan ? ` Un essai gratuit de votre abonnement (${(defaultPlan.monthlyPriceCents / 100).toFixed(0)} €/mois, ${defaultPlan.monthlyEventQuota} événements publiables par mois) a été activé.` : ""}`);
+    const quotaLabel = defaultPlan ? (defaultPlan.monthlyEventQuota == null ? "événements illimités" : `${defaultPlan.monthlyEventQuota} événements publiables par mois`) : "";
+    await notify(restaurant.ownerId, "Compte restaurateur approuvé", `Votre établissement est validé, vous pouvez préparer vos événements.${defaultPlan ? ` Un essai gratuit de ${trialDays} jours de votre abonnement (${(defaultPlan.monthlyPriceCents / 100).toFixed(0)} €/mois, ${quotaLabel}) a été activé ; l’abonnement sera prélevé automatiquement à l’issue de l’essai sauf annulation.` : ""}`);
     await audit(adminId, "APPROVE_RESTAURANT", "Restaurant", id);
     return updated;
   }
@@ -1078,10 +1096,22 @@ app.post("/restaurants/me/subscription/cancel", { preHandler: roles(UserRole.ORG
 });
 app.get("/admin/plans", { preHandler: roles(UserRole.ADMIN) }, async () => prisma.plan.findMany({ orderBy: { createdAt: "asc" } }));
 app.post("/admin/plans", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
-  const input = z.object({ name: z.string().min(2).max(80), monthlyPriceCents: z.number().int().min(0), monthlyEventQuota: z.number().int().min(1), active: z.boolean().default(true) }).parse(request.body);
+  const input = z.object({ name: z.string().min(2).max(80), monthlyPriceCents: z.number().int().min(0), monthlyEventQuota: z.number().int().min(1).nullable(), active: z.boolean().default(true) }).parse(request.body);
   const plan = await prisma.plan.create({ data: input });
   await audit(currentId(request), "CREATE_PLAN", "Plan", plan.id, input);
   return reply.code(201).send(plan);
+});
+// §7 : "supprimer une formule" au sens du cahier des charges veut dire la désactiver (active:false),
+// jamais la retirer de la base — ses abonnements historiques restent lisibles et facturables tels
+// quels (contrainte ON DELETE RESTRICT sur RestaurantSubscription.planId). Modifier le prix ou le
+// quota d'une formule active n'affecte que les nouveaux abonnements ; un abonnement déjà en cours
+// change de conditions au prochain renouvellement, jamais rétroactivement.
+app.patch("/admin/plans/:id", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const input = z.object({ name: z.string().min(2).max(80).optional(), monthlyPriceCents: z.number().int().min(0).optional(), monthlyEventQuota: z.number().int().min(1).nullable().optional(), active: z.boolean().optional() }).parse(request.body);
+  const plan = await prisma.plan.update({ where: { id }, data: input });
+  await audit(currentId(request), "UPDATE_PLAN", "Plan", id, input);
+  return plan;
 });
 app.post("/admin/restaurants/:id/subscription", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -1268,6 +1298,78 @@ app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZ
     shareAttributedApplications, shareAttributedPurchases
   };
 });
+// §6 (cahier des charges 2026-09) : tableau de statistiques strictement réservé au super-administrateur
+// — contrairement à /admin/dashboard (partagé avec les restaurateurs, dont les champs plateforme sont
+// déjà neutralisés à null pour eux), cette route n'accepte même pas le rôle ORGANIZER : aucune donnée
+// n'y transite jamais vers un compte restaurateur ou modérateur. Tunnel de conversion, finance
+// consolidée et audience, sur la même fenêtre de dates.
+app.get("/admin/stats", { preHandler: roles(UserRole.ADMIN) }, async (request) => {
+  const query = z.object({ since: z.string().optional(), until: z.string().optional() }).parse(request.query);
+  const since = query.since ? new Date(query.since) : new Date(Date.now() - 30 * 86_400_000);
+  const until = query.until ? new Date(query.until) : new Date();
+  const range = { gte: since, lte: until };
+  const [
+    interviewsRequested, interviewsAccepted, interviewsRefused,
+    applicationsCreated, paymentsSucceeded, paymentsFailed, ticketsConfirmed,
+    ticketRevenue, refundedAmount, activeSubscriptions, subscriptionsByStatus,
+    newParticipants, newRestaurantRequests, shareClicks, shareAttributedApplications, shareAttributedPurchases
+  ] = await Promise.all([
+    prisma.application.count({ where: { eventId: null, createdAt: range } }),
+    prisma.application.count({ where: { eventId: null, status: ApplicationStatus.ACCEPTED, decidedAt: range } }),
+    prisma.application.count({ where: { eventId: null, status: ApplicationStatus.REFUSED, decidedAt: range } }),
+    prisma.application.count({ where: { eventId: { not: null }, createdAt: range } }),
+    prisma.payment.count({ where: { status: PaymentStatus.SUCCEEDED, paidAt: range } }),
+    prisma.payment.count({ where: { status: PaymentStatus.FAILED, createdAt: range } }),
+    prisma.ticket.count({ where: { status: { not: TicketStatus.CANCELLED }, reservation: { confirmedAt: range } } }),
+    prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED, paidAt: range }, _sum: { amountCents: true } }),
+    prisma.payment.aggregate({ where: { refundedAt: range }, _sum: { refundedAmountCents: true } }),
+    prisma.restaurantSubscription.findMany({ where: { status: "ACTIVE" }, include: { plan: true } }),
+    prisma.restaurantSubscription.groupBy({ by: ["status"], _count: true }),
+    prisma.user.count({ where: { role: UserRole.PARTICIPANT, createdAt: range } }),
+    prisma.restaurant.count({ where: { submittedAt: range } }),
+    prisma.shareLink.aggregate({ _sum: { clicks: true } }),
+    prisma.application.count({ where: { attributedShareLinkId: { not: null }, createdAt: range } }),
+    prisma.application.count({ where: { attributedShareLinkId: { not: null }, createdAt: range, reservation: { payment: { status: PaymentStatus.SUCCEEDED } } } })
+  ]);
+  return {
+    range: { since, until },
+    funnel: {
+      interviewsRequested, interviewsAccepted, interviewsRefused,
+      interviewAcceptanceRate: (interviewsAccepted + interviewsRefused) > 0 ? Math.round((interviewsAccepted / (interviewsAccepted + interviewsRefused)) * 100) : null,
+      applicationsCreated, paymentsSucceeded, paymentsFailed, ticketsConfirmed,
+      paymentSuccessRate: (paymentsSucceeded + paymentsFailed) > 0 ? Math.round((paymentsSucceeded / (paymentsSucceeded + paymentsFailed)) * 100) : null
+    },
+    finance: {
+      ticketRevenueCents: ticketRevenue._sum.amountCents ?? 0,
+      refundedCents: refundedAmount._sum.refundedAmountCents ?? 0,
+      subscriptionMonthlyRevenueCents: activeSubscriptions.reduce((sum, s) => sum + s.plan.monthlyPriceCents, 0),
+      activeSubscriptionsCount: activeSubscriptions.length,
+      subscriptionsByStatus: subscriptionsByStatus.map(s => ({ status: s.status, count: s._count }))
+    },
+    audience: {
+      newParticipants, newRestaurantRequests,
+      shareClicks: shareClicks._sum.clicks ?? 0, shareAttributedApplications, shareAttributedPurchases
+    }
+  };
+});
+// Export CSV des paiements réussis sur la période (§6) : ligne par vente, jamais de données
+// personnelles au-delà du nom affiché déjà visible ailleurs dans l'administration.
+app.get("/admin/stats/export.csv", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const query = z.object({ since: z.string().optional(), until: z.string().optional() }).parse(request.query);
+  const since = query.since ? new Date(query.since) : new Date(Date.now() - 30 * 86_400_000);
+  const until = query.until ? new Date(query.until) : new Date();
+  const payments = await prisma.payment.findMany({
+    where: { status: PaymentStatus.SUCCEEDED, paidAt: { gte: since, lte: until } },
+    include: { reservation: { include: { user: true, event: true } } },
+    orderBy: { paidAt: "asc" }
+  });
+  const rows = [["Date", "Événement", "Participant", "Montant (€)"].join(",")];
+  for (const p of payments) {
+    rows.push([p.paidAt?.toISOString() ?? "", `"${p.reservation.event.title.replaceAll('"', "'")}"`, `"${p.reservation.user.displayName.replaceAll('"', "'")}"`, (p.amountCents / 100).toFixed(2)].join(","));
+  }
+  reply.header("Content-Type", "text/csv; charset=utf-8").header("Content-Disposition", `attachment; filename="ventes-${since.toISOString().slice(0, 10)}-${until.toISOString().slice(0, 10)}.csv"`);
+  return rows.join("\n");
+});
 // Entretiens globaux : uniquement le super-admin, jamais un restaurateur (voir cahier des charges §6).
 app.get("/admin/global-interviews", { preHandler: roles(UserRole.ADMIN) }, async () =>
   prisma.application.findMany({ where: { eventId: null }, include: { user: { include: { profile: true } }, call: true }, orderBy: { createdAt: "desc" } })
@@ -1294,6 +1396,17 @@ app.post("/admin/global-interviews/:id/decision", { preHandler: roles(UserRole.A
   await notify(application.userId, "Profil validé", "Votre profil est validé : vous pouvez désormais vous inscrire directement aux événements, sans nouvel entretien.");
   await audit(adminId, "VALIDATE_PROFILE", "Application", id);
   return updatedApplication;
+});
+// §2 : retrait du badge Vérifié par un administrateur (aucun endpoint n'existait avant ce point —
+// jusqu'ici validatedAt ne pouvait être posé que par un entretien, jamais retiré).
+app.post("/admin/profiles/:userId/revoke-validation", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { userId } = z.object({ userId: z.string() }).parse(request.params);
+  const profile = await prisma.profile.findUnique({ where: { userId } });
+  if (!profile?.validatedAt) return reply.code(409).send({ error: "Ce profil n’est pas validé" });
+  await prisma.profile.update({ where: { userId }, data: { validatedAt: null } });
+  await notify(userId, "Validation de profil retirée", "Votre profil n’est plus marqué comme vérifié. Vous pouvez redemander un entretien de validation.");
+  await audit(currentId(request), "REVOKE_PROFILE_VALIDATION", "Profile", userId);
+  return { ok: true };
 });
 // §13/§14 : reprogrammer l'entretien d'un candidat (action rapide admin), jamais laissée à la charge
 // du participant qui devrait sinon annuler puis reprendre un nouveau créneau. L'ancien créneau est
@@ -1351,7 +1464,7 @@ app.get("/admin/events/:id/reservations", { preHandler: roles(UserRole.ADMIN, Us
 // automatique de tous les billets concernés, jamais "à traiter manuellement" — l'événement
 // n'existant plus, les quotas tenus sont aussi réinitialisés pour ne pas laisser de données de
 // capacité incohérentes. Partagée entre l'annulation manuelle et la décision minimum non atteint.
-const cancelEventWithRefunds = async (event: { id: string; title: string; status: EventStatus }, actorId: string | undefined, action: string) => {
+const cancelEventWithRefunds = async (event: { id: string; title: string; status: EventStatus; category: string; zone: string | null }, actorId: string | undefined, action: string) => {
   if (event.status === EventStatus.CANCELLED) throw httpError(409, "Cet événement est déjà annulé");
   const reservations = await prisma.reservation.findMany({ where: { eventId: event.id, cancelledAt: null }, include: { payment: { include: { ledgerEntry: true } }, user: true } });
   await prisma.$transaction(async (tx) => {
@@ -1367,7 +1480,21 @@ const cancelEventWithRefunds = async (event: { id: string; title: string; status
   for (const r of paid) {
     if (await executeRefund(r.payment!, event, {})) refundedIds.add(r.id);
   }
-  await Promise.all(reservations.map(r => notify(r.userId, "Événement annulé", `« ${event.title} » a été annulé.${refundedIds.has(r.id) ? ` Vous avez été intégralement remboursé(e) (${(r.payment!.amountCents / 100).toFixed(2)} €).` : ""}`)));
+  // §4 : le remboursement reste automatique et inconditionnel (aucune conséquence financière laissée
+  // en suspens), mais chaque personne concernée reçoit aussi jusqu'à 3 alternatives à réserver si elle
+  // le souhaite — un vrai transfert du paiement existant vers un autre événement (sans repasser par un
+  // nouveau paiement) demanderait de fixer des règles de gestion de l'écart de prix qui ne sont pas
+  // définies dans le cahier des charges ; non construit pour éviter d'inventer cette politique.
+  const offersByUser = new Map<string, Prisma.AlternativeOfferGetPayload<{ include: { alternativeEvent: true } }>[]>();
+  for (const r of reservations) {
+    offersByUser.set(r.userId, await createAlternativeOfferIfPossible(r.userId, event));
+  }
+  await Promise.all(reservations.map(r => {
+    const offers = offersByUser.get(r.userId) ?? [];
+    const refundNote = refundedIds.has(r.id) ? ` Vous avez été intégralement remboursé(e) (${(r.payment!.amountCents / 100).toFixed(2)} €).` : "";
+    const altNote = offers.length > 0 ? ` ${offers.length > 1 ? "Des événements alternatifs" : "Un événement alternatif"} vous ${offers.length > 1 ? "sont" : "est"} proposé${offers.length > 1 ? "s" : ""} dans votre espace.` : "";
+    return notify(r.userId, "Événement annulé", `« ${event.title} » a été annulé.${refundNote}${altNote}`);
+  }));
   await audit(actorId, action, "Event", event.id, { affectedReservations: reservations.length, refunded: refundedIds.size, refundFailed: paid.length - refundedIds.size });
   return { cancelled: true, refundedCount: refundedIds.size, refundFailedCount: paid.length - refundedIds.size };
 };
@@ -1739,7 +1866,8 @@ app.post("/admin/events/:id/review-decision", { preHandler: roles(UserRole.ADMIN
     }
     const yearMonth = currentYearMonth();
     const usage = await prisma.restaurantMonthlyUsage.upsert({ where: { restaurantId_yearMonth: { restaurantId: event.controllerRestaurant.id, yearMonth } }, update: {}, create: { restaurantId: event.controllerRestaurant.id, yearMonth } });
-    if (usage.eventsPublished >= subscription.plan.monthlyEventQuota) {
+    // §7 : monthlyEventQuota null = formule Premium illimitée, aucun plafond à vérifier.
+    if (subscription.plan.monthlyEventQuota != null && usage.eventsPublished >= subscription.plan.monthlyEventQuota) {
       return reply.code(409).send({ error: `Quota mensuel atteint (${usage.eventsPublished}/${subscription.plan.monthlyEventQuota} événements publiés ce mois-ci).` });
     }
     await prisma.restaurantMonthlyUsage.update({ where: { restaurantId_yearMonth: { restaurantId: event.controllerRestaurant.id, yearMonth } }, data: { eventsPublished: { increment: 1 } } });
@@ -2052,21 +2180,58 @@ const checkMinParticipantsThresholds = async () => {
 };
 setInterval(() => { checkMinParticipantsThresholds().catch(err => app.log.error(err)); }, 60_000);
 
-// Rappel d'événement (§13) : envoyé une seule fois par réservation confirmée, dans la fenêtre qui
-// précède le début de l'événement (AppSetting EVENT_REMINDER_HOURS_BEFORE, §23 — délai provisoire
-// non fixé par le cahier des charges). reminderSentAt rend le balayage idempotent même si le
+// Rappel d'événement en deux temps (§13, complété §3 du cahier des charges 2026-09) : un rappel J-1
+// (AppSetting EVENT_REMINDER_HOURS_BEFORE) puis un second rappel plus proche H-2 (AppSetting
+// EVENT_REMINDER_H2_HOURS_BEFORE), chacun envoyé une seule fois par réservation confirmée grâce à son
+// propre marqueur (reminderSentAt / reminderH2SentAt), qui rend le balayage idempotent même si le
 // serveur redémarre entre deux passages.
 const sendEventReminders = async () => {
-  const hoursBefore = getSetting("EVENT_REMINDER_HOURS_BEFORE");
-  const due = await prisma.reservation.findMany({
-    where: { confirmedAt: { not: null }, cancelledAt: null, reminderSentAt: null, event: { startsAt: { gt: new Date(), lte: new Date(Date.now() + hoursBefore * 60 * 60_000) } } },
-    include: { event: true }
+  const sendBatch = async (hoursBefore: number, field: "reminderSentAt" | "reminderH2SentAt", label: string) => {
+    const due = await prisma.reservation.findMany({
+      where: { confirmedAt: { not: null }, cancelledAt: null, [field]: null, event: { startsAt: { gt: new Date(), lte: new Date(Date.now() + hoursBefore * 60 * 60_000) } } },
+      include: { event: true }
+    });
+    for (const reservation of due) {
+      await prisma.reservation.update({ where: { id: reservation.id }, data: { [field]: new Date() } });
+      await notify(reservation.userId, "Votre événement approche", `« ${reservation.event.title} » a lieu ${label} (${reservation.event.startsAt.toLocaleString("fr-FR")}). À très vite !`);
+    }
+  };
+  await sendBatch(getSetting("EVENT_REMINDER_HOURS_BEFORE"), "reminderSentAt", "demain");
+  await sendBatch(getSetting("EVENT_REMINDER_H2_HOURS_BEFORE"), "reminderH2SentAt", "dans un peu plus de 2h");
+};
+// §3 (cahier des charges 2026-09) : rappel d'abonnement restaurateur bientôt expiré (fin de période ou
+// fin d'essai), envoyé une seule fois par période via expiryReminderSentAt.
+const checkSubscriptionExpirySoon = async () => {
+  const daysBefore = getSetting("SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE");
+  const candidates = await prisma.restaurantSubscription.findMany({
+    where: {
+      status: { in: ["ACTIVE", "TRIALING"] }, cancelledAt: null,
+      currentPeriodEnd: { gt: new Date(), lte: new Date(Date.now() + daysBefore * 24 * 60 * 60_000) }
+    },
+    include: { restaurant: true, plan: true }
   });
-  for (const reservation of due) {
-    await prisma.reservation.update({ where: { id: reservation.id }, data: { reminderSentAt: new Date() } });
-    await notify(reservation.userId, "Votre événement approche", `« ${reservation.event.title} » a lieu le ${reservation.event.startsAt.toLocaleString("fr-FR")}. À très vite !`);
+  const due = candidates.filter(sub => !sub.expiryReminderSentAt || sub.expiryReminderSentAt < sub.currentPeriodStart);
+  for (const sub of due) {
+    await prisma.restaurantSubscription.update({ where: { id: sub.id }, data: { expiryReminderSentAt: new Date() } });
+    const label = sub.status === "TRIALING" ? "votre essai gratuit se termine" : "votre abonnement se renouvelle";
+    await notify(sub.restaurant.ownerId, "Abonnement bientôt renouvelé", `Formule ${sub.plan.name} : ${label} le ${sub.currentPeriodEnd.toLocaleDateString("fr-FR")}.`);
   }
 };
+setInterval(() => { checkSubscriptionExpirySoon().catch(err => app.log.error(err)); }, 60_000);
+// §7 (cahier des charges 2026-09) : « on enclenche le paiement au bout de 7 jours s'il n'annule pas ».
+// Ne déclenche aucun prélèvement réel (Stripe Billing n'est pas câblé) : fait uniquement passer le
+// statut de TRIALING à ACTIVE à l'échéance de l'essai, comme le ferait la confirmation d'un premier
+// prélèvement réussi. Une résiliation avant l'échéance (status CANCELLED) sort la ligne de cette
+// requête, donc plus aucun passage à ACTIVE n'a lieu.
+const checkTrialSubscriptionsDue = async () => {
+  const due = await prisma.restaurantSubscription.findMany({ where: { status: "TRIALING", currentPeriodEnd: { lt: new Date() } }, include: { restaurant: true, plan: true } });
+  for (const sub of due) {
+    await prisma.restaurantSubscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", currentPeriodStart: new Date(), currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60_000) } });
+    await notify(sub.restaurant.ownerId, "Abonnement activé", `Votre essai gratuit est terminé : l’abonnement « ${sub.plan.name} » (${(sub.plan.monthlyPriceCents / 100).toFixed(0)} €/mois) est maintenant actif.`);
+    await audit(undefined, "TRIAL_SUBSCRIPTION_ACTIVATED", "RestaurantSubscription", sub.id);
+  }
+};
+setInterval(() => { checkTrialSubscriptionsDue().catch(err => app.log.error(err)); }, 60_000);
 setInterval(() => { sendEventReminders().catch(err => app.log.error(err)); }, 60_000);
 
 // Programmation d'articles (§18) : ne publie jamais depuis DRAFT ou IN_REVIEW, uniquement un

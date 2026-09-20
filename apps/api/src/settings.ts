@@ -79,7 +79,22 @@ export const SETTINGS_SCHEMA = {
   EVENT_REMINDER_HOURS_BEFORE: {
     schema: z.number().int().positive(),
     default: 24,
-    description: "Délai avant le début d'un événement auquel le rappel (§13) est envoyé à chaque réservation confirmée, une seule fois."
+    description: "Délai avant le début d'un événement auquel le premier rappel (J-1, §13) est envoyé à chaque réservation confirmée, une seule fois."
+  },
+  EVENT_REMINDER_H2_HOURS_BEFORE: {
+    schema: z.number().int().positive(),
+    default: 2,
+    description: "Délai avant le début d'un événement auquel le second rappel (H-2, §3 du cahier des charges 2026-09) est envoyé, en plus du rappel J-1."
+  },
+  SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE: {
+    schema: z.number().int().positive(),
+    default: 3,
+    description: "Délai avant l'échéance d'un abonnement restaurateur (fin de période ou fin d'essai) auquel un rappel est envoyé, une seule fois par période."
+  },
+  RESTAURANT_TRIAL_DAYS: {
+    schema: z.number().int().positive(),
+    default: 7,
+    description: "Durée de l'essai gratuit ouvert automatiquement à l'approbation d'un restaurateur (§7 du cahier des charges 2026-09) : carte bancaire requise à l'inscription, abonnement activé à l'issue de l'essai sauf annulation avant l'échéance."
   }
 } as const;
 
