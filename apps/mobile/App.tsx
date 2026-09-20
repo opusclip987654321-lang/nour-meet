@@ -27,9 +27,13 @@ function Notice({text,error=false}:{text:string,error?:boolean}){return <View st
 // deux catégories, sans dépendre d'une librairie d'icônes SVG absente du projet mobile.
 function CategoryChip({category}:{category:string}){const color=categoryColor(category);return <View style={s.categoryChip}><View style={[s.categoryDot,{backgroundColor:color}]}/><Text style={[s.categoryChipText,{color}]}>{category}</Text></View>}
 
-function Login({onLogin}:{onLogin:()=>void}){
-  const [phone,setPhone]=useState(""),[code,setCode]=useState(""),[step,setStep]=useState(1),[busy,setBusy]=useState(false),[error,setError]=useState(""),[devCode,setDevCode]=useState<string|null>(null);
-  const submit=async()=>{setBusy(true);setError("");try{if(step===1){const r=await api<{delivery:"mock"|"sms";devCode?:string}>("/auth/request-otp",{method:"POST",body:JSON.stringify({phone})});setDevCode(r.devCode??null);setStep(2)}else{const r=await api<{token:string}>("/auth/verify-otp",{method:"POST",body:JSON.stringify({phone,code})});await setToken(r.token);onLogin()}}catch(e){setError((e as Error).message)}finally{setBusy(false)}};
+function Login({onLogin}:{onLogin:(opts?:{restaurateur?:boolean})=>void}){
+  const [phone,setPhone]=useState(""),[code,setCode]=useState(""),[step,setStep]=useState<1|2|3>(1),[busy,setBusy]=useState(false),[error,setError]=useState(""),[devCode,setDevCode]=useState<string|null>(null);
+  // isNewUser (renvoyé une seule fois, à la création du compte) déclenche l'écran de choix
+  // participant/restaurateur, jamais revu ensuite — même logique que sur le web (voir Login() dans
+  // apps/web/src/App.tsx).
+  const submit=async()=>{setBusy(true);setError("");try{if(step===1){const r=await api<{delivery:"mock"|"sms";devCode?:string}>("/auth/request-otp",{method:"POST",body:JSON.stringify({phone})});setDevCode(r.devCode??null);setStep(2)}else{const r=await api<{token:string;isNewUser?:boolean}>("/auth/verify-otp",{method:"POST",body:JSON.stringify({phone,code})});await setToken(r.token);if(r.isNewUser)setStep(3);else onLogin()}}catch(e){setError((e as Error).message)}finally{setBusy(false)}};
+  if(step===3)return <SafeAreaView style={s.safe}><StatusBar style="light"/><View style={s.login}><Logo/><View style={s.loginHero}><Text style={s.eyebrow}>BIENVENUE</Text><Text style={s.loginTitle}>Que souhaitez-vous{`\n`}faire sur Nūr Meet ?</Text><Text style={s.paragraph}>Ce choix détermine votre espace ; il ne peut être fait qu’une seule fois, à la création du compte.</Text></View><GoldButton title="Participer aux événements" onPress={()=>onLogin()}/><GoldButton title="Je suis restaurateur" secondary onPress={()=>onLogin({restaurateur:true})}/></View></SafeAreaView>;
   return <SafeAreaView style={s.safe}><StatusBar style="light"/><KeyboardAvoidingView style={s.login} behavior={Platform.OS==="ios"?"padding":undefined}><Logo/><View style={s.loginHero}><Text style={s.eyebrow}>BIENVENUE</Text><Text style={s.loginTitle}>{step===1?"Votre numéro\nouvre la porte.":"Entrez le code\nreçu par SMS."}</Text><Text style={s.paragraph}>{step===1?"Connexion rapide et sécurisée, sans mot de passe.":`Code envoyé au ${phone}`}</Text></View>{error?<Notice text={error} error/>:null}<Text style={s.label}>{step===1?"NUMÉRO DE TÉLÉPHONE":"CODE À SIX CHIFFRES"}</Text><TextInput style={[s.input,step===2&&s.otp]} value={step===1?phone:code} onChangeText={step===1?setPhone:v=>setCode(v.replace(/\D/g,"").slice(0,6))} keyboardType="phone-pad" textContentType={step===2?"oneTimeCode":"telephoneNumber"} placeholderTextColor="#666" placeholder={step===1?"+33612345678":"••••••"}/><GoldButton title={busy?"Patientez…":step===1?"Recevoir mon code":"Vérifier"} onPress={submit} disabled={busy}/>{devCode?<View style={s.demo}><Text style={s.demoTitle}>MODE LOCAL — AUCUN SMS FACTURÉ</Text><Text style={s.meta}>Code de développement : {devCode}</Text></View>:null}</KeyboardAvoidingView></SafeAreaView>
 }
 
@@ -54,7 +58,7 @@ function Concept({setTab}:{setTab:(t:Tab)=>void}){
   </ScrollView>;
 }
 
-function Events(){
+function Events({user}:{user:any}){
   const [events,setEvents]=useState<any[]>([]),[selected,setSelected]=useState<any>(null),[application,setApplication]=useState<any>(null),[message,setMessage]=useState(""),[showForm,setShowForm]=useState(false),[answers,setAnswers]=useState<Record<string,string>>({}),[submitting,setSubmitting]=useState(false);
   useEffect(()=>{api<any[]>("/events").then(setEvents)},[]);
   const loadApplication=(eventId:string)=>api<any>(`/events/${eventId}/my-application`).then(setApplication).catch(()=>setApplication(null));
@@ -103,6 +107,7 @@ function Events(){
       {canCancel?<GoldButton title={submitting?"…":"Annuler mon inscription"} secondary onPress={cancel} disabled={submitting}/>
       :<Text style={s.meta}>Statut : {application.status}</Text>}
     </View>
+    :user.hasRestaurant?<Notice text="Votre compte restaurateur vous permet de découvrir les événements proposés, mais ne permet pas d’y participer."/>
     :showForm?<View>{questions.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={answers[q.key]??""} onChangeText={v=>setAnswers({...answers,[q.key]:v})}/></View>)}<GoldButton title={submitting?"Envoi…":"Envoyer ma candidature"} onPress={apply} disabled={submitting}/></View>
     :full?<View style={s.bookingBar}><Text style={s.meta}>Cet événement est complet</Text><GoldButton title={submitting?"…":"Rejoindre la liste d’attente"} onPress={joinWaitlist} disabled={submitting}/></View>
     :<View style={s.bookingBar}><View><Text style={s.meta}>À partir de</Text><Text style={s.bookingPrice}>{money(selected.priceCents)}</Text></View><GoldButton title={requiresScreening?"Candidater":"S’inscrire"} onPress={()=>setShowForm(true)}/></View>}
@@ -330,12 +335,128 @@ function Espace({user,onSaved,onLogout}:{user:any,onSaved:()=>void,onLogout:()=>
   </View>;
 }
 
-function TabBar({tab,setTab}:{tab:Tab,setTab:(t:Tab)=>void}){const tabs:[Tab,string,string][]=[["home","⌂","Accueil"],["events","◇","Événements"],["scan","⌗","Scanner"],["messages","○","Messages"],["profile","●","Mon espace"]];return <View style={s.tabBar}>{tabs.map(([id,icon,label])=><Pressable key={id} onPress={()=>setTab(id)} style={[s.tabItem,id==="scan"&&s.scanTab]}><Text style={[s.tabIcon,tab===id&&{color:id==="scan"?"#111":C.gold}]}>{icon}</Text><Text style={[s.tabLabel,tab===id&&{color:C.gold}]}>{label}</Text></Pressable>)}</View>}
+// Espace dédié aux comptes restaurateurs (candidature en cours ou déjà approuvée), voir
+// RestaurantSpace/RestaurantApplication dans apps/web/src/App.tsx pour l'équivalent web : plus un
+// onglet du dashboard participant, car un restaurateur n'a plus le droit d'y participer aux
+// événements — seulement de les consulter. Remplace l'onglet "Mon espace" par "Mon établissement".
+const emptyRestaurantForm={name:"",managerName:"",siret:"",description:"",district:"",address:"",phone:"",desiredCapacity:"",desiredSchedule:"",averagePricePerPersonCents:"",defaultMinParticipants:"",priceIncludesDrink:false,priceIncludesStarter:false,priceIncludesMain:false,priceIncludesDessert:false,priceNotes:"",proposesCategoryPricing:false,allowsPrivatization:false,specialConditions:""};
+function ToggleChip({label,active,onPress}:{label:string,active:boolean,onPress:()=>void}){return <Pressable onPress={onPress} style={[s.choiceChip,active&&s.choiceChipActive]}><Text style={[s.choiceChipText,active&&{color:"#111"}]}>{label}</Text></Pressable>}
+
+function RestaurantSpace({onLogout}:{onLogout:()=>void}){
+  const [restaurant,setRestaurant]=useState<any>(null);
+  const [loading,setLoading]=useState(true);
+  const [form,setForm]=useState(emptyRestaurantForm);
+  const [message,setMessage]=useState(""),[submitting,setSubmitting]=useState(false),[photoBusy,setPhotoBusy]=useState(false);
+
+  const load=()=>api<any>("/restaurants/me").then(r=>{setRestaurant(r);setForm({...emptyRestaurantForm,name:r.name??"",managerName:r.managerName??"",siret:r.siret??"",description:r.description??"",district:r.district??"",address:r.address??"",phone:r.phone??"",desiredCapacity:r.desiredCapacity?String(r.desiredCapacity):"",desiredSchedule:r.desiredSchedule??"",averagePricePerPersonCents:r.averagePricePerPersonCents!=null?String(r.averagePricePerPersonCents/100):"",defaultMinParticipants:r.defaultMinParticipants?String(r.defaultMinParticipants):"",priceIncludesDrink:!!r.priceIncludesDrink,priceIncludesStarter:!!r.priceIncludesStarter,priceIncludesMain:!!r.priceIncludesMain,priceIncludesDessert:!!r.priceIncludesDessert,priceNotes:r.priceNotes??"",proposesCategoryPricing:!!r.proposesCategoryPricing,allowsPrivatization:!!r.allowsPrivatization,specialConditions:r.specialConditions??""})}).catch(()=>setRestaurant(null)).finally(()=>setLoading(false));
+  useEffect(()=>{load()},[]);
+
+  const payload=()=>({...form,desiredCapacity:form.desiredCapacity?Number(form.desiredCapacity):undefined,defaultMinParticipants:form.defaultMinParticipants?Number(form.defaultMinParticipants):undefined,averagePricePerPersonCents:form.averagePricePerPersonCents?Math.round(Number(form.averagePricePerPersonCents)*100):undefined});
+
+  const submit=async()=>{
+    if(!form.name.trim()||!form.managerName.trim()||!/^\d{14}$/.test(form.siret)){setMessage("Renseignez le nom, le responsable et un SIRET à 14 chiffres.");return}
+    setSubmitting(true);setMessage("");
+    try{await api("/restaurants/apply",{method:"POST",body:JSON.stringify(payload())});setMessage("Votre demande a été envoyée.");await load()}
+    catch(e){setMessage((e as Error).message)}
+    finally{setSubmitting(false)}
+  };
+  const saveProfile=async()=>{
+    setSubmitting(true);setMessage("");
+    try{await api("/restaurants/me",{method:"PATCH",body:JSON.stringify(payload())});setMessage("Fiche mise à jour.");await load()}
+    catch(e){setMessage((e as Error).message)}
+    finally{setSubmitting(false)}
+  };
+  const uploadPhoto=async()=>{
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert("Accès refusé","Autorisez l’accès aux photos pour ajouter une photo.");return}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:["images"],quality:0.8});
+    if(result.canceled||!result.assets[0])return;
+    const asset=result.assets[0];
+    setPhotoBusy(true);setMessage("");
+    try{const body=new FormData();body.append("file",{uri:asset.uri,name:asset.fileName??"photo.jpg",type:asset.mimeType??"image/jpeg"} as any);await api("/restaurants/me/photos",{method:"POST",body});await load()}
+    catch(e){setMessage((e as Error).message)}
+    finally{setPhotoBusy(false)}
+  };
+  const removePhoto=async(photoId:string)=>{
+    setPhotoBusy(true);setMessage("");
+    try{await api(`/restaurants/me/photos/${photoId}`,{method:"DELETE"});await load()}
+    catch(e){setMessage((e as Error).message)}
+    finally{setPhotoBusy(false)}
+  };
+
+  const priceFields=<>
+    <Text style={s.label}>PLACES POUR LA SOIRÉE</Text><TextInput style={s.input} keyboardType="number-pad" value={form.desiredCapacity} onChangeText={v=>setForm({...form,desiredCapacity:v.replace(/\D/g,"")})}/>
+    <Text style={s.label}>JOURS ET HORAIRES SOUHAITÉS</Text><TextInput style={s.input} value={form.desiredSchedule} onChangeText={v=>setForm({...form,desiredSchedule:v})} placeholder="Vendredi et samedi soir" placeholderTextColor="#666"/>
+    <Text style={s.label}>PRIX MOYEN PAR PERSONNE (€)</Text><TextInput style={s.input} keyboardType="decimal-pad" value={form.averagePricePerPersonCents} onChangeText={v=>setForm({...form,averagePricePerPersonCents:v.replace(/[^0-9.]/g,"")})}/>
+    <Text style={s.label}>MINIMUM DE PARTICIPANTS HABITUEL</Text><TextInput style={s.input} keyboardType="number-pad" value={form.defaultMinParticipants} onChangeText={v=>setForm({...form,defaultMinParticipants:v.replace(/\D/g,"")})}/>
+    <Text style={s.label}>LE PRIX COMPREND HABITUELLEMENT</Text>
+    <View style={{flexDirection:"row",flexWrap:"wrap",gap:8,marginBottom:8}}>
+      <ToggleChip label="Boisson" active={form.priceIncludesDrink} onPress={()=>setForm({...form,priceIncludesDrink:!form.priceIncludesDrink})}/>
+      <ToggleChip label="Entrée" active={form.priceIncludesStarter} onPress={()=>setForm({...form,priceIncludesStarter:!form.priceIncludesStarter})}/>
+      <ToggleChip label="Plat" active={form.priceIncludesMain} onPress={()=>setForm({...form,priceIncludesMain:!form.priceIncludesMain})}/>
+      <ToggleChip label="Dessert" active={form.priceIncludesDessert} onPress={()=>setForm({...form,priceIncludesDessert:!form.priceIncludesDessert})}/>
+    </View>
+    <Text style={s.label}>PRÉCISIONS SUR LE CONTENU DU PRIX</Text><TextInput style={[s.input,{height:70}]} multiline value={form.priceNotes} onChangeText={v=>setForm({...form,priceNotes:v})}/>
+    <View style={{gap:8,marginBottom:8}}>
+      <ToggleChip label="Tarifs par catégorie (homme/femme)" active={form.proposesCategoryPricing} onPress={()=>setForm({...form,proposesCategoryPricing:!form.proposesCategoryPricing})}/>
+      <ToggleChip label="Privatisation possible" active={form.allowsPrivatization} onPress={()=>setForm({...form,allowsPrivatization:!form.allowsPrivatization})}/>
+    </View>
+    <Text style={s.label}>CONDITIONS PARTICULIÈRES</Text><TextInput style={[s.input,{height:70}]} multiline value={form.specialConditions} onChangeText={v=>setForm({...form,specialConditions:v})}/>
+  </>;
+
+  if(loading)return <View style={[s.content,{flex:1,alignItems:"center"}]}><ActivityIndicator color={C.gold}/></View>;
+
+  if(restaurant?.status==="PENDING")return <ScrollView contentContainerStyle={s.content}><ScreenTitle title="Mon établissement"/><Notice text={`Votre demande pour « ${restaurant.name} » est en cours d’examen.`}/><GoldButton title="Se déconnecter" secondary onPress={onLogout}/></ScrollView>;
+
+  if(restaurant?.status==="APPROVED")return <ScrollView contentContainerStyle={s.content}>
+    <ScreenTitle title="Mon établissement"/>
+    <Notice text={`Votre établissement « ${restaurant.name} » est approuvé.`}/>
+    {message?<Notice text={message} error={!message.includes("mise à jour")}/>:null}
+    <Text style={s.sectionTitle}>Fiche établissement</Text>
+    {priceFields}
+    <GoldButton title={submitting?"Enregistrement…":"Enregistrer"} onPress={saveProfile} disabled={submitting}/>
+    <Text style={[s.sectionTitle,{marginTop:24}]}>Galerie ({(restaurant.photos??[]).length}/8)</Text>
+    <View style={{flexDirection:"row",flexWrap:"wrap",gap:10,marginBottom:14}}>
+      {(restaurant.photos??[]).map((p:any)=><View key={p.id} style={{width:100}}><Image source={{uri:`${API_URL}${p.url}`}} style={{width:100,height:100,borderRadius:8}}/><Pressable onPress={()=>removePhoto(p.id)} disabled={photoBusy}><Text style={[s.link,{marginTop:4,textAlign:"center"}]}>Retirer</Text></Pressable></View>)}
+    </View>
+    <GoldButton title={photoBusy?"…":"Ajouter une photo"} secondary onPress={uploadPhoto} disabled={photoBusy||(restaurant.photos??[]).length>=8}/>
+    <Text style={[s.meta,{marginTop:20}]}>La gestion des événements et du tableau de bord se fait pour l’instant depuis le site nour-meet.</Text>
+    <GoldButton title="Se déconnecter" secondary onPress={onLogout}/>
+  </ScrollView>;
+
+  return <ScrollView contentContainerStyle={s.content}>
+    <ScreenTitle eyebrow="OUVRIR UN COMPTE PROFESSIONNEL" title="Devenir restaurateur"/>
+    {restaurant?.status==="REJECTED"&&<Notice text={`Votre précédente demande n’a pas été retenue${restaurant.rejectionReason?` : ${restaurant.rejectionReason}`:"."} Vous pouvez soumettre une nouvelle demande.`} error/>}
+    {message?<Notice text={message} error={!message.includes("envoyée")}/>:null}
+    <Text style={s.label}>NOM DE L’ÉTABLISSEMENT</Text><TextInput style={s.input} value={form.name} onChangeText={v=>setForm({...form,name:v})}/>
+    <Text style={s.label}>NOM DU RESPONSABLE</Text><TextInput style={s.input} value={form.managerName} onChangeText={v=>setForm({...form,managerName:v})}/>
+    <Text style={s.label}>SIRET (14 CHIFFRES)</Text><TextInput style={s.input} keyboardType="number-pad" value={form.siret} onChangeText={v=>setForm({...form,siret:v.replace(/\D/g,"").slice(0,14)})}/>
+    <Text style={s.label}>TÉLÉPHONE PROFESSIONNEL</Text><TextInput style={s.input} keyboardType="phone-pad" value={form.phone} onChangeText={v=>setForm({...form,phone:v})}/>
+    <Text style={s.label}>QUARTIER / VILLE</Text><TextInput style={s.input} value={form.district} onChangeText={v=>setForm({...form,district:v})}/>
+    <Text style={s.label}>ADRESSE</Text><TextInput style={s.input} value={form.address} onChangeText={v=>setForm({...form,address:v})}/>
+    <Text style={s.label}>DESCRIPTION</Text><TextInput style={[s.input,{height:80}]} multiline value={form.description} onChangeText={v=>setForm({...form,description:v})}/>
+    {priceFields}
+    <Text style={[s.meta,{marginVertical:12}]}>Le SIRET est déclaratif : Nour ne réalise pas de vérification officielle auprès d’un registre. La galerie de photos se complète après approbation.</Text>
+    <GoldButton title={submitting?"Envoi…":"Envoyer ma demande"} onPress={submit} disabled={submitting}/>
+    <GoldButton title="Se déconnecter" secondary onPress={onLogout}/>
+  </ScrollView>;
+}
+
+function TabBar({tab,setTab,profileLabel}:{tab:Tab,setTab:(t:Tab)=>void,profileLabel:string}){const tabs:[Tab,string,string][]=[["home","⌂","Accueil"],["events","◇","Événements"],["scan","⌗","Scanner"],["messages","○","Messages"],["profile","●",profileLabel]];return <View style={s.tabBar}>{tabs.map(([id,icon,label])=><Pressable key={id} onPress={()=>setTab(id)} style={[s.tabItem,id==="scan"&&s.scanTab]}><Text style={[s.tabIcon,tab===id&&{color:id==="scan"?"#111":C.gold}]}>{icon}</Text><Text style={[s.tabLabel,tab===id&&{color:C.gold}]}>{label}</Text></Pressable>)}</View>}
 
 export default function App(){
-  const [loading,setLoading]=useState(true),[user,setUser]=useState<any>(null),[tab,setTab]=useState<Tab>("home");const load=async()=>{setLoading(true);try{if(await getToken())setUser(await api("/me"));else setUser(null)}catch{await setToken(null);setUser(null)}finally{setLoading(false)}};useEffect(()=>{load()},[]);
-  if(loading)return <SafeAreaView style={[s.safe,s.center]}><ActivityIndicator color={C.gold}/></SafeAreaView>;if(!user)return <Login onLogin={load}/>;
-  return <SafeAreaView style={s.safe}><StatusBar style="light"/><View style={s.app}>{tab==="home"&&<Home user={user} setTab={setTab}/>} {tab==="events"&&<Events/>}{tab==="concept"&&<Concept setTab={setTab}/>}{tab==="scan"&&<Scanner/>}{tab==="messages"&&<Messages user={user}/>} {tab==="profile"&&<Espace user={user} onSaved={load} onLogout={async()=>{await setToken(null);setUser(null)}}/>}</View><TabBar tab={tab} setTab={setTab}/></SafeAreaView>
+  const [loading,setLoading]=useState(true),[user,setUser]=useState<any>(null),[tab,setTab]=useState<Tab>("home");
+  // Vrai dès que le choix "restaurateur" a été fait au premier login (voir Login) ET tant que la
+  // fiche Restaurant n'existe pas encore côté serveur : sans ça, un tout nouveau candidat n'aurait
+  // aucun moyen d'atterrir sur le formulaire, puisque user.hasRestaurant reste faux jusqu'à l'envoi
+  // de sa demande (même logique que le navigate("/restaurant") du web, voir Login() sur le web).
+  const [forceRestaurantSpace,setForceRestaurantSpace]=useState(false);
+  const load=async()=>{setLoading(true);try{if(await getToken())setUser(await api("/me"));else setUser(null)}catch{await setToken(null);setUser(null)}finally{setLoading(false)}};useEffect(()=>{load()},[]);
+  const logout=async()=>{await setToken(null);setUser(null);setForceRestaurantSpace(false)};
+  if(loading)return <SafeAreaView style={[s.safe,s.center]}><ActivityIndicator color={C.gold}/></SafeAreaView>;
+  if(!user)return <Login onLogin={opts=>{if(opts?.restaurateur){setForceRestaurantSpace(true);setTab("profile")}load()}}/>;
+  const showRestaurantSpace=user.hasRestaurant||forceRestaurantSpace;
+  return <SafeAreaView style={s.safe}><StatusBar style="light"/><View style={s.app}>{tab==="home"&&<Home user={user} setTab={setTab}/>} {tab==="events"&&<Events user={user}/>}{tab==="concept"&&<Concept setTab={setTab}/>}{tab==="scan"&&<Scanner/>}{tab==="messages"&&<Messages user={user}/>} {tab==="profile"&&(showRestaurantSpace?<RestaurantSpace onLogout={logout}/>:<Espace user={user} onSaved={load} onLogout={logout}/>)}</View><TabBar tab={tab} setTab={setTab} profileLabel={showRestaurantSpace?"Mon établissement":"Mon espace"}/></SafeAreaView>
 }
 
 const s=StyleSheet.create({
