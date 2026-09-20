@@ -25,7 +25,8 @@
       ],
       "expo-web-browser",
       "expo-sharing",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-video"
     ]
   }
 }

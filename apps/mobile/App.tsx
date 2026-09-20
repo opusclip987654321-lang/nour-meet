@@ -4,8 +4,9 @@ import { File, Paths } from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import * as Sharing from "expo-sharing";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { VideoView, useVideoPlayer } from "expo-video";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Image, ImageBackground, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { API_URL, WEB_URL, api, getToken, setToken } from "./src/api";
 import { SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening, EVENT_CATEGORIES } from "@nour/shared";
@@ -22,6 +23,7 @@ type Tab="home"|"events"|"scan"|"messages"|"profile"|"concept"|"blog";
 const BLOG_CATEGORIES=["Couple","Rencontre","Solitude","Mariage","Communication","Vie relationnelle"];
 const money=(n:number)=>`${(n/100).toFixed(2).replace(".",",")} €`;
 const when=(v:string)=>new Intl.DateTimeFormat("fr-FR",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}).format(new Date(v));
+const imgUrl=(src:string)=>src.startsWith("http")?src:`${API_URL}${src}`;
 // Stripe n'a pas de module natif installable dans Expo Go (seuls les modules Expo officiels le
 // sont) : plutôt que de dupliquer PaymentModal en React Native derrière un client de développement
 // natif, le paiement carte ouvre la page web déjà testée (voir PayStandalone dans
@@ -50,7 +52,10 @@ function Login({onLogin}:{onLogin:(opts?:{restaurateur?:boolean})=>void}){
   return <SafeAreaView style={s.safe}><StatusBar style="light"/><KeyboardAvoidingView style={s.login} behavior={Platform.OS==="ios"?"padding":undefined}><Logo/><View style={s.loginHero}><Text style={s.eyebrow}>BIENVENUE</Text><Text style={s.loginTitle}>{step===1?"Votre numéro\nouvre la porte.":"Entrez le code\nreçu par SMS."}</Text><Text style={s.paragraph}>{step===1?"Connexion rapide et sécurisée, sans mot de passe.":`Code envoyé au ${phone}`}</Text></View>{error?<Notice text={error} error/>:null}<Text style={s.label}>{step===1?"NUMÉRO DE TÉLÉPHONE":"CODE À SIX CHIFFRES"}</Text><TextInput style={[s.input,step===2&&s.otp]} value={step===1?phone:code} onChangeText={step===1?setPhone:v=>setCode(v.replace(/\D/g,"").slice(0,6))} keyboardType="phone-pad" textContentType={step===2?"oneTimeCode":"telephoneNumber"} placeholderTextColor="#666" placeholder={step===1?"+33612345678":"••••••"}/><GoldButton title={busy?"Patientez…":step===1?"Recevoir mon code":"Vérifier"} onPress={submit} disabled={busy}/>{devCode?<View style={s.demo}><Text style={s.demoTitle}>MODE LOCAL — AUCUN SMS FACTURÉ</Text><Text style={s.meta}>Code de développement : {devCode}</Text></View>:null}</KeyboardAvoidingView></SafeAreaView>
 }
 
-function EventCard({event,onPress}:{event:any,onPress:()=>void}){return <Pressable onPress={onPress} style={s.eventCard}><View style={s.eventArt}><Text style={s.eventDay}>{new Date(event.startsAt).getDate()}</Text><Text style={s.eventMonth}>{new Date(event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</Text></View><View style={s.eventCopy}><Text style={[s.eyebrow,{color:categoryColor(event.category)}]}>{event.category.toUpperCase()} · {when(event.startsAt)}</Text><Text style={s.eventTitle}>{event.title}</Text><Text style={s.meta}>{event.district} · {event.capacity-event.confirmedCount} places</Text><Text style={s.price}>{money(event.priceCents)}</Text></View></Pressable>}
+function EventCard({event,onPress}:{event:any,onPress:()=>void}){
+  const priceLabel=event.priceTiers?.length>0?`À partir de ${money(Math.min(...event.priceTiers.map((t:any)=>t.amountCents)))}`:money(event.priceCents);
+  return <Pressable onPress={onPress} style={s.eventCard}><View style={s.eventArt}><Text style={s.eventDay}>{new Date(event.startsAt).getDate()}</Text><Text style={s.eventMonth}>{new Date(event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</Text></View><View style={s.eventCopy}><Text style={[s.eyebrow,{color:categoryColor(event.category)}]}>{event.category.toUpperCase()} · {when(event.startsAt)}</Text><Text style={s.eventTitle}>{event.title}</Text><Text style={s.meta}>{event.district} · {event.capacity-event.confirmedCount} places</Text><Text style={s.price}>{priceLabel}</Text></View></Pressable>;
+}
 
 function Home({user,setTab}:{user:any,setTab:(t:Tab)=>void}){
   const [events,setEvents]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]);useEffect(()=>{api<any[]>("/events").then(setEvents);api<any[]>("/me/tickets").then(setTickets)},[]);
@@ -60,7 +65,13 @@ function Home({user,setTab}:{user:any,setTab:(t:Tab)=>void}){
 // §16 : résumé écrit toujours disponible sans lancer de vidéo (la vidéo elle-même n'est pas
 // intégrée sur mobile — pas de lecteur natif ajouté pour l'instant, contrairement au web).
 function Concept({setTab}:{setTab:(t:Tab)=>void}){
+  const [video,setVideo]=useState<{url:string;thumbnail:string;subtitles:string}|null>(null);
+  useEffect(()=>{api<any>("/concept-video").then(setVideo).catch(()=>{})},[]);
+  const player=useVideoPlayer(null,p=>{p.loop=false});
+  useEffect(()=>{if(video?.url)player.replace(video.url)},[video?.url]);
   return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>setTab("home")}><Text style={s.back}>‹ Retour</Text></Pressable><ScreenTitle eyebrow="LE CONCEPT" title="Comment fonctionne Nūr Meet."/>
+    {video?.url?<VideoView player={player} style={{width:"100%",height:220,borderRadius:14,marginTop:10}} nativeControls/>
+    :<View style={[s.scanPlaceholder,{height:220,marginTop:10,marginBottom:0}]}><Text style={s.scanIcon}>▶</Text><Text style={[s.meta,{textAlign:"center",paddingHorizontal:20}]}>La vidéo de présentation (60 à 90 secondes) sera bientôt disponible ici. En attendant, voici comment tout fonctionne :</Text></View>}
     {[
       ["01","Speed dating, avec sélection","Un questionnaire privé, un entretien téléphonique et une décision de notre équipe avant toute inscription : un cadre sérieux, pensé pour de vraies rencontres."],
       ["02","Networking, en accès direct","Un questionnaire professionnel non bloquant, puis une inscription immédiate : idéal pour élargir son réseau sans étape supplémentaire."],
@@ -109,7 +120,8 @@ function Blog({setTab}:{setTab:(t:Tab)=>void}){
 function Events({user}:{user:any}){
   const [events,setEvents]=useState<any[]>([]),[selected,setSelected]=useState<any>(null),[application,setApplication]=useState<any>(null),[message,setMessage]=useState(""),[showForm,setShowForm]=useState(false),[answers,setAnswers]=useState<Record<string,string>>({}),[submitting,setSubmitting]=useState(false);
   const [waitlistEntry,setWaitlistEntry]=useState<any>(null),[altOffer,setAltOffer]=useState<any>(null);
-  useEffect(()=>{api<any[]>("/events").then(setEvents)},[]);
+  const [q,setQ]=useState(""),[category,setCategory]=useState("");
+  useEffect(()=>{const params=new URLSearchParams({...(q?{q}:{}),...(category?{category}:{})});api<any[]>(`/events?${params}`).then(setEvents)},[q,category]);
   const loadApplication=(eventId:string)=>api<any>(`/events/${eventId}/my-application`).then(setApplication).catch(()=>setApplication(null));
   const loadWaitlist=(eventId:string)=>api<any>(`/events/${eventId}/waitlist/me`).then(setWaitlistEntry).catch(()=>setWaitlistEntry(null));
   const openEvent=(e:any)=>{
@@ -169,7 +181,23 @@ function Events({user}:{user:any}){
       await Share.share({message:`Je vais à « ${selected.title} », viens avec moi : ${link.url}`});
     }catch(e){setMessage((e as Error).message)}
   };
-  if(selected)return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>{setSelected(null);setApplication(null);setWaitlistEntry(null);setAltOffer(null)}}><Text style={s.back}>‹ Retour</Text></Pressable><View style={s.detailArt}><Text style={[s.eyebrow,{color:categoryColor(selected.category)}]}>{selected.category.toUpperCase()}</Text><Text style={s.detailTitle}>{selected.title}</Text></View><View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View><Text style={s.sectionTitle}>Rencontrez autrement</Text><Text style={s.paragraph}>{selected.description}</Text><GoldButton title="J’y vais, viens avec moi" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
+  if(selected){
+    const perkLabels=[selected.perks?.drink&&"Boisson incluse",selected.perks?.starter&&"Entrée incluse",selected.perks?.main&&"Plat inclus",selected.perks?.dessert&&"Dessert inclus"].filter(Boolean) as string[];
+    return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>{setSelected(null);setApplication(null);setWaitlistEntry(null);setAltOffer(null)}}><Text style={s.back}>‹ Retour</Text></Pressable>
+    {selected.imageUrl?<ImageBackground source={{uri:imgUrl(selected.imageUrl)}} style={s.detailArt} imageStyle={{borderRadius:13}}><View style={[StyleSheet.absoluteFill,{backgroundColor:"#0b0b0c99",borderRadius:13}]}/><Text style={[s.eyebrow,{color:categoryColor(selected.category)}]}>{selected.category.toUpperCase()}</Text><Text style={s.detailTitle}>{selected.title}</Text></ImageBackground>
+    :<View style={s.detailArt}><Text style={[s.eyebrow,{color:categoryColor(selected.category)}]}>{selected.category.toUpperCase()}</Text><Text style={s.detailTitle}>{selected.title}</Text></View>}
+    <Text style={s.paragraph}>{selected.description}</Text>
+    {selected.photos?.length>0&&<ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginVertical:14}} contentContainerStyle={{gap:10}}>{selected.photos.map((url:string,i:number)=><Image key={i} source={{uri:imgUrl(url)}} style={{width:220,height:140,borderRadius:10}}/>)}</ScrollView>}
+    <View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View>
+    <View style={s.detailFacts}><View><Text style={s.label}>CAPACITÉ</Text><Text style={s.bodyStrong}>{selected.capacity} participants</Text></View>{(selected.minAge||selected.maxAge)&&<View><Text style={s.label}>TRANCHE D’ÂGE</Text><Text style={s.bodyStrong}>{selected.minAge&&selected.maxAge?`${selected.minAge}-${selected.maxAge} ans`:selected.minAge?`${selected.minAge} ans et plus`:`Jusqu’à ${selected.maxAge} ans`}</Text></View>}</View>
+    {selected.organizer?.name&&<View style={s.detailFacts}><View><Text style={s.label}>ORGANISATEUR</Text><Text style={s.bodyStrong}>{selected.organizer.name}</Text></View></View>}
+    {selected.quotas?.length>0&&<View style={{marginTop:6,marginBottom:14}}><Text style={s.label}>PLACES PAR CATÉGORIE</Text>{selected.quotas.map((qt:any)=><View key={qt.category} style={{flexDirection:"row",justifyContent:"space-between",marginTop:6}}><Text style={s.meta}>{qt.category==="HOMME"?"Hommes":"Femmes"}</Text><Text style={s.bodyStrong}>{qt.heldCount>=qt.capacity?"Complet":`${qt.capacity-qt.heldCount} places`}</Text></View>)}</View>}
+    <Text style={s.sectionTitle}>Une expérience pensée pour de vraies rencontres</Text>
+    <Text style={s.paragraph}>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité.</Text>
+    {(perkLabels.length>0||selected.perks?.description)&&<View style={s.chips}>{perkLabels.map(l=><Text key={l} style={s.chip}>{l}</Text>)}{selected.perks?.description&&<Text style={s.chip}>{selected.perks.description}</Text>}</View>}
+    <Text style={[s.meta,{marginTop:14}]}>{requiresScreening?"Profils sélectionnés":"Inscription directe"} · QR code d’entrée unique · Code de contact privé · Équipe présente sur place</Text>
+    <View style={{marginTop:20}}><Text style={s.label}>POLITIQUE D’ANNULATION</Text><Text style={s.paragraph}>Annulation gratuite jusqu’à 24 heures avant l’événement : remboursement intégral automatique. Passé ce délai, aucun remboursement n’est possible de plein droit.</Text></View>
+    <GoldButton title="J’y vais, viens avec moi" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
     {altOffer&&<View style={s.altOffer}><Text style={s.eyebrow}>ÉVÉNEMENT ALTERNATIF PROPOSÉ</Text><Text style={s.sectionTitle}>{altOffer.alternativeEvent.title}</Text><Text style={s.meta}>{when(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</Text><Text style={s.bodyStrong}>{money(altOffer.alternativeEvent.priceCents)}</Text><View style={{flexDirection:"row",gap:10,marginTop:10}}><View style={{flex:1}}><GoldButton title={submitting?"…":"Accepter"} onPress={()=>respondAltOffer(true)} disabled={submitting}/></View><View style={{flex:1}}><GoldButton title={submitting?"…":"Refuser"} secondary onPress={()=>respondAltOffer(false)} disabled={submitting}/></View></View></View>}
     {application?<View>
       {application.status==="PAYMENT_PENDING"&&<View style={s.reservationCard}><Text style={s.meta}>{application.reservation?`Votre place est retenue quelques minutes (jusqu’au ${when(application.reservation.expiresAt)}) : finalisez votre paiement.`:"Vous pouvez régler votre billet dès maintenant."}</Text><GoldButton title={`Payer par carte · ${money(selected.priceCents)}`} onPress={async()=>{await payByCard(application.id,selected.id,selected.priceCents);await loadApplication(selected.id)}}/></View>}
@@ -183,9 +211,16 @@ function Events({user}:{user:any}){
     :requiresScreening&&!user.profile?.validatedAt?<Notice text="Votre profil doit d’abord être validé lors d’un entretien avec Nour Meet avant de vous inscrire à un speed dating. Rendez-vous dans « Mon espace » → « Entretien »." error/>
     :showForm?<View>{questions.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={answers[q.key]??""} onChangeText={v=>setAnswers({...answers,[q.key]:v})}/></View>)}<GoldButton title={submitting?"Envoi…":"Envoyer ma candidature"} onPress={apply} disabled={submitting}/></View>
     :full?<View style={s.bookingBar}><Text style={s.meta}>Cet événement est complet</Text><GoldButton title={submitting?"…":"Rejoindre la liste d’attente"} onPress={joinWaitlist} disabled={submitting}/></View>
-    :<View style={s.bookingBar}><View><Text style={s.meta}>À partir de</Text><Text style={s.bookingPrice}>{money(selected.priceCents)}</Text></View><GoldButton title={requiresScreening?"Candidater":"S’inscrire"} onPress={()=>setShowForm(true)}/></View>}
+    :<View style={s.bookingBar}><View>{selected.priceTiers?.length>0?selected.priceTiers.map((t:any)=><Text key={t.category} style={s.meta}>{t.category==="HOMME"?"Hommes":"Femmes"} · <Text style={s.bodyStrong}>{money(t.amountCents)}</Text></Text>):<><Text style={s.meta}>À partir de</Text><Text style={s.bookingPrice}>{money(selected.priceCents)}</Text></>}</View><GoldButton title={requiresScreening?"Candidater":"S’inscrire"} onPress={()=>setShowForm(true)}/></View>}
   </ScrollView>;
-  return <ScrollView contentContainerStyle={s.content}><ScreenTitle eyebrow="CALENDRIER" title="Événements"/><TextInput style={s.search} placeholder="Rechercher" placeholderTextColor="#777"/>{events.map(e=><EventCard key={e.id} event={e} onPress={()=>openEvent(e)}/>)}</ScrollView>
+  }
+  return <ScrollView contentContainerStyle={s.content}><ScreenTitle eyebrow="CALENDRIER" title="Événements"/><TextInput style={s.search} value={q} onChangeText={setQ} placeholder="Rechercher un événement" placeholderTextColor="#777"/>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:16}} contentContainerStyle={{gap:8}}>
+      <Pressable onPress={()=>setCategory("")} style={[s.choiceChip,!category&&s.choiceChipActive]}><Text style={[s.choiceChipText,!category&&{color:"#111"}]}>Toutes les catégories</Text></Pressable>
+      {EVENT_CATEGORIES.map(c=><Pressable key={c.name} onPress={()=>setCategory(c.name)} style={[s.choiceChip,category===c.name&&s.choiceChipActive]}><Text style={[s.choiceChipText,category===c.name&&{color:"#111"}]}>{c.name}</Text></Pressable>)}
+    </ScrollView>
+    {events.length===0?<Text style={s.meta}>Aucun événement disponible. Modifiez vos filtres ou revenez prochainement.</Text>:events.map(e=><EventCard key={e.id} event={e} onPress={()=>openEvent(e)}/>)}
+  </ScrollView>
 }
 
 function Scanner(){
