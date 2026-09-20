@@ -23,5 +23,8 @@
     "react-dom": "19.2.3",
     "typescript": "^5.9.3"
   },
-  "engines": {"node": ">=20"}
+  "engines": {"node": ">=20"},
+  "overrides": {
+    "react-native": "0.86.2"
+  }
 }
