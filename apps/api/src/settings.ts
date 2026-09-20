@@ -95,6 +95,21 @@ export const SETTINGS_SCHEMA = {
     schema: z.number().int().positive(),
     default: 7,
     description: "Durée de l'essai gratuit ouvert automatiquement à l'approbation d'un restaurateur (§7 du cahier des charges 2026-09) : carte bancaire requise à l'inscription, abonnement activé à l'issue de l'essai sauf annulation avant l'échéance."
+  },
+  ANALYTICS_ENABLED: {
+    schema: z.boolean(),
+    default: false,
+    description: "Active la mesure d'audience (POST /analytics/pageview, C32-C34 de l'ordre correctif 2026-09-20). Désactivée par défaut : ne jamais collecter silencieusement. Avant activation en production, mettre en place un bandeau de consentement OU configurer la collecte pour respecter l'exemption CNIL « mesure d'audience » (anonyme, jamais transmis à un tiers, jamais croisé avec d'autres données, rétention courte) — décision à faire valider juridiquement, pas par ce réglage seul."
+  },
+  ANALYTICS_RETENTION_DAYS: {
+    schema: z.number().int().positive(),
+    default: 390,
+    description: "Durée de conservation des visites (PageView) avant purge automatique. 390 jours par défaut (13 mois), plafond habituellement retenu pour l'exemption CNIL « mesure d'audience »."
+  },
+  CANCELLATION_ALERT_THRESHOLD_PERCENT: {
+    schema: z.number().min(0).max(100),
+    default: 20,
+    description: "Seuil de taux d'annulation (sur 24h glissantes, réservations confirmées annulées / réservations confirmées) au-delà duquel une alerte admin est déclenchée (C37)."
   }
 } as const;
 

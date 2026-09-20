@@ -46,7 +46,32 @@ function Header() {
   const isStaff = !!user && STAFF_ROLES.includes(user.role);
   return <header className="site-header"><Logo/><nav>{isStaff?<><NavLink to="/admin">Administration</NavLink><NavLink to="/">Voir le site public</NavLink></>:<><NavLink to="/">Accueil</NavLink><NavLink to="/events">Événements</NavLink><NavLink to="/concept">Le concept</NavLink><NavLink to="/blog">Blog</NavLink>{user && (user.hasRestaurant ? <NavLink to="/restaurant">Mon établissement</NavLink> : <NavLink to="/dashboard">Mon espace</NavLink>)}</>}</nav><div className="header-actions">{user ? <><span className="member-name">{user.displayName}</span><button className="link-button" onClick={logout}>Déconnexion</button></> : <Link className="button small" to="/login">Se connecter</Link>}</div></header>;
 }
-function Layout({ children }: {children: ReactNode}) { return <><Header/><main>{children}</main><footer><Logo/><p>Paris et Île-de-France · Expérience privée · Données protégées</p></footer></>; }
+// C32-C34 (ordre correctif 2026-09-20) : un identifiant anonyme aléatoire (jamais une empreinte
+// technique), posé une seule fois côté navigateur — le serveur n'écrit rien tant que
+// ANALYTICS_ENABLED est désactivé (défaut), donc cet appel est sans effet hors activation explicite.
+// utm_* n'est capturé qu'une fois par session (sessionStorage), pour attribuer toute la visite à sa
+// source d'origine même après plusieurs pages vues sans paramètres dans l'URL.
+const trackPageview = (path: string) => {
+  try {
+    let anonId = localStorage.getItem("nour_anon_id");
+    if (!anonId) { anonId = crypto.randomUUID(); localStorage.setItem("nour_anon_id", anonId); }
+    let utm = sessionStorage.getItem("nour_utm");
+    if (utm === null) {
+      const params = new URLSearchParams(window.location.search);
+      const captured = { utmSource: params.get("utm_source"), utmMedium: params.get("utm_medium"), utmCampaign: params.get("utm_campaign") };
+      utm = JSON.stringify(captured);
+      sessionStorage.setItem("nour_utm", utm);
+    }
+    let referrerHost: string | null = null;
+    try { referrerHost = document.referrer ? new URL(document.referrer).hostname : null; } catch { /* referrer illisible : ignoré */ }
+    api("/analytics/pageview", { method: "POST", body: JSON.stringify({ path, anonId, referrerHost, ...JSON.parse(utm) }) }).catch(() => {});
+  } catch { /* stockage navigateur indisponible (navigation privée...) : la mesure d'audience s'efface, jamais la page */ }
+};
+function Layout({ children }: {children: ReactNode}) {
+  const location=useLocation();
+  useEffect(()=>{trackPageview(location.pathname)},[location.pathname]);
+  return <><Header/><main>{children}</main><footer><Logo/><p>Paris et Île-de-France · Expérience privée · Données protégées</p></footer></>;
+}
 function Loading() { return <div className="state-page"><div className="spinner"/><h2>Chargement…</h2></div>; }
 // C13/C14 (ordre correctif 2026-09-20) : liste de notifications partagée (participant, restaurateur,
 // admin) — chronologique, lu/non lu, cliquable vers la destination métier exacte (linkPath), jamais
@@ -913,7 +938,9 @@ function Admin() {
     {stats.subscriptionsByStatus?.map((s:any)=><Stat key={s.status} label={`Abonnements ${SUBSCRIPTION_STATUS_LABEL[s.status]??s.status}`} value={s.count}/>)}
   </div><div className="admin-grid"><div className="panel chart"><div className="panel-title"><h2>Activité sur 30 jours</h2><span>Données de démonstration</span></div><div className="bars">{[32,50,42,68,60,82,75,94,70,85,97,88].map((n,i)=><i key={i} style={{height:`${n}%`}}/>)}</div></div><div className="panel quick"><h2>Actions rapides</h2>{user?.role==="ADMIN"&&<Link to="/admin/applications">Traiter les entretiens <span>→</span></Link>}<Link to="/admin/attendees">Voir les participants <span>→</span></Link><Link to="/admin/scanner">Scanner un billet <span>→</span></Link>{user?.role==="ADMIN"&&<Link to="/admin/restaurants">Demandes restaurateurs <span>→</span></Link>}{user?.role==="ADMIN"&&<Link to="/admin/finance">Voir les finances <span>→</span></Link>}<Link to="/events">Voir les événements <span>→</span></Link></div></div></>}</div></section></Layout>;
 }
-function Stat({label,value}:{label:string;value:string|number}){return <div className="stat"><small>{label.toUpperCase()}</small><strong>{value}</strong><span>Mis à jour maintenant</span></div>}
+// C35 : jamais de mention "mis à jour maintenant" statique — trompeur pour une période choisie
+// par l'admin (ex. "cette année"), qui n'a rien à voir avec l'instant présent.
+function Stat({label,value}:{label:string;value:ReactNode}){return <div className="stat"><small>{label.toUpperCase()}</small><strong>{value}</strong></div>}
 function AdminNav(){
   const {user}=useAuth(); const role=user?.role;
   const manages = role==="ADMIN"||role==="ORGANIZER";
@@ -1285,28 +1312,94 @@ function AdminRestaurants() {
 // §6 (cahier des charges 2026-09) : tableau exclusivement super-admin — la route serveur elle-même
 // (roles(UserRole.ADMIN) seul) refuse déjà tout autre rôle ; cette page n'est de toute façon jamais
 // listée ni routée pour un restaurateur ou modérateur (voir AdminNav et App()).
+// C33 : préréglages de période. Chaque préréglage calcule aussi la période précédente de même
+// durée, pour la comparaison — jamais une comparaison approximative ou inventée.
+const STATS_PRESETS: [string, () => {since:string;until:string;compareSince:string;compareUntil:string}][] = [
+  ["Aujourd’hui", () => { const d=new Date().toISOString().slice(0,10); const y=new Date(Date.now()-86_400_000).toISOString().slice(0,10); return {since:d,until:d,compareSince:y,compareUntil:y}; }],
+  ["Hier", () => { const y=new Date(Date.now()-86_400_000).toISOString().slice(0,10); const y2=new Date(Date.now()-2*86_400_000).toISOString().slice(0,10); return {since:y,until:y,compareSince:y2,compareUntil:y2}; }],
+  ["7 derniers jours", () => { const until=new Date().toISOString().slice(0,10); const since=new Date(Date.now()-7*86_400_000).toISOString().slice(0,10); const compareUntil=new Date(Date.now()-7*86_400_000).toISOString().slice(0,10); const compareSince=new Date(Date.now()-14*86_400_000).toISOString().slice(0,10); return {since,until,compareSince,compareUntil}; }],
+  ["30 derniers jours", () => { const until=new Date().toISOString().slice(0,10); const since=new Date(Date.now()-30*86_400_000).toISOString().slice(0,10); const compareUntil=new Date(Date.now()-30*86_400_000).toISOString().slice(0,10); const compareSince=new Date(Date.now()-60*86_400_000).toISOString().slice(0,10); return {since,until,compareSince,compareUntil}; }],
+  ["Ce mois-ci", () => { const now=new Date(); const since=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10); const until=now.toISOString().slice(0,10); const compareUntil=new Date(now.getFullYear(),now.getMonth(),0).toISOString().slice(0,10); const compareSince=new Date(now.getFullYear(),now.getMonth()-1,1).toISOString().slice(0,10); return {since,until,compareSince,compareUntil}; }],
+  ["Cette année", () => { const now=new Date(); const since=new Date(now.getFullYear(),0,1).toISOString().slice(0,10); const until=now.toISOString().slice(0,10); const compareUntil=new Date(now.getFullYear()-1,11,31).toISOString().slice(0,10); const compareSince=new Date(now.getFullYear()-1,0,1).toISOString().slice(0,10); return {since,until,compareSince,compareUntil}; }]
+];
+function StatDelta({current,previous,invert}:{current:number;previous:number|null|undefined;invert?:boolean}){
+  if(previous==null)return null;
+  const diff=previous===0?(current>0?100:0):Math.round(((current-previous)/previous)*100);
+  const good=invert?diff<=0:diff>=0;
+  return <span style={{fontSize:11,color:good?"var(--green)":"var(--red)",marginLeft:6}}>{diff>0?"+":""}{diff}%</span>;
+}
 function AdminStats() {
   const [stats,setStats]=useState<any>(null);
-  const [since,setSince]=useState(new Date(Date.now()-30*86_400_000).toISOString().slice(0,10));
-  const [until,setUntil]=useState(new Date().toISOString().slice(0,10));
-  const load=()=>api<any>(`/admin/stats?since=${since}&until=${until}`).then(setStats);
-  useEffect(()=>{load()},[since,until]);
-  const exportCsv=async()=>{
-    const response=await fetch(`${API_URL}/admin/stats/export.csv?since=${since}&until=${until}`,{headers:{Authorization:`Bearer ${getToken()}`}});
+  const [range,setRange]=useState(STATS_PRESETS[3][1]());
+  const [scope,setScope]=useState<"all"|"participants"|"restaurants">("all");
+  const load=()=>api<any>(`/admin/stats?since=${range.since}&until=${range.until}&compareSince=${range.compareSince}&compareUntil=${range.compareUntil}`).then(setStats);
+  useEffect(()=>{load()},[range]);
+  const exportFile=async(ext:"csv"|"xlsx")=>{
+    const response=await fetch(`${API_URL}/admin/stats/export.${ext}?since=${range.since}&until=${range.until}`,{headers:{Authorization:`Bearer ${getToken()}`}});
     const blob=await response.blob();
     const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");a.href=url;a.download=`ventes-${since}-${until}.csv`;a.click();URL.revokeObjectURL(url);
+    const a=document.createElement("a");a.href=url;a.download=`statistiques-${range.since}-${range.until}.${ext}`;a.click();URL.revokeObjectURL(url);
   };
   if(!stats)return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><Loading/></div></section></Layout>;
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Statistiques</h1>
-    <div className="filters"><label>Depuis<input type="date" value={since} onChange={e=>setSince(e.target.value)}/></label><label>Jusqu’au<input type="date" value={until} onChange={e=>setUntil(e.target.value)}/></label><button type="button" className="button small secondary" onClick={exportCsv}>Exporter les ventes (CSV)</button></div>
-    <div className="panel-title"><h2>Tunnel de conversion</h2></div>
-    <div className="stat-grid"><Stat label="Entretiens demandés" value={stats.funnel.interviewsRequested}/><Stat label="Profils validés" value={stats.funnel.interviewsAccepted}/><Stat label="Taux d’acceptation" value={stats.funnel.interviewAcceptanceRate!=null?`${stats.funnel.interviewAcceptanceRate}%`:"—"}/><Stat label="Candidatures à un événement" value={stats.funnel.applicationsCreated}/><Stat label="Paiements réussis" value={stats.funnel.paymentsSucceeded}/><Stat label="Taux de succès paiement" value={stats.funnel.paymentSuccessRate!=null?`${stats.funnel.paymentSuccessRate}%`:"—"}/><Stat label="Billets confirmés" value={stats.funnel.ticketsConfirmed}/></div>
+    <div className="filters">{STATS_PRESETS.map(([label,fn])=><button key={label} type="button" className="button small secondary" onClick={()=>setRange(fn())}>{label}</button>)}</div>
+    <div className="filters"><label>Depuis<input type="date" value={range.since} onChange={e=>setRange({...range,since:e.target.value})}/></label><label>Jusqu’au<input type="date" value={range.until} onChange={e=>setRange({...range,until:e.target.value})}/></label>
+      <select value={scope} onChange={e=>setScope(e.target.value as any)}><option value="all">Participants + restaurateurs</option><option value="participants">Participants</option><option value="restaurants">Restaurateurs</option></select>
+      <button type="button" className="button small secondary" onClick={()=>exportFile("csv")}>Exporter les ventes (CSV)</button>
+      <button type="button" className="button small secondary" onClick={()=>exportFile("xlsx")}>Exporter tout (Excel)</button>
+    </div>
+    {(stats.alerts.cancellationRate24h>=stats.alerts.cancellationThreshold||stats.alerts.subscriptionsExpiringSoon>0)&&<Notice kind="error">
+      {stats.alerts.cancellationRate24h>=stats.alerts.cancellationThreshold&&<>Taux d’annulation sur 24h : {stats.alerts.cancellationRate24h}% (seuil {stats.alerts.cancellationThreshold}%). </>}
+      {stats.alerts.subscriptionsExpiringSoon>0&&<>{stats.alerts.subscriptionsExpiringSoon} abonnement{stats.alerts.subscriptionsExpiringSoon>1?"s":""} restaurateur{stats.alerts.subscriptionsExpiringSoon>1?"s":""} arrivent à échéance bientôt.</>}
+    </Notice>}
+    {!stats.analyticsEnabled&&<Notice kind="info">Mesure d’audience désactivée (visiteurs, sources, entonnoir haut) : à activer dans Réglages après mise en place d’un consentement conforme.</Notice>}
+
+    {(scope==="all"||scope==="participants")&&<>
+      <div className="panel-title"><h2>Audience</h2></div>
+      {stats.audience.instrumented?<div className="stat-grid">
+        <Stat label="Visites" value={stats.audience.totalViews}/>
+        <Stat label="Visiteurs uniques" value={stats.audience.uniqueVisitors}/>
+      </div>:<p className="fine left">Non instrumenté (mesure d’audience désactivée).</p>}
+      {stats.audience.instrumented&&stats.audience.bySource.length>0&&<p className="fine left">Sources : {stats.audience.bySource.map((s:any)=>`${s.source} (${s.visits})`).join(" · ")}</p>}
+
+      <div className="panel-title"><h2>Tunnel participant</h2></div>
+      <div className="stat-grid">
+        {stats.funnelParticipant.top.instrumented&&<><Stat label="Visiteurs accueil" value={stats.funnelParticipant.top.homeVisitors}/><Stat label="Visiteurs catalogue" value={stats.funnelParticipant.top.catalogVisitors}/></>}
+        <Stat label="Entretiens demandés" value={stats.funnelParticipant.interviewsRequested}/>
+        <Stat label="Profils validés" value={stats.funnelParticipant.interviewsAccepted}/>
+        <Stat label="Taux d’acceptation" value={stats.funnelParticipant.interviewAcceptanceRate!=null?`${stats.funnelParticipant.interviewAcceptanceRate}%`:"—"}/>
+        <Stat label="Candidatures à un événement" value={stats.funnelParticipant.applicationsCreated}/>
+        <Stat label="Paiements réussis" value={stats.funnelParticipant.paymentsSucceeded}/>
+        <Stat label="Taux de succès paiement" value={stats.funnelParticipant.paymentSuccessRate!=null?`${stats.funnelParticipant.paymentSuccessRate}%`:"—"}/>
+        <Stat label="Billets confirmés" value={stats.funnelParticipant.ticketsConfirmed}/>
+        <Stat label="Annulations" value={stats.funnelParticipant.cancellationsCount}/>
+        <Stat label="Entrées liste d’attente" value={stats.funnelParticipant.waitlistCount}/>
+      </div>
+    </>}
+
+    {(scope==="all"||scope==="restaurants")&&<>
+      <div className="panel-title"><h2>Tunnel restaurateur</h2></div>
+      <div className="stat-grid"><Stat label="Nouvelles demandes" value={stats.funnelRestaurant.newRequests}/><Stat label="Approuvées" value={stats.funnelRestaurant.approved}/><Stat label="Abonnements souscrits" value={stats.funnelRestaurant.subscriptionsStarted}/><Stat label="Événements créés" value={stats.funnelRestaurant.eventsCreated}/><Stat label="Événements publiés" value={stats.funnelRestaurant.eventsPublished}/></div>
+    </>}
+
     <div className="panel-title"><h2>Finance</h2></div>
-    <div className="stat-grid"><Stat label="Revenu billetterie" value={money(stats.finance.ticketRevenueCents)}/><Stat label="Remboursé" value={money(stats.finance.refundedCents)}/><Stat label="MRR abonnements" value={money(stats.finance.subscriptionMonthlyRevenueCents)}/><Stat label="Abonnements actifs" value={stats.finance.activeSubscriptionsCount}/></div>
+    <div className="stat-grid">
+      <Stat label="Revenu billetterie" value={<>{money(stats.finance.ticketRevenueCents)}<StatDelta current={stats.finance.ticketRevenueCents} previous={stats.previous?.finance.ticketRevenueCents}/></>}/>
+      <Stat label="Remboursé" value={`${money(stats.finance.refundedCents)} (${stats.finance.refundedCount})`}/>
+      <Stat label="MRR abonnements" value={money(stats.finance.subscriptionMonthlyRevenueCents)}/>
+      <Stat label="Abonnements actifs" value={stats.finance.activeSubscriptionsCount}/>
+      <Stat label="Impayés (PAST_DUE)" value={stats.finance.pastDueCount}/>
+    </div>
     <p className="fine left">Abonnements par statut : {stats.finance.subscriptionsByStatus.map((s:any)=>`${s.status} (${s.count})`).join(" · ")||"—"}</p>
-    <div className="panel-title"><h2>Audience</h2></div>
-    <div className="stat-grid"><Stat label="Nouveaux participants" value={stats.audience.newParticipants}/><Stat label="Nouvelles demandes restaurateurs" value={stats.audience.newRestaurantRequests}/><Stat label="Clics de partage (total)" value={stats.audience.shareClicks}/><Stat label="Candidatures via partage" value={stats.audience.shareAttributedApplications}/><Stat label="Achats via partage" value={stats.audience.shareAttributedPurchases}/></div>
+
+    <div className="panel-title"><h2>Blog</h2></div>
+    {stats.blog.instrumented?<div className="stat-grid"><Stat label="Lectures" value={stats.blog.reads}/><Stat label="Lecteurs uniques" value={stats.blog.uniqueReaders}/></div>:<p className="fine left">Non instrumenté (mesure d’audience désactivée).</p>}
+
+    <div className="panel-title"><h2>Search Console</h2></div>
+    <p className="fine left">{stats.searchConsole.connected?"Connecté.":"Non configuré — aucune donnée Search Console à afficher."}</p>
+
+    <div className="panel-title"><h2>Partage</h2></div>
+    <div className="stat-grid"><Stat label="Nouveaux participants" value={stats.audienceLegacy.newParticipants}/><Stat label="Clics de partage (total)" value={stats.audienceLegacy.shareClicks}/><Stat label="Candidatures via partage" value={stats.audienceLegacy.shareAttributedApplications}/><Stat label="Achats via partage" value={stats.audienceLegacy.shareAttributedPurchases}/></div>
   </div></section></Layout>;
 }
 

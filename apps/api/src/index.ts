@@ -5,6 +5,7 @@ import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import QRCode from "qrcode";
+import ExcelJS from "exceljs";
 import Stripe from "stripe";
 import { PrismaClient, Prisma, UserRole, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, EventStatus, QuotaCategory, AlternativeOfferStatus, SubscriptionStatus } from "@prisma/client";
 import { z, ZodError } from "zod";
@@ -378,6 +379,17 @@ app.setErrorHandler((error, _request, reply) => {
 });
 
 app.get("/health", async () => ({ status: "ok", service: "nour-api", smsMode: smsVerification.mode, now: new Date().toISOString() }));
+
+// C32-C34 (ordre correctif 2026-09-20) : n'écrit strictement rien tant que ANALYTICS_ENABLED est
+// désactivé (défaut) — jamais de traceur actif silencieusement, voir settings.ts. anonId reste un
+// identifiant aléatoire posé par le navigateur, jamais une empreinte technique reconstituée ici.
+app.post("/analytics/pageview", { preHandler: optionalAuth, config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
+  if (!getSetting("ANALYTICS_ENABLED")) return reply.code(204).send();
+  const input = z.object({ path: z.string().max(300), anonId: z.string().max(100), referrerHost: z.string().max(200).nullable().optional(), utmSource: z.string().max(100).nullable().optional(), utmMedium: z.string().max(100).nullable().optional(), utmCampaign: z.string().max(100).nullable().optional() }).parse(request.body);
+  const token = request.user as TokenUser | undefined;
+  await prisma.pageView.create({ data: { path: input.path, anonId: input.anonId, referrerHost: input.referrerHost ?? null, utmSource: input.utmSource ?? null, utmMedium: input.utmMedium ?? null, utmCampaign: input.utmCampaign ?? null, userId: token?.sub ?? null, userRole: token?.role ?? null } });
+  return reply.code(204).send();
+});
 
 app.post("/auth/request-otp", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 3, timeWindow: "10 minutes" } } }, async (request) => {
   const input = z.object({ phone: z.string().min(8).max(30) }).parse(request.body);
@@ -1438,16 +1450,38 @@ app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZ
 // déjà neutralisés à null pour eux), cette route n'accepte même pas le rôle ORGANIZER : aucune donnée
 // n'y transite jamais vers un compte restaurateur ou modérateur. Tunnel de conversion, finance
 // consolidée et audience, sur la même fenêtre de dates.
-app.get("/admin/stats", { preHandler: roles(UserRole.ADMIN) }, async (request) => {
-  const query = z.object({ since: z.string().optional(), until: z.string().optional() }).parse(request.query);
-  const since = query.since ? new Date(query.since) : new Date(Date.now() - 30 * 86_400_000);
-  const until = query.until ? new Date(query.until) : new Date();
+// C33 : classe une visite selon utm_source si présent, sinon le domaine du référent — jamais
+// inventé, "Direct" seulement en l'absence totale de référent, "Inconnu" seulement si rien n'est
+// exploitable (référent illisible et pas d'UTM).
+const classifySource = (pv: { utmSource: string | null; referrerHost: string | null }): string => {
+  if (pv.utmSource) {
+    const s = pv.utmSource.toLowerCase();
+    if (s.includes("google")) return "Google";
+    if (s.includes("instagram")) return "Instagram";
+    if (s.includes("tiktok")) return "TikTok";
+    if (s.includes("facebook")) return "Facebook";
+    return `Campagne (${pv.utmSource})`;
+  }
+  if (!pv.referrerHost) return "Direct";
+  const h = pv.referrerHost.toLowerCase();
+  if (h.includes("nour-meet") || h.includes("localhost")) return "Interne";
+  if (h.includes("google")) return "Google";
+  if (h.includes("instagram")) return "Instagram";
+  if (h.includes("tiktok")) return "TikTok";
+  if (h.includes("facebook") || h.includes("fb.com")) return "Facebook";
+  return `Autre (${pv.referrerHost})`;
+};
+const statsForRange = async (since: Date, until: Date) => {
   const range = { gte: since, lte: until };
+  const analyticsEnabled = getSetting("ANALYTICS_ENABLED");
   const [
     interviewsRequested, interviewsAccepted, interviewsRefused,
-    applicationsCreated, paymentsSucceeded, paymentsFailed, ticketsConfirmed,
-    ticketRevenue, refundedAmount, activeSubscriptions, subscriptionsByStatus,
-    newParticipants, newRestaurantRequests, shareClicks, shareAttributedApplications, shareAttributedPurchases
+    applicationsCreated, paymentsSucceeded, paymentsFailed, ticketsConfirmed, cancellationsCount, waitlistCount,
+    ticketRevenue, refundedAmount, refundedCount, pastDueCount, activeSubscriptions, subscriptionsByStatus,
+    newParticipants, newRestaurantRequests, restaurantsApproved, subscriptionsStarted,
+    eventsCreatedByRestaurant, eventsApprovedForRestaurant,
+    shareClicks, shareAttributedApplications, shareAttributedPurchases,
+    pageViews
   ] = await Promise.all([
     prisma.application.count({ where: { eventId: null, createdAt: range } }),
     prisma.application.count({ where: { eventId: null, status: ApplicationStatus.ACCEPTED, decidedAt: range } }),
@@ -1456,54 +1490,141 @@ app.get("/admin/stats", { preHandler: roles(UserRole.ADMIN) }, async (request) =
     prisma.payment.count({ where: { status: PaymentStatus.SUCCEEDED, paidAt: range } }),
     prisma.payment.count({ where: { status: PaymentStatus.FAILED, createdAt: range } }),
     prisma.ticket.count({ where: { status: { not: TicketStatus.CANCELLED }, reservation: { confirmedAt: range } } }),
+    prisma.reservation.count({ where: { confirmedAt: { not: null }, cancelledAt: range } }),
+    prisma.waitlistEntry.count({ where: { createdAt: range } }),
     prisma.payment.aggregate({ where: { status: PaymentStatus.SUCCEEDED, paidAt: range }, _sum: { amountCents: true } }),
     prisma.payment.aggregate({ where: { refundedAt: range }, _sum: { refundedAmountCents: true } }),
+    prisma.payment.count({ where: { refundedAt: range } }),
+    prisma.restaurantSubscription.count({ where: { status: "PAST_DUE" } }),
     prisma.restaurantSubscription.findMany({ where: { status: "ACTIVE" }, include: { plan: true } }),
     prisma.restaurantSubscription.groupBy({ by: ["status"], _count: true }),
     prisma.user.count({ where: { role: UserRole.PARTICIPANT, createdAt: range } }),
     prisma.restaurant.count({ where: { submittedAt: range } }),
+    prisma.restaurant.count({ where: { verifiedAt: range } }),
+    prisma.restaurantSubscription.count({ where: { createdAt: range } }),
+    prisma.event.count({ where: { controllerRestaurantId: { not: null }, createdAt: range } }),
+    prisma.event.count({ where: { controllerRestaurantId: { not: null }, quotaConsumedAt: range } }),
     prisma.shareLink.aggregate({ _sum: { clicks: true } }),
     prisma.application.count({ where: { attributedShareLinkId: { not: null }, createdAt: range } }),
-    prisma.application.count({ where: { attributedShareLinkId: { not: null }, createdAt: range, reservation: { payment: { status: PaymentStatus.SUCCEEDED } } } })
+    prisma.application.count({ where: { attributedShareLinkId: { not: null }, createdAt: range, reservation: { payment: { status: PaymentStatus.SUCCEEDED } } } }),
+    analyticsEnabled ? prisma.pageView.findMany({ where: { createdAt: range }, select: { path: true, anonId: true, utmSource: true, referrerHost: true } }) : Promise.resolve(null)
   ]);
+  let audience: any = { instrumented: false };
+  let blog: any = { instrumented: false };
+  let funnelTopParticipant: any = { instrumented: false };
+  if (pageViews) {
+    const uniqueAnon = new Set(pageViews.map(p => p.anonId));
+    const bySource = new Map<string, number>();
+    for (const pv of pageViews) { const s = classifySource(pv); bySource.set(s, (bySource.get(s) ?? 0) + 1); }
+    audience = { instrumented: true, totalViews: pageViews.length, uniqueVisitors: uniqueAnon.size, bySource: [...bySource.entries()].map(([source, visits]) => ({ source, visits })).sort((a, b) => b.visits - a.visits) };
+    const blogViews = pageViews.filter(p => p.path.startsWith("/blog"));
+    blog = { instrumented: true, reads: blogViews.length, uniqueReaders: new Set(blogViews.map(p => p.anonId)).size };
+    const home = new Set(pageViews.filter(p => p.path === "/").map(p => p.anonId)).size;
+    const catalog = new Set(pageViews.filter(p => p.path.startsWith("/events")).map(p => p.anonId)).size;
+    funnelTopParticipant = { instrumented: true, homeVisitors: home, catalogVisitors: catalog };
+  }
+  const monthlyRevenueCents = activeSubscriptions.reduce((sum, s) => sum + s.plan.monthlyPriceCents, 0);
   return {
-    range: { since, until },
-    funnel: {
+    audience,
+    funnelParticipant: {
+      top: funnelTopParticipant,
       interviewsRequested, interviewsAccepted, interviewsRefused,
       interviewAcceptanceRate: (interviewsAccepted + interviewsRefused) > 0 ? Math.round((interviewsAccepted / (interviewsAccepted + interviewsRefused)) * 100) : null,
-      applicationsCreated, paymentsSucceeded, paymentsFailed, ticketsConfirmed,
-      paymentSuccessRate: (paymentsSucceeded + paymentsFailed) > 0 ? Math.round((paymentsSucceeded / (paymentsSucceeded + paymentsFailed)) * 100) : null
+      applicationsCreated, paymentsSucceeded, paymentsFailed,
+      paymentSuccessRate: (paymentsSucceeded + paymentsFailed) > 0 ? Math.round((paymentsSucceeded / (paymentsSucceeded + paymentsFailed)) * 100) : null,
+      ticketsConfirmed, cancellationsCount, waitlistCount
     },
+    funnelRestaurant: { newRequests: newRestaurantRequests, approved: restaurantsApproved, subscriptionsStarted, eventsCreated: eventsCreatedByRestaurant, eventsPublished: eventsApprovedForRestaurant },
     finance: {
       ticketRevenueCents: ticketRevenue._sum.amountCents ?? 0,
-      refundedCents: refundedAmount._sum.refundedAmountCents ?? 0,
-      subscriptionMonthlyRevenueCents: activeSubscriptions.reduce((sum, s) => sum + s.plan.monthlyPriceCents, 0),
-      activeSubscriptionsCount: activeSubscriptions.length,
+      refundedCents: refundedAmount._sum.refundedAmountCents ?? 0, refundedCount,
+      subscriptionMonthlyRevenueCents: monthlyRevenueCents,
+      activeSubscriptionsCount: activeSubscriptions.length, pastDueCount,
       subscriptionsByStatus: subscriptionsByStatus.map(s => ({ status: s.status, count: s._count }))
     },
-    audience: {
-      newParticipants, newRestaurantRequests,
-      shareClicks: shareClicks._sum.clicks ?? 0, shareAttributedApplications, shareAttributedPurchases
-    }
+    audienceLegacy: { newParticipants, shareClicks: shareClicks._sum.clicks ?? 0, shareAttributedApplications, shareAttributedPurchases },
+    blog,
+    searchConsole: { connected: false }
   };
-});
-// Export CSV des paiements réussis sur la période (§6) : ligne par vente, jamais de données
-// personnelles au-delà du nom affiché déjà visible ailleurs dans l'administration.
-app.get("/admin/stats/export.csv", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
-  const query = z.object({ since: z.string().optional(), until: z.string().optional() }).parse(request.query);
+};
+app.get("/admin/stats", { preHandler: roles(UserRole.ADMIN) }, async (request) => {
+  const query = z.object({ since: z.string().optional(), until: z.string().optional(), compareSince: z.string().optional(), compareUntil: z.string().optional() }).parse(request.query);
   const since = query.since ? new Date(query.since) : new Date(Date.now() - 30 * 86_400_000);
   const until = query.until ? new Date(query.until) : new Date();
+  const current = await statsForRange(since, until);
+  const previous = query.compareSince && query.compareUntil ? await statsForRange(new Date(query.compareSince), new Date(query.compareUntil)) : null;
+  // C37 : hausse inhabituelle des annulations (fenêtre glissante distincte de la période choisie ci-dessus,
+  // toujours sur 24h réelles) + abonnements dont l'échéance approche, pour une lecture immédiate.
+  const alertSince = new Date(Date.now() - 24 * 60 * 60_000);
+  const [confirmed24h, cancelled24h, expiringSoonCount] = await Promise.all([
+    prisma.reservation.count({ where: { confirmedAt: { gte: alertSince } } }),
+    prisma.reservation.count({ where: { confirmedAt: { not: null }, cancelledAt: { gte: alertSince } } }),
+    prisma.restaurantSubscription.count({ where: { status: { in: ["ACTIVE", "TRIALING"] }, currentPeriodEnd: { lte: new Date(Date.now() + getSetting("SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE") * 24 * 60 * 60_000) } } })
+  ]);
+  const cancellationRate24h = confirmed24h > 0 ? Math.round((cancelled24h / confirmed24h) * 100) : 0;
+  return {
+    range: { since, until }, ...current, previous,
+    alerts: { cancellationRate24h, cancellationThreshold: getSetting("CANCELLATION_ALERT_THRESHOLD_PERCENT"), subscriptionsExpiringSoon: expiringSoonCount },
+    analyticsEnabled: getSetting("ANALYTICS_ENABLED")
+  };
+});
+// Protection anti-injection de formule (C36, OWASP CSV injection) : un champ commençant par
+// = + - @ est neutralisé par une apostrophe, aussi bien pour le CSV que pour l'Excel généré.
+const csvSafe = (value: string) => /^[=+\-@]/.test(value) ? `'${value}` : value;
+const salesRowsForRange = async (since: Date, until: Date) => {
   const payments = await prisma.payment.findMany({
     where: { status: PaymentStatus.SUCCEEDED, paidAt: { gte: since, lte: until } },
     include: { reservation: { include: { user: true, event: true } } },
     orderBy: { paidAt: "asc" }
   });
-  const rows = [["Date", "Événement", "Participant", "Montant (€)"].join(",")];
-  for (const p of payments) {
-    rows.push([p.paidAt?.toISOString() ?? "", `"${p.reservation.event.title.replaceAll('"', "'")}"`, `"${p.reservation.user.displayName.replaceAll('"', "'")}"`, (p.amountCents / 100).toFixed(2)].join(","));
-  }
+  return payments.map(p => ({ date: p.paidAt!, event: csvSafe(p.reservation.event.title), participant: csvSafe(p.reservation.user.displayName), amount: p.amountCents / 100 }));
+};
+// Export CSV des ventes sur la période (C36) : ligne par vente, jamais de données personnelles
+// au-delà du nom affiché déjà visible ailleurs dans l'administration, protégé contre les formules.
+app.get("/admin/stats/export.csv", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const query = z.object({ since: z.string().optional(), until: z.string().optional() }).parse(request.query);
+  const since = query.since ? new Date(query.since) : new Date(Date.now() - 30 * 86_400_000);
+  const until = query.until ? new Date(query.until) : new Date();
+  const rows = await salesRowsForRange(since, until);
+  const lines = [["Date", "Événement", "Participant", "Montant (€)"].join(",")];
+  for (const r of rows) lines.push([r.date.toISOString(), `"${r.event}"`, `"${r.participant}"`, r.amount.toFixed(2)].join(","));
   reply.header("Content-Type", "text/csv; charset=utf-8").header("Content-Disposition", `attachment; filename="ventes-${since.toISOString().slice(0, 10)}-${until.toISOString().slice(0, 10)}.csv"`);
-  return rows.join("\n");
+  return lines.join("\n");
+});
+// Export Excel complet (C36) : contrairement au CSV, plusieurs feuilles — ventes, abonnements,
+// événements, blog — pour répondre à « un CSV des seules ventes n'est pas l'export complet attendu ».
+app.get("/admin/stats/export.xlsx", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const query = z.object({ since: z.string().optional(), until: z.string().optional() }).parse(request.query);
+  const since = query.since ? new Date(query.since) : new Date(Date.now() - 30 * 86_400_000);
+  const until = query.until ? new Date(query.until) : new Date();
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Nūr Meet";
+  const salesSheet = workbook.addWorksheet("Ventes");
+  salesSheet.addRow(["Date", "Événement", "Participant", "Montant (€)"]);
+  for (const r of await salesRowsForRange(since, until)) salesSheet.addRow([r.date, r.event, r.participant, r.amount]);
+  salesSheet.getColumn(1).width = 22; salesSheet.getColumn(2).width = 35; salesSheet.getColumn(3).width = 25;
+
+  const subs = await prisma.restaurantSubscription.findMany({ where: { createdAt: { gte: since, lte: until } }, include: { restaurant: true, plan: true } });
+  const subsSheet = workbook.addWorksheet("Abonnements");
+  subsSheet.addRow(["Établissement", "Formule", "Statut", "Période", "Début", "Échéance"]);
+  for (const s of subs) subsSheet.addRow([csvSafe(s.restaurant.name), s.plan.name, s.status, s.billingPeriod, s.currentPeriodStart, s.currentPeriodEnd]);
+  subsSheet.getColumn(1).width = 30;
+
+  const events = await prisma.event.findMany({ where: { createdAt: { gte: since, lte: until } }, include: { controllerRestaurant: true, _count: { select: { applications: true, reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } } });
+  const eventsSheet = workbook.addWorksheet("Événements");
+  eventsSheet.addRow(["Titre", "Catégorie", "Statut", "Restaurateur", "Capacité", "Candidatures", "Confirmées", "Taux de remplissage"]);
+  for (const e of events) eventsSheet.addRow([csvSafe(e.title), e.category, e.status, e.controllerRestaurant ? csvSafe(e.controllerRestaurant.name) : "Nūr Meet", e.capacity, e._count.applications, e._count.reservations, e.capacity > 0 ? `${Math.round((e._count.reservations / e.capacity) * 100)}%` : "—"]);
+  eventsSheet.getColumn(1).width = 35;
+
+  const articles = await prisma.article.findMany({ where: { status: "PUBLISHED", publishedAt: { gte: since, lte: until } } });
+  const blogSheet = workbook.addWorksheet("Blog");
+  blogSheet.addRow(["Titre", "Catégorie", "Publié le"]);
+  for (const a of articles) blogSheet.addRow([csvSafe(a.title), a.category, a.publishedAt]);
+  blogSheet.getColumn(1).width = 40;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").header("Content-Disposition", `attachment; filename="statistiques-${since.toISOString().slice(0, 10)}-${until.toISOString().slice(0, 10)}.xlsx"`);
+  return reply.send(Buffer.from(buffer));
 });
 // Entretiens globaux : uniquement le super-admin, jamais un restaurateur (voir cahier des charges §6).
 app.get("/admin/global-interviews", { preHandler: roles(UserRole.ADMIN) }, async () =>
@@ -2383,6 +2504,34 @@ const publishScheduledArticles = async () => {
   }
 };
 setInterval(() => { publishScheduledArticles().catch(err => app.log.error(err)); }, 60_000);
+
+// C32-C34 : purge automatique des visites au-delà de la rétention configurée (ANALYTICS_RETENTION_DAYS,
+// 13 mois par défaut — plafond habituel de l'exemption CNIL « mesure d'audience »).
+const purgeOldPageViews = async () => {
+  const retentionDays = getSetting("ANALYTICS_RETENTION_DAYS");
+  await prisma.pageView.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - retentionDays * 24 * 60 * 60_000) } } });
+};
+setInterval(() => { purgeOldPageViews().catch(err => app.log.error(err)); }, 24 * 60 * 60_000);
+// C37 : hausse inhabituelle des annulations sur 24h glissantes, seuil configurable
+// (CANCELLATION_ALERT_THRESHOLD_PERCENT) ; une seule alerte par fenêtre pour éviter les doublons.
+let lastCancellationAlertAt: Date | null = null;
+const checkCancellationSpike = async () => {
+  const since = new Date(Date.now() - 24 * 60 * 60_000);
+  const [confirmed, cancelled] = await Promise.all([
+    prisma.reservation.count({ where: { confirmedAt: { gte: since } } }),
+    prisma.reservation.count({ where: { confirmedAt: { not: null }, cancelledAt: { gte: since } } })
+  ]);
+  if (confirmed === 0) return;
+  const rate = (cancelled / confirmed) * 100;
+  const threshold = getSetting("CANCELLATION_ALERT_THRESHOLD_PERCENT");
+  if (rate < threshold) return;
+  if (lastCancellationAlertAt && Date.now() - lastCancellationAlertAt.getTime() < 6 * 60 * 60_000) return;
+  lastCancellationAlertAt = new Date();
+  const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+  await Promise.all(admins.map(a => notify(a.id, "Hausse inhabituelle des annulations", `Taux d’annulation sur 24h : ${rate.toFixed(0)}% (seuil ${threshold}%).`, "/admin/stats")));
+  await audit(undefined, "CANCELLATION_SPIKE_ALERT", "Reservation", "n/a", { rate, threshold, confirmed, cancelled });
+};
+setInterval(() => { checkCancellationSpike().catch(err => app.log.error(err)); }, 60 * 60_000);
 
 // §5 (cahier des charges 2026-09) : fait sortir un article de qualité éditoriale de la réserve
 // (ArticleQueueEntry, jamais un brouillon générique) vers Article au statut DRAFT, un par jour et

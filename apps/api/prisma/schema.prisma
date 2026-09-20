@@ -643,6 +643,27 @@ model OutboxMessage {
   createdAt DateTime     @default(now())
 }
 
+// Mesure d'audience (C32-C34, ordre correctif 2026-09-20) : première partie, anonyme, jamais un
+// identifiant tiers/publicitaire. anonId est un identifiant aléatoire posé côté navigateur
+// (localStorage), jamais une empreinte ni une donnée personnelle ; userId n'est renseigné que si le
+// visiteur est déjà connecté (corrélation avec son propre compte, jamais un nouveau traçage).
+// Désactivé par défaut (AppSetting ANALYTICS_ENABLED) : ne jamais collecter silencieusement — voir
+// settings.ts pour la mise en garde légale avant activation en production.
+model PageView {
+  id           String   @id @default(cuid())
+  path         String
+  anonId       String
+  userId       String?
+  userRole     String?
+  referrerHost String?
+  utmSource    String?
+  utmMedium    String?
+  utmCampaign  String?
+  createdAt    DateTime @default(now())
+  @@index([createdAt])
+  @@index([anonId])
+}
+
 // Paramètres applicatifs centralisés (voir src/settings.ts) : toute valeur "provisoire" du cahier
 // des charges (verrou de paiement, quota mensuel restaurateur, drapeaux de fonction...) vit ici,
 // jamais en dur dans le code. Une clé absente retombe sur sa valeur par défaut codée dans
