@@ -22,6 +22,9 @@ import { createSmsVerificationProvider } from "./sms-verification.js";
 import { createEmailProvider } from "./email-provider.js";
 import { createAIProvider } from "./ai-provider.js";
 import { loadSettings, updateSetting, getSetting, listSettingsForAdmin, SETTINGS_SCHEMA } from "./settings.js";
+import { initSentry, Sentry } from "./sentry.js";
+
+initSentry();
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const uploadsDir = path.join(publicDir, "uploads", "events");
@@ -375,7 +378,12 @@ app.setErrorHandler((error, _request, reply) => {
   // correcte, jamais journalisée comme une erreur serveur.
   if ((error as { code?: string }).code === "P2025") return reply.code(404).send({ error: "Ressource introuvable" });
   const status = (error as any).statusCode ?? 500;
-  if (status >= 500) app.log.error(error);
+  if (status >= 500) {
+    app.log.error(error);
+    // Seules les vraies pannes serveur (5xx) partent vers Sentry — jamais une simple erreur de
+    // saisie ou d'autorisation (400/401/403/404/409), qui ne relève pas d'une surveillance de panne.
+    if (env.SENTRY_DSN) Sentry.captureException(error);
+  }
   return reply.code(status).send({ error: status >= 500 ? "Erreur interne" : (error as Error).message });
 });
 

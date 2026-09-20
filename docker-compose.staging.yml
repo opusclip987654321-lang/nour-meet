@@ -1,0 +1,82 @@
+# Compose de PRÉPRODUCTION — troisième environnement, clairement séparé des deux autres :
+# - dev (docker-compose.yml) : données de démonstration réamorcées à chaque démarrage, tout en local.
+# - staging (celui-ci) : mêmes garde-fous que la production (NODE_ENV=production, donc SMS_MODE=mock
+#   refusé, vrai JWT_SECRET exigé, etc. — voir apps/api/src/env.ts), mais base de données, volumes
+#   et ports totalement séparés de la production. Sert à valider une version avant de la déployer
+#   réellement, avec des clés Stripe TEST et, idéalement, un numéro Twilio Verify de test dédié.
+# - production (docker-compose.prod.yml) : données réelles, jamais touchées par ce fichier.
+#
+# Volontairement SANS Caddy/HTTPS public par défaut : n'expose que 127.0.0.1 sur le serveur, donc
+# accessible uniquement via un tunnel SSH (ex. `ssh -L 8081:localhost:8081 -L 4001:localhost:4001
+# utilisateur@serveur`) le temps de la recette. Si un accès public est un jour nécessaire, ajouter
+# un bloc "staging.nourmeet.com" dans infra/Caddyfile pointant vers ces mêmes ports internes.
+#
+# Utilisation : docker compose -f docker-compose.staging.yml --env-file .env.staging up -d --build
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER manquant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}
+      POSTGRES_DB: ${POSTGRES_DB:-nour_meet_staging}
+    volumes:
+      - nour_staging_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nour} -d ${POSTGRES_DB:-nour_meet_staging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-nour_meet_staging}?schema=public
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant — dédié à la préproduction, différent de la production}
+      SMS_MODE: ${SMS_MODE:?SMS_MODE=mock est interdit (NODE_ENV=production), voir env.ts}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_VERIFY_SERVICE_SID: ${TWILIO_VERIFY_SERVICE_SID:-}
+      API_PORT: "4000"
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8081}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?STRIPE_SECRET_KEY manquant (clé TEST recommandée ici)}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET manquant}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    volumes:
+      - nour_staging_uploads_data:/app/apps/api/public/uploads
+    ports:
+      - "127.0.0.1:4001:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    command: sh -c "npx prisma migrate deploy && npm run start"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4001}
+        VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:-}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:80"
+    depends_on:
+      - api
+
+volumes:
+  nour_staging_postgres_data:
+  nour_staging_uploads_data:

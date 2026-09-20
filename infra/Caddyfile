@@ -1,0 +1,23 @@
+# Reverse proxy de production : HTTPS automatique (Let's Encrypt), renouvellement automatique,
+# redirection HTTP -> HTTPS automatique dès qu'un domaine (et non une adresse IP/scheme http://)
+# est utilisé comme nom de bloc, ce qui est le cas ici pour les trois domaines.
+#
+# Variables substituées depuis l'environnement du conteneur (voir docker-compose.prod.yml) :
+# DOMAIN_WEB (ex. nourmeet.com), DOMAIN_API (ex. api.nourmeet.com), ACME_EMAIL.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN_WEB} {
+	reverse_proxy web:80
+	encode gzip
+}
+
+www.{$DOMAIN_WEB} {
+	redir https://{$DOMAIN_WEB}{uri} permanent
+}
+
+{$DOMAIN_API} {
+	reverse_proxy api:4000
+	encode gzip
+}

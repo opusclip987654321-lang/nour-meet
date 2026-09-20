@@ -19,7 +19,10 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: optionalEnvironmentSecret,
   STRIPE_WEBHOOK_SECRET: optionalEnvironmentSecret,
   RESEND_API_KEY: optionalEnvironmentSecret,
-  RESEND_FROM_EMAIL: z.string().email().optional()
+  RESEND_FROM_EMAIL: z.string().email().optional(),
+  // Surveillance d'erreurs (Sentry) : désactivée tant qu'aucun DSN n'est fourni, jamais activée
+  // par défaut — voir sentry.ts pour le filtrage des données personnelles avant tout envoi.
+  SENTRY_DSN: optionalEnvironmentSecret
 }).superRefine((value, ctx) => {
   if (value.RESEND_API_KEY && !value.RESEND_FROM_EMAIL) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["RESEND_FROM_EMAIL"], message: "RESEND_FROM_EMAIL est requis avec RESEND_API_KEY" });
