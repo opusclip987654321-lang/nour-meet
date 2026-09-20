@@ -563,7 +563,7 @@ app.get("/events/:id", { preHandler: optionalAuth }, async (request) => {
 
 app.get("/events/:id/my-application", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId: currentId(request) } }, include: { call: true, reservation: { include: { payment: true } } } });
+  const application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId: currentId(request) } }, include: { call: true, reservation: { include: { payment: true } }, networkingAnswer: true } });
   if (!application) return reply.code(404).send({ error: "Aucune inscription pour cet événement" });
   return application;
 });
@@ -616,7 +616,11 @@ const networkingAnswersSchema = z.object({
 // - SCREENING (speed dating) : exige un profil déjà validé par l'entretien global (une seule
 //   démarche par personne, décision antérieure du produit conservée telle quelle — voir le résumé
 //   de fin de lot) et un questionnaire privé (7 questions), jamais transmis au restaurateur.
-// - DIRECT (networking) : aucune validation de profil requise, questionnaire non bloquant.
+// - DIRECT (networking) : aucune validation de profil requise, aucun questionnaire ici. Arbitrage
+//   12/E3 (cahier des charges consolidé 2026-09-20) : les questions professionnelles ne sont plus
+//   jamais posées avant l'achat — elles ne doivent ni ralentir ni conditionner le paiement. Elles
+//   sont proposées, facultatives, une fois la place confirmée (voir POST
+//   /applications/:id/networking-answers).
 // Dans les deux cas, aucune place n'est retenue ici : la candidature autorise seulement à tenter le
 // paiement via POST /applications/:id/payment-intent, qui pose le verrou technique court.
 app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
@@ -634,7 +638,7 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   if (existing) return reply.code(409).send({ error: "Vous êtes déjà inscrit(e) à cet événement", application: existing });
   const input = requiresScreening
     ? z.object({ screeningAnswers: screeningAnswersSchema, shareCode: z.string().optional() }).parse(request.body)
-    : z.object({ networkingAnswers: networkingAnswersSchema, shareCode: z.string().optional() }).parse(request.body);
+    : z.object({ shareCode: z.string().optional() }).parse(request.body);
   // Partage attribué (§12) : le code vient de l'URL au moment de la visite, jamais recalculé après
   // coup ; un code inconnu ou expiré n'échoue jamais la candidature, il est simplement ignoré.
   const shareLink = input.shareCode ? await prisma.shareLink.findUnique({ where: { code: input.shareCode } }) : null;
@@ -654,12 +658,28 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
       attributedShareLinkId: shareLink && shareLink.eventId === id && shareLink.userId !== userId ? shareLink.id : undefined,
       ...(requiresScreening
         ? { screeningAnswer: { create: (input as { screeningAnswers: z.infer<typeof screeningAnswersSchema> }).screeningAnswers } }
-        : { networkingAnswer: { create: (input as { networkingAnswers: z.infer<typeof networkingAnswersSchema> }).networkingAnswers } })
+        : {})
     }
   });
   await audit(userId, "CREATE_APPLICATION", "Application", application.id);
   await notify(userId, "Inscription enregistrée", `Vous pouvez maintenant régler votre billet pour « ${event.title} » (${(resolvePriceCents(event, quotaCategory, getSetting("ENABLE_GENDER_PRICING")) / 100).toFixed(2)} €). La place n’est confirmée qu’une fois le paiement réussi.`, "/dashboard?tab=reservations");
   return reply.code(201).send({ application });
+});
+
+// Arbitrage 12/E3 (cahier des charges consolidé 2026-09-20) : les questions professionnelles d'un
+// événement networking sont facultatives et ne se posent qu'une fois la place réellement confirmée
+// (jamais avant ou pendant le paiement). Peut être appelé plusieurs fois pour corriger une réponse.
+app.post("/applications/:id/networking-answers", { preHandler: auth }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const userId = currentId(request);
+  const application = await prisma.application.findFirst({ where: { id, userId }, include: { event: true } });
+  if (!application) return reply.code(404).send({ error: "Candidature introuvable" });
+  if (!application.event || eventRequiresScreening(application.event)) return reply.code(409).send({ error: "Cet événement ne propose pas de questionnaire professionnel" });
+  if (application.status !== ApplicationStatus.CONFIRMED) return reply.code(409).send({ error: "Ce questionnaire n’est disponible qu’une fois votre place confirmée" });
+  const answers = networkingAnswersSchema.parse(request.body);
+  await prisma.networkingAnswer.upsert({ where: { applicationId: id }, update: answers, create: { applicationId: id, ...answers } });
+  await audit(userId, "SUBMIT_NETWORKING_ANSWERS", "Application", id);
+  return { ok: true };
 });
 
 // Entretien global de validation du profil : une seule démarche par personne (pas par événement).

@@ -370,11 +370,39 @@ function PayStandalone(){
   </div>;
 }
 
+// Arbitrage 12/E3 (cahier des charges consolidé 2026-09-20) : proposé uniquement une fois la place
+// confirmée, jamais avant ou pendant le paiement, et entièrement facultatif — "Plus tard" ne bloque
+// rien et ne réapparaît que lors d'une prochaine visite de cette page.
+function NetworkingFollowUp({ applicationId }: { applicationId: string }) {
+  const [dismissed, setDismissed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  if (dismissed || done) return done ? <Notice kind="success">Merci, vos informations professionnelles ont été enregistrées.</Notice> : null;
+  const submit = async (e: FormEvent) => {
+    e.preventDefault(); setSubmitting(true);
+    try { await api(`/applications/${applicationId}/networking-answers`, { method: "POST", body: JSON.stringify(answers) }); setDone(true); }
+    catch { setDismissed(true); }
+    finally { setSubmitting(false); }
+  };
+  return <form className="questionnaire" onSubmit={submit}>
+    <p className="fine">Facultatif : quelques informations professionnelles pour mieux organiser la soirée.</p>
+    {NETWORKING_QUESTIONS.map(q => <label key={q.key}>{q.label}<textarea value={answers[q.key] ?? ""} onChange={e => setAnswers({ ...answers, [q.key]: e.target.value })}/></label>)}
+    <div className="decision-buttons">
+      <button className="button" disabled={submitting}>{submitting ? "Envoi…" : "Envoyer"}</button>
+      <button type="button" className="button secondary" onClick={() => setDismissed(true)}>Plus tard</button>
+    </div>
+  </form>;
+}
+
 function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { application: any; event: PublicEvent; onPaid: () => void; onWaitlisted: () => void }) {
   const [showPayment, setShowPayment] = useState(false);
   if (application.status === "REFUSED") return <Notice kind="error">Votre candidature n’a pas été retenue pour cet événement.</Notice>;
   if (application.status === "CANCELLED") return <Notice kind="error">Cette candidature a été annulée.</Notice>;
-  if (application.status === "CONFIRMED") return <Notice kind="success">Votre place est confirmée. Retrouvez votre billet dans votre espace personnel.</Notice>;
+  if (application.status === "CONFIRMED") return <>
+    <Notice kind="success">Votre place est confirmée. Retrouvez votre billet dans votre espace personnel.</Notice>
+    {!eventRequiresScreening(event) && !application.networkingAnswer && <NetworkingFollowUp applicationId={application.id}/>}
+  </>;
   // La candidature autorise à tenter le paiement, elle ne garantit jamais de place à elle seule
   // (§5) : le clic sur "Payer" est ce qui pose réellement le verrou, via PaymentModal.
   if (application.status === "PAYMENT_PENDING") return <div className="payment-block">
@@ -447,13 +475,16 @@ function EventDetail() {
   const refreshApplication=()=>api<any>(`/events/${event.id}/my-application`).then(setApplication).catch(()=>{});
   const markWaitlisted=()=>{api<any>(`/events/${event.id}/waitlist/me`).then(setWaitlistEntry).catch(()=>{});setNotice({kind:"info",text:"Cet événement est complet pour votre catégorie : vous avez été placé(e) sur liste d’attente."})};
 
-  // La candidature ne garantit jamais de place (§5) : elle enregistre le questionnaire et autorise
-  // seulement à tenter le paiement ensuite (voir ApplicationStatusPanel → PaymentModal).
-  const apply=async(answers:Record<string,string>)=>{
+  // La candidature ne garantit jamais de place (§5) : elle enregistre le questionnaire (spéciale
+  // dating uniquement) et autorise seulement à tenter le paiement ensuite (voir
+  // ApplicationStatusPanel → PaymentModal). Arbitrage 12/E3 : un événement networking ne pose plus
+  // aucune question professionnelle à ce stade — voir le formulaire facultatif post-paiement dans
+  // ApplicationStatusPanel.
+  const apply=async(answers?:Record<string,string>)=>{
     setBusy(true);setNotice(null);
     try{
       const storedRef=sessionStorage.getItem(`nour_ref_${event.id}`)??undefined;
-      const body=requiresScreening?{screeningAnswers:answers,shareCode:storedRef}:{networkingAnswers:answers,shareCode:storedRef};
+      const body=requiresScreening?{screeningAnswers:answers,shareCode:storedRef}:{shareCode:storedRef};
       const result=await api<any>(`/events/${event.id}/apply`,{method:"POST",body:JSON.stringify(body)});
       setApplication(result.application);setShowQuestionnaire(false);
       setNotice({kind:"success",text:"Candidature envoyée : vous pouvez maintenant régler votre billet."});
@@ -511,8 +542,8 @@ function EventDetail() {
     :user.hasRestaurant?<Notice kind="info">Votre compte restaurateur vous permet de découvrir les événements proposés, mais ne permet pas d’y participer.</Notice>
     :requiresScreening&&!profileValidated?<Notice kind="error">Votre profil doit d’abord être validé lors d’un entretien avec Nour Meet avant de vous inscrire à un speed dating. <Link to="/dashboard">Demander mon entretien →</Link></Notice>
     :categoryUnknown?<Notice kind="error">Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement.</Notice>
-    :showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>
-    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même candidater : une liste d’attente et une éventuelle proposition alternative vous seront proposées au moment de payer.</Notice>}<button className="button full" onClick={()=>setShowQuestionnaire(true)}>{requiresScreening?"Candidater":"S’inscrire"}</button></>}
+    :requiresScreening&&showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>
+    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même candidater : une liste d’attente et une éventuelle proposition alternative vous seront proposées au moment de payer.</Notice>}<button className="button full" disabled={busy} onClick={()=>requiresScreening?setShowQuestionnaire(true):apply()}>{requiresScreening?"Candidater":busy?"…":"S’inscrire"}</button></>}
     <p className="fine">Le paiement est proposé immédiatement après le questionnaire ; la place n’est acquise qu’une fois le paiement confirmé.</p></aside></section></Layout>;
 }
 
