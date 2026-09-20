@@ -1,4 +1,4 @@
-import { PrismaClient, UserRole, EventStatus, EventFlow, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus } from "@prisma/client";
+import { PrismaClient, UserRole, EventStatus, EventFlow, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, AlternativeOfferStatus } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -45,17 +45,17 @@ async function main() {
     where: { slug: "afterwork-entrepreneurs-octobre" }, update: { zone: "La Défense" },
     create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "afterwork-entrepreneurs-octobre", title: "Afterwork des entrepreneurs", category: "Networking", description: "Rencontrez des entrepreneurs et indépendants autour d’échanges structurés.", startsAt: new Date("2026-10-01T19:00:00+02:00"), endsAt: new Date("2026-10-01T22:30:00+02:00"), district: "La Défense", address: "2 place de la Défense, 92800 Puteaux", zone: "La Défense", capacity: 40, priceCents: 4500, status: EventStatus.PUBLISHED }
   });
-  await prisma.event.upsert({
+  const artThe = await prisma.event.upsert({
     where: { slug: "art-the-conversations" }, update: { zone: "Paris intra-muros" },
     create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "art-the-conversations", title: "Art, thé & conversations", category: "Networking", description: "Une rencontre culturelle dans un salon privatisé du Marais.", startsAt: new Date("2026-10-04T16:00:00+02:00"), endsAt: new Date("2026-10-04T19:00:00+02:00"), district: "Paris 4e", address: "18 rue des Archives, 75004 Paris", zone: "Paris intra-muros", capacity: 20, priceCents: 2900, status: EventStatus.PUBLISHED }
   });
-  await prisma.event.upsert({
+  const soireeNour = await prisma.event.upsert({
     where: { slug: "soiree-nour-x-amana" }, update: { zone: "Paris intra-muros" },
     create: { controllerRestaurantId: null, venueRestaurantId: restaurant.id, slug: "soiree-nour-x-amana", title: "Soirée Nūr × Maison Amana", category: "Networking", description: "Un événement organisé directement par Nūr Meet, accueilli par notre partenaire Maison Amana.", startsAt: new Date("2026-10-10T19:00:00+02:00"), endsAt: new Date("2026-10-10T22:00:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 30, priceCents: 4000, status: EventStatus.PUBLISHED }
   });
   // Deuxième événement Networking à La Défense, pour démontrer les propositions d'événements alternatifs
   // (même catégorie + même zone) lorsque l'Afterwork est complet.
-  await prisma.event.upsert({
+  const networkingBis = await prisma.event.upsert({
     where: { slug: "networking-la-defense-bis" }, update: { zone: "La Défense" },
     create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "networking-la-defense-bis", title: "Networking des indépendants", category: "Networking", description: "Une seconde soirée networking à La Défense pour les indépendants et entrepreneurs.", startsAt: new Date("2026-10-08T19:00:00+02:00"), endsAt: new Date("2026-10-08T22:00:00+02:00"), district: "La Défense", address: "5 place de la Défense, 92800 Puteaux", zone: "La Défense", capacity: 30, priceCents: 4000, status: EventStatus.PUBLISHED }
   });
@@ -132,6 +132,27 @@ async function main() {
   });
   const existingHommeApp = await prisma.application.findFirst({ where: { userId: hommeValide.id, eventId: null } });
   if (!existingHommeApp) await prisma.application.create({ data: { userId: hommeValide.id, motivation: "Compte de test : participant homme déjà validé.", status: ApplicationStatus.ACCEPTED, decidedAt: new Date() } });
+
+  // C26 (ordre correctif 2026-09-20) : scénario de liste d'attente + alternatives immédiatement
+  // visible pour "Homme Validé", sans passer par une vraie saturation de capacité (données de seed,
+  // jamais un vrai paiement) — "Afterwork des entrepreneurs" comme candidature en cours, avec les 3
+  // autres soirées Networking d'Île-de-France (même région que La Défense) proposées comme
+  // alternatives réellement disponibles. "Dîner & Connexions" (Speed dating) démontre par omission
+  // le filtrage par catégorie : jamais proposé ici puisqu'incompatible.
+  const waitlistApplication = await prisma.application.upsert({
+    where: { eventId_userId: { eventId: afterwork.id, userId: hommeValide.id } },
+    update: { status: ApplicationStatus.PAYMENT_PENDING },
+    create: { eventId: afterwork.id, userId: hommeValide.id, motivation: "Compte de test : candidature en attente, événement complet.", status: ApplicationStatus.PAYMENT_PENDING }
+  });
+  await prisma.waitlistEntry.upsert({
+    where: { applicationId: waitlistApplication.id },
+    update: {},
+    create: { eventId: afterwork.id, userId: hommeValide.id, applicationId: waitlistApplication.id, position: 1 }
+  });
+  for (const alt of [artThe, soireeNour, networkingBis]) {
+    const existingOffer = await prisma.alternativeOffer.findFirst({ where: { userId: hommeValide.id, originalEventId: afterwork.id, alternativeEventId: alt.id } });
+    if (!existingOffer) await prisma.alternativeOffer.create({ data: { userId: hommeValide.id, originalEventId: afterwork.id, alternativeEventId: alt.id, status: AlternativeOfferStatus.PENDING, respondsBy: new Date(Date.now() + 7 * 24 * 60 * 60_000) } });
+  }
 
   await prisma.user.upsert({
     where: { phone: "+33600000021" },
