@@ -23,7 +23,9 @@
           "cameraPermission": "Autoriser Nūr Meet à scanner les QR codes personnels."
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-sharing",
+      "@react-native-community/datetimepicker"
     ]
   }
 }
