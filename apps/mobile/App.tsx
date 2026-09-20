@@ -132,6 +132,7 @@ function Events({user}:{user:any}){
   const requiresScreening=selected?eventRequiresScreening(selected):false;
   const questions=requiresScreening?SCREENING_QUESTIONS:NETWORKING_QUESTIONS;
   const full=selected?selected.confirmedCount>=selected.capacity:false;
+  const categoryUnknown=selected?selected.quotas?.length>0&&!user.profile?.quotaCategory:false;
   const canCancel=application&&!["REFUSED","CANCELLED"].includes(application.status);
   // La candidature ne garantit jamais de place (elle enregistre le questionnaire et autorise
   // seulement à tenter le paiement) : c'est le clic sur "Payer par carte" ci-dessous qui pose
@@ -202,6 +203,7 @@ function Events({user}:{user:any}){
     {application?<View>
       {application.status==="PAYMENT_PENDING"&&<View style={s.reservationCard}><Text style={s.meta}>{application.reservation?`Votre place est retenue quelques minutes (jusqu’au ${when(application.reservation.expiresAt)}) : finalisez votre paiement.`:"Vous pouvez régler votre billet dès maintenant."}</Text><GoldButton title={`Payer par carte · ${money(selected.priceCents)}`} onPress={async()=>{await payByCard(application.id,selected.id,selected.priceCents);await loadApplication(selected.id)}}/></View>}
       {waitlistEntry?<View style={s.reservationCard}><Text style={s.eyebrow}>LISTE D’ATTENTE</Text><Text style={s.bodyStrong}>Position {waitlistEntry.rank??waitlistEntry.position}</Text><GoldButton title={submitting?"…":"Quitter la liste d’attente"} secondary onPress={leaveWaitlist} disabled={submitting}/></View>
+      :categoryUnknown?<Notice text="Complétez votre catégorie (homme/femme) dans votre profil avant de rejoindre la liste d’attente." error/>
       :full&&canCancel?<GoldButton title={submitting?"…":"Rejoindre la liste d’attente"} secondary onPress={joinWaitlist} disabled={submitting}/>
       :null}
       {canCancel?<GoldButton title={submitting?"…":"Annuler mon inscription"} secondary onPress={cancel} disabled={submitting}/>
@@ -209,6 +211,7 @@ function Events({user}:{user:any}){
     </View>
     :user.hasRestaurant?<Notice text="Votre compte restaurateur vous permet de découvrir les événements proposés, mais ne permet pas d’y participer."/>
     :requiresScreening&&!user.profile?.validatedAt?<Notice text="Votre profil doit d’abord être validé lors d’un entretien avec Nour Meet avant de vous inscrire à un speed dating. Rendez-vous dans « Mon espace » → « Entretien »." error/>
+    :categoryUnknown?<Notice text="Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement." error/>
     :showForm?<View>{questions.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={answers[q.key]??""} onChangeText={v=>setAnswers({...answers,[q.key]:v})}/></View>)}<GoldButton title={submitting?"Envoi…":"Envoyer ma candidature"} onPress={apply} disabled={submitting}/></View>
     :full?<View style={s.bookingBar}><Text style={s.meta}>Cet événement est complet</Text><GoldButton title={submitting?"…":"Rejoindre la liste d’attente"} onPress={joinWaitlist} disabled={submitting}/></View>
     :<View style={s.bookingBar}><View>{selected.priceTiers?.length>0?selected.priceTiers.map((t:any)=><Text key={t.category} style={s.meta}>{t.category==="HOMME"?"Hommes":"Femmes"} · <Text style={s.bodyStrong}>{money(t.amountCents)}</Text></Text>):<><Text style={s.meta}>À partir de</Text><Text style={s.bookingPrice}>{money(selected.priceCents)}</Text></>}</View><GoldButton title={requiresScreening?"Candidater":"S’inscrire"} onPress={()=>setShowForm(true)}/></View>}
@@ -611,6 +614,7 @@ function RestaurantSpace({onLogout}:{onLogout:()=>void}){
   if(restaurant?.status==="APPROVED")return <ScrollView contentContainerStyle={s.content}>
     <ScreenTitle title="Mon établissement"/>
     <Notice text={`Votre établissement « ${restaurant.name} » est approuvé.`}/>
+    {restaurant.subscription&&<Text style={[s.meta,{marginTop:8}]}>Abonnement « {restaurant.subscription.plan.name} » — {(restaurant.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois — statut : {restaurant.subscription.status} — {restaurant.currentMonthEventsPublished}/{restaurant.subscription.plan.monthlyEventQuota} événements publiés ce mois-ci.</Text>}
     {message?<Notice text={message} error={!message.includes("mise à jour")}/>:null}
     <Text style={s.sectionTitle}>Fiche établissement</Text>
     {priceFields}
