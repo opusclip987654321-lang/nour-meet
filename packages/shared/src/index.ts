@@ -94,6 +94,7 @@ export interface SessionUser {
   displayName: string;
   role: UserRole;
   profileCompleted: boolean;
+  hasRestaurant: boolean;
 }
 
 export interface PublicEvent {

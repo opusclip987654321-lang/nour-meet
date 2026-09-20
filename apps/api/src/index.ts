@@ -353,16 +353,23 @@ app.post("/auth/verify-otp", { config: { rateLimit: { max: smsVerification.mode 
   const phone = normalizePhoneNumber(input.phone);
   if (!await smsVerification.checkCode(phone, input.code)) return reply.code(401).send({ error: "Code incorrect ou expiré" });
   let user = await prisma.user.findUnique({ where: { phone }, include: { profile: true } });
-  if (!user) user = await prisma.user.create({ data: { phone, displayName: input.displayName ?? "Nouveau membre", profile: { create: { interests: [] } } }, include: { profile: true } });
+  // isNewUser sert au front à proposer, une seule fois, le choix « participant ou restaurateur »
+  // juste après la création du compte — jamais recalculé ni stocké, seulement vrai sur cet appel-ci.
+  let isNewUser = false;
+  if (!user) { user = await prisma.user.create({ data: { phone, displayName: input.displayName ?? "Nouveau membre", profile: { create: { interests: [] } } }, include: { profile: true } }); isNewUser = true; }
   if (user.suspendedAt) return reply.code(403).send({ error: "Compte suspendu" });
   if (user.deletedAt) return reply.code(403).send({ error: "Compte supprimé" });
   const token = app.jwt.sign({ sub: user.id, role: user.role, phone: user.phone }, { expiresIn: "30d" });
-  return { token, user: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profileCompleted: user.profile?.profileCompleted ?? false } };
+  return { token, isNewUser, user: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profileCompleted: user.profile?.profileCompleted ?? false } };
 });
 
 app.get("/me", { preHandler: auth }, async (request) => {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: currentId(request) }, include: { profile: true } });
-  return { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profile: user.profile, age: profileAge(user.profile?.birthDate) };
+  // hasRestaurant reflète l'existence d'une fiche Restaurant quel que soit son statut (PENDING,
+  // APPROVED, REJECTED, SUSPENDED) : c'est ce champ, jamais le rôle, qui bloque la participation aux
+  // événements (le rôle ne devient ORGANIZER qu'à l'approbation, bien après la simple candidature).
+  const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: user.id }, select: { id: true } });
+  return { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profile: user.profile, age: profileAge(user.profile?.birthDate), hasRestaurant: !!restaurant };
 });
 
 app.patch("/me/profile", { preHandler: auth }, async (request) => {
@@ -518,6 +525,9 @@ const networkingAnswersSchema = z.object({
 app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const userId = currentId(request);
+  // Un compte restaurateur (candidature en cours ou déjà approuvée) n'a jamais le droit de participer
+  // aux événements en tant que participant, quel que soit le statut de sa fiche Restaurant.
+  if (await prisma.restaurant.findUnique({ where: { ownerId: userId } })) return reply.code(403).send({ error: "Les comptes restaurateurs ne peuvent pas participer aux événements" });
   const event = await prisma.event.findUniqueOrThrow({ where: { id }, include: { priceTiers: true } });
   const requiresScreening = eventRequiresScreening(event);
   const profile = await prisma.profile.findUnique({ where: { userId } });
@@ -566,6 +576,7 @@ app.get("/me/global-interview", { preHandler: auth }, async (request) => {
 app.post("/me/global-interview", { preHandler: auth }, async (request, reply) => {
   const { motivation } = z.object({ motivation: z.string().min(30).max(1200) }).parse(request.body);
   const userId = currentId(request);
+  if (await prisma.restaurant.findUnique({ where: { ownerId: userId } })) return reply.code(403).send({ error: "Les comptes restaurateurs ne peuvent pas participer aux événements" });
   const profile = await prisma.profile.findUnique({ where: { userId } });
   if (!profile?.profileCompleted) return reply.code(409).send({ error: "Complétez votre profil avant de demander un entretien" });
   if (profile.validatedAt) return reply.code(409).send({ error: "Votre profil est déjà validé" });
@@ -606,7 +617,12 @@ app.post("/applications/:id/schedule", { preHandler: auth }, async (request, rep
   return { scheduled: true, slot };
 });
 
-app.get("/me/applications", { preHandler: auth }, async (request) => prisma.application.findMany({ where: { userId: currentId(request) }, include: { event: true, call: true, reservation: { include: { payment: true, ticket: true } } }, orderBy: { createdAt: "desc" } }));
+app.get("/me/applications", { preHandler: auth }, async (request) => {
+  const applications = await prisma.application.findMany({ where: { userId: currentId(request) }, include: { event: true, call: true, reservation: { include: { payment: true, ticket: true } } }, orderBy: { createdAt: "desc" } });
+  // Même résolution d'image par défaut que les routes publiques (§ligne 307/1316) : un événement
+  // sans photo uploadée ne doit jamais renvoyer imageUrl:null au front.
+  return applications.map(a => a.event ? { ...a, event: { ...a.event, imageUrl: a.event.imageUrl ?? defaultCategoryImage(a.event.category) } } : a);
+});
 
 // Politique d'annulation §7 : plus de 24h avant l'événement, remboursement intégral automatique,
 // calculé et exécuté ici même (jamais seulement affiché côté interface) ; 24h ou moins, aucun
@@ -814,7 +830,7 @@ await app.register(async (webhooks) => {
 });
 
 app.get("/me/tickets", { preHandler: auth }, async (request) => {
-  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: true } } }, orderBy: { createdAt: "desc" } });
+  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: true } } } } }, orderBy: { createdAt: "desc" } });
   return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await QRCode.toDataURL(t.code) })));
 });
 
