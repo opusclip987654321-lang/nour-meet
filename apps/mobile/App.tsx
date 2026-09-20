@@ -1,7 +1,7 @@
 import { StatusBar } from "expo-status-bar";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { API_URL, api, getToken, setToken } from "./src/api";
 import { SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening, EVENT_CATEGORIES } from "@nour/shared";
@@ -121,6 +121,66 @@ function Scanner(){
   const open=async()=>{if(!permission?.granted){const p=await requestPermission();if(!p.granted){Alert.alert("Caméra refusée","Vous pouvez saisir le code manuellement.");return}}setActive(true)};
   if(profile)return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>setProfile(null)}><Text style={s.back}>‹ Scanner un autre code</Text></Pressable><View style={s.profilePreview}><Avatar name={profile.displayName} size={100} photoUrl={profile.photoUrl}/><Text style={s.profileName}>{profile.displayName}</Text><Text style={s.meta}>{profile.age?`${profile.age} ans · `:""}{profile.city}</Text><Text style={s.validated}>PROFIL VALIDÉ</Text></View><Text style={s.sectionTitle}>À propos</Text><Text style={s.paragraph}>{profile.bio}</Text><View style={s.chips}>{profile.interests?.map((x:string)=><Text style={s.chip} key={x}>{x}</Text>)}</View><GoldButton title="Envoyer une demande de contact" onPress={()=>api("/contacts/request",{method:"POST",body:JSON.stringify({recipientId:profile.userId})}).then(()=>Alert.alert("Demande envoyée","La messagerie s’ouvrira après acceptation."))}/></ScrollView>;
   return <View style={[s.content,{flex:1}]}><ScreenTitle title="Scanner un code"/>{active?<View style={s.cameraWrap}><CameraView style={StyleSheet.absoluteFill} barcodeScannerSettings={{barcodeTypes:["qr"]}} onBarcodeScanned={({data})=>lookup(data)}/><View style={s.scanGuide}/></View>:<Pressable onPress={open} style={s.scanPlaceholder}><Text style={s.scanIcon}>⌗</Text><Text style={s.sectionTitle}>Ouvrir la caméra</Text><Text style={s.meta}>Cadrez le QR code personnel.</Text></Pressable>}{error?<Notice text={error} error/>:null}<Text style={s.label}>OU SAISIR LE CODE</Text><TextInput style={s.input} value={code} onChangeText={setCode} autoCapitalize="characters"/><GoldButton title="Rechercher le profil" onPress={()=>lookup()}/></View>
+}
+
+// Scanner d'entrée pour le personnel (ADMIN/ORGANIZER/RECEPTION) : distinct du Scanner ci-dessus, qui
+// ne fait que consulter un profil de contact entre participants. Ici chaque scan valide directement
+// le billet côté serveur (/admin/tickets/scan) — pas d'étape de confirmation séparée, voir Scanner()
+// dans apps/web/src/App.tsx pour l'équivalent web.
+function TicketScanner(){
+  const [permission,requestPermission]=useCameraPermissions();
+  const [active,setActive]=useState(false);
+  const [code,setCode]=useState("");
+  const [result,setResult]=useState<any>(null);
+  const [error,setError]=useState("");
+  const busyRef=useRef(false);
+  const lastScanRef=useRef<{code:string;at:number}>({code:"",at:0});
+
+  const runScan=async(scannedCode:string)=>{
+    if(!scannedCode||busyRef.current)return;
+    busyRef.current=true;setResult(null);setError("");
+    try{setResult(await api<any>("/admin/tickets/scan",{method:"POST",body:JSON.stringify({code:scannedCode})}))}
+    catch(e){setError((e as Error).message)}
+    finally{busyRef.current=false}
+  };
+  const onBarcode=(data:string)=>{
+    const now=Date.now();
+    if(data===lastScanRef.current.code&&now-lastScanRef.current.at<3000)return;
+    lastScanRef.current={code:data,at:now};
+    runScan(data);
+  };
+  const open=async()=>{if(!permission?.granted){const p=await requestPermission();if(!p.granted){Alert.alert("Caméra refusée","Vous pouvez saisir le code manuellement.");return}}setActive(true)};
+  const submitManual=()=>{runScan(code);setCode("")};
+
+  return <View>
+    <Text style={s.sectionTitle}>Scanner un billet</Text>
+    {active?<View style={s.cameraWrap}><CameraView style={StyleSheet.absoluteFill} barcodeScannerSettings={{barcodeTypes:["qr"]}} onBarcodeScanned={({data})=>onBarcode(data)}/><View style={s.scanGuide}/></View>
+    :<Pressable onPress={open} style={s.scanPlaceholder}><Text style={s.scanIcon}>⌗</Text><Text style={s.sectionTitle}>Ouvrir la caméra</Text><Text style={s.meta}>Cadrez le QR code du billet.</Text></Pressable>}
+    <View style={[s.reservationCard,result?{borderColor:C.green}:error?{borderColor:C.red}:null]}>
+      {result?<><Text style={{color:C.green,fontWeight:"800",fontSize:18}}>✓ Entrée autorisée</Text><Text style={s.bodyStrong}>{result.participant}</Text><Text style={s.meta}>{result.event}</Text></>
+      :error?<><Text style={{color:C.red,fontWeight:"800",fontSize:18}}>× Entrée refusée</Text><Text style={s.meta}>{error}</Text></>
+      :<Text style={s.meta}>En attente d’un billet : présentez le QR code ou saisissez le code manuellement.</Text>}
+    </View>
+    <Text style={s.label}>SAISIE MANUELLE (SECOURS)</Text>
+    <TextInput style={s.input} value={code} onChangeText={setCode} placeholder="Code du billet" placeholderTextColor="#666" autoCapitalize="characters"/>
+    <GoldButton title="Vérifier et valider l’entrée" onPress={submitManual}/>
+  </View>;
+}
+
+// Accueil du personnel sans fiche restaurant (ADMIN/MODERATOR/RECEPTION) : un compte ORGANIZER passe
+// par RestaurantSpace à la place (voir plus haut), pas par cet écran, pour ne pas dupliquer sa fiche
+// établissement ni son bouton de déconnexion. Le reste du back-office (statistiques, finance,
+// modération, CMS…) reste volontairement hors mobile : ce sont des outils denses pensés desktop,
+// contrairement au scan de billet à l'entrée qui, lui, a toute sa place sur un téléphone.
+const ROLE_LABEL:Record<string,string>={ADMIN:"ADMINISTRATEUR",MODERATOR:"MODÉRATEUR",RECEPTION:"PERSONNEL D’ACCUEIL"};
+function StaffHome({user,onLogout}:{user:any,onLogout:()=>void}){
+  return <SafeAreaView style={s.safe}><StatusBar style="light"/><ScrollView contentContainerStyle={s.content}>
+    <Logo/>
+    <View style={s.loginHero}><Text style={s.eyebrow}>{ROLE_LABEL[user.role]??user.role}</Text><Text style={s.homeTitle}>Bonjour {user.displayName}.</Text></View>
+    {user.role==="RECEPTION"||user.role==="ADMIN"?<TicketScanner/>:<Notice text="Utilisez le site nour-meet pour traiter les signalements de modération."/>}
+    <Text style={[s.meta,{marginTop:24}]}>Le reste de l’administration (statistiques, finance, gestion des événements…) se gère depuis le site nour-meet.</Text>
+    <GoldButton title="Se déconnecter" secondary onPress={onLogout}/>
+  </ScrollView></SafeAreaView>;
 }
 
 function Messages({user}:{user:any}){
@@ -420,6 +480,7 @@ function RestaurantSpace({onLogout}:{onLogout:()=>void}){
       {(restaurant.photos??[]).map((p:any)=><View key={p.id} style={{width:100}}><Image source={{uri:`${API_URL}${p.url}`}} style={{width:100,height:100,borderRadius:8}}/><Pressable onPress={()=>removePhoto(p.id)} disabled={photoBusy}><Text style={[s.link,{marginTop:4,textAlign:"center"}]}>Retirer</Text></Pressable></View>)}
     </View>
     <GoldButton title={photoBusy?"…":"Ajouter une photo"} secondary onPress={uploadPhoto} disabled={photoBusy||(restaurant.photos??[]).length>=8}/>
+    <View style={{marginTop:30}}><TicketScanner/></View>
     <Text style={[s.meta,{marginTop:20}]}>La gestion des événements et du tableau de bord se fait pour l’instant depuis le site nour-meet.</Text>
     <GoldButton title="Se déconnecter" secondary onPress={onLogout}/>
   </ScrollView>;
@@ -455,6 +516,7 @@ export default function App(){
   const logout=async()=>{await setToken(null);setUser(null);setForceRestaurantSpace(false)};
   if(loading)return <SafeAreaView style={[s.safe,s.center]}><ActivityIndicator color={C.gold}/></SafeAreaView>;
   if(!user)return <Login onLogin={opts=>{if(opts?.restaurateur){setForceRestaurantSpace(true);setTab("profile")}load()}}/>;
+  if(["ADMIN","MODERATOR","RECEPTION"].includes(user.role))return <StaffHome user={user} onLogout={logout}/>;
   const showRestaurantSpace=user.hasRestaurant||forceRestaurantSpace;
   return <SafeAreaView style={s.safe}><StatusBar style="light"/><View style={s.app}>{tab==="home"&&<Home user={user} setTab={setTab}/>} {tab==="events"&&<Events user={user}/>}{tab==="concept"&&<Concept setTab={setTab}/>}{tab==="scan"&&<Scanner/>}{tab==="messages"&&<Messages user={user}/>} {tab==="profile"&&(showRestaurantSpace?<RestaurantSpace onLogout={logout}/>:<Espace user={user} onSaved={load} onLogout={logout}/>)}</View><TabBar tab={tab} setTab={setTab} profileLabel={showRestaurantSpace?"Mon établissement":"Mon espace"}/></SafeAreaView>
 }
