@@ -8,7 +8,7 @@ import { VideoView, useVideoPlayer } from "expo-video";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Image, ImageBackground, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
-import { API_URL, WEB_URL, api, getToken, setToken } from "./src/api";
+import { WEB_URL, api, getToken, setToken } from "./src/api";
 import { categoryColor, money, when, dayLabel, timeLabel, imgUrl } from "./src/format";
 import { SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening, EVENT_CATEGORIES } from "@nour/shared";
 
@@ -29,7 +29,7 @@ const payByCard=async(applicationId:string,eventId:string,amountCents:number)=>{
 function Logo(){return <View style={s.logo}><View style={s.logoMark}><Text style={s.logoN}>N</Text></View><Text style={s.logoText}>NŪR <Text style={{color:C.gold}}>MEET</Text></Text></View>}
 function GoldButton({title,onPress,secondary=false,disabled=false}:{title:string,onPress:()=>void,secondary?:boolean,disabled?:boolean}){return <Pressable disabled={disabled} onPress={onPress} style={[s.button,secondary&&s.buttonSecondary,disabled&&{opacity:.5}]}><Text style={[s.buttonText,secondary&&{color:C.cream}]}>{title}</Text></Pressable>}
 function ScreenTitle({eyebrow,title,action}:{eyebrow?:string,title:string,action?:React.ReactNode}){return <View style={s.titleRow}><View>{eyebrow&&<Text style={s.eyebrow}>{eyebrow}</Text>}<Text style={s.screenTitle}>{title}</Text></View>{action}</View>}
-function Avatar({name,size=48,photoUrl}:{name:string,size?:number,photoUrl?:string|null}){if(photoUrl)return <Image source={{uri:`${API_URL}${photoUrl}`}} style={{width:size,height:size,borderRadius:size/2}}/>;return <View style={[s.avatar,{width:size,height:size,borderRadius:size/2}]}><Text style={[s.avatarText,{fontSize:size*.3}]}>{name.slice(0,2).toUpperCase()}</Text></View>}
+function Avatar({name,size=48,photoUrl}:{name:string,size?:number,photoUrl?:string|null}){if(photoUrl)return <Image source={{uri:imgUrl(photoUrl)}} style={{width:size,height:size,borderRadius:size/2}}/>;return <View style={[s.avatar,{width:size,height:size,borderRadius:size/2}]}><Text style={[s.avatarText,{fontSize:size*.3}]}>{name.slice(0,2).toUpperCase()}</Text></View>}
 function Notice({text,error=false}:{text:string,error?:boolean}){return <View style={[s.notice,error&&{borderLeftColor:C.red}]}><Text style={s.noticeText}>{text}</Text></View>}
 // Indication speed dating/networking (correctif §1/§4) : un point de couleur suffit à distinguer les
 // deux catégories, sans dépendre d'une librairie d'icônes SVG absente du projet mobile.
@@ -87,7 +87,7 @@ function Blog({setTab}:{setTab:(t:Tab)=>void}){
     <Text style={[s.eyebrow,{marginTop:6}]}>{selected.category.toUpperCase()}</Text>
     <Text style={s.detailTitle}>{selected.title}</Text>
     {selected.author&&<Text style={s.meta}>Par {selected.author.displayName} · {new Date(selected.publishedAt).toLocaleDateString("fr-FR")}</Text>}
-    {selected.imageUrl&&<Image source={{uri:`${API_URL}${selected.imageUrl}`}} style={{width:"100%",height:220,borderRadius:14,marginVertical:16}}/>}
+    {selected.imageUrl&&<Image source={{uri:imgUrl(selected.imageUrl)}} style={{width:"100%",height:220,borderRadius:14,marginVertical:16}}/>}
     {selected.content.split("\n\n").map((p:string,i:number)=><Text key={i} style={[s.paragraph,{marginBottom:14}]}>{p}</Text>)}
     {selected.keywords?.length>0&&<View style={s.chips}>{selected.keywords.map((k:string)=><Text key={k} style={s.chip}>{k}</Text>)}</View>}
   </ScrollView>;
@@ -101,7 +101,7 @@ function Blog({setTab}:{setTab:(t:Tab)=>void}){
     </ScrollView>
     {articles.length===0?<Text style={s.meta}>Aucun article pour le moment.</Text>:articles.map(a=>
       <Pressable key={a.id} onPress={()=>openArticle(a.slug)} style={s.reservationCard}>
-        {a.imageUrl&&<Image source={{uri:`${API_URL}${a.imageUrl}`}} style={{width:"100%",height:140,borderRadius:8,marginBottom:10}}/>}
+        {a.imageUrl&&<Image source={{uri:imgUrl(a.imageUrl)}} style={{width:"100%",height:140,borderRadius:8,marginBottom:10}}/>}
         <Text style={s.eyebrow}>{a.category.toUpperCase()}</Text>
         <Text style={s.sectionTitle}>{a.title}</Text>
         <Text style={s.paragraph}>{a.excerpt}</Text>
@@ -614,7 +614,7 @@ function RestaurantSpace({onLogout}:{onLogout:()=>void}){
     <GoldButton title={submitting?"Enregistrement…":"Enregistrer"} onPress={saveProfile} disabled={submitting}/>
     <Text style={[s.sectionTitle,{marginTop:24}]}>Galerie ({(restaurant.photos??[]).length}/8)</Text>
     <View style={{flexDirection:"row",flexWrap:"wrap",gap:10,marginBottom:14}}>
-      {(restaurant.photos??[]).map((p:any)=><View key={p.id} style={{width:100}}><Image source={{uri:`${API_URL}${p.url}`}} style={{width:100,height:100,borderRadius:8}}/><Pressable onPress={()=>removePhoto(p.id)} disabled={photoBusy}><Text style={[s.link,{marginTop:4,textAlign:"center"}]}>Retirer</Text></Pressable></View>)}
+      {(restaurant.photos??[]).map((p:any)=><View key={p.id} style={{width:100}}><Image source={{uri:imgUrl(p.url)}} style={{width:100,height:100,borderRadius:8}}/><Pressable onPress={()=>removePhoto(p.id)} disabled={photoBusy}><Text style={[s.link,{marginTop:4,textAlign:"center"}]}>Retirer</Text></Pressable></View>)}
     </View>
     <GoldButton title={photoBusy?"…":"Ajouter une photo"} secondary onPress={uploadPhoto} disabled={photoBusy||(restaurant.photos??[]).length>=8}/>
     <View style={{marginTop:30}}><TicketScanner/></View>
