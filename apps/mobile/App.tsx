@@ -96,9 +96,15 @@ function Blog({setTab}:{setTab:(t:Tab)=>void}){
 
 function Events({user}:{user:any}){
   const [events,setEvents]=useState<any[]>([]),[selected,setSelected]=useState<any>(null),[application,setApplication]=useState<any>(null),[message,setMessage]=useState(""),[showForm,setShowForm]=useState(false),[answers,setAnswers]=useState<Record<string,string>>({}),[submitting,setSubmitting]=useState(false);
+  const [waitlistEntry,setWaitlistEntry]=useState<any>(null),[altOffer,setAltOffer]=useState<any>(null);
   useEffect(()=>{api<any[]>("/events").then(setEvents)},[]);
   const loadApplication=(eventId:string)=>api<any>(`/events/${eventId}/my-application`).then(setApplication).catch(()=>setApplication(null));
-  const openEvent=(e:any)=>{setSelected(e);setMessage("");setShowForm(false);setAnswers({});loadApplication(e.id)};
+  const loadWaitlist=(eventId:string)=>api<any>(`/events/${eventId}/waitlist/me`).then(setWaitlistEntry).catch(()=>setWaitlistEntry(null));
+  const openEvent=(e:any)=>{
+    setSelected(e);setMessage("");setShowForm(false);setAnswers({});
+    loadApplication(e.id);loadWaitlist(e.id);
+    api<any[]>("/me/alternative-offers").then(list=>setAltOffer(list.find(o=>o.originalEventId===e.id&&o.status==="PENDING")??null)).catch(()=>{});
+  };
   const requiresScreening=selected?eventRequiresScreening(selected):false;
   const questions=requiresScreening?SCREENING_QUESTIONS:NETWORKING_QUESTIONS;
   const full=selected?selected.confirmedCount>=selected.capacity:false;
@@ -128,7 +134,20 @@ function Events({user}:{user:any}){
   };
   const joinWaitlist=async()=>{
     setSubmitting(true);
-    try{await api(`/events/${selected.id}/waitlist`,{method:"POST"});setMessage("Vous êtes inscrit(e) sur la liste d’attente.")}
+    try{await api(`/events/${selected.id}/waitlist`,{method:"POST"});await loadWaitlist(selected.id);setMessage("Vous êtes inscrit(e) sur la liste d’attente.")}
+    catch(e){setMessage((e as Error).message)}
+    finally{setSubmitting(false)}
+  };
+  const leaveWaitlist=async()=>{
+    setSubmitting(true);
+    try{await api(`/events/${selected.id}/waitlist`,{method:"DELETE"});setWaitlistEntry(null);setMessage("Vous avez quitté la liste d’attente.")}
+    catch(e){setMessage((e as Error).message)}
+    finally{setSubmitting(false)}
+  };
+  const respondAltOffer=async(accept:boolean)=>{
+    if(!altOffer)return;
+    setSubmitting(true);
+    try{await api(`/alternative-offers/${altOffer.id}/respond`,{method:"POST",body:JSON.stringify({accept})});setAltOffer(null);setMessage(accept?"Place réservée sur l’événement alternatif : consultez votre espace personnel pour payer.":"Proposition refusée.")}
     catch(e){setMessage((e as Error).message)}
     finally{setSubmitting(false)}
   };
@@ -138,8 +157,12 @@ function Events({user}:{user:any}){
       await Share.share({message:`Je vais à « ${selected.title} », viens avec moi : ${link.url}`});
     }catch(e){setMessage((e as Error).message)}
   };
-  if(selected)return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>{setSelected(null);setApplication(null)}}><Text style={s.back}>‹ Retour</Text></Pressable><View style={s.detailArt}><Text style={[s.eyebrow,{color:categoryColor(selected.category)}]}>{selected.category.toUpperCase()}</Text><Text style={s.detailTitle}>{selected.title}</Text></View><View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View><Text style={s.sectionTitle}>Rencontrez autrement</Text><Text style={s.paragraph}>{selected.description}</Text><GoldButton title="J’y vais, viens avec moi" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
+  if(selected)return <ScrollView contentContainerStyle={s.content}><Pressable onPress={()=>{setSelected(null);setApplication(null);setWaitlistEntry(null);setAltOffer(null)}}><Text style={s.back}>‹ Retour</Text></Pressable><View style={s.detailArt}><Text style={[s.eyebrow,{color:categoryColor(selected.category)}]}>{selected.category.toUpperCase()}</Text><Text style={s.detailTitle}>{selected.title}</Text></View><View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View><Text style={s.sectionTitle}>Rencontrez autrement</Text><Text style={s.paragraph}>{selected.description}</Text><GoldButton title="J’y vais, viens avec moi" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
+    {altOffer&&<View style={s.altOffer}><Text style={s.eyebrow}>ÉVÉNEMENT ALTERNATIF PROPOSÉ</Text><Text style={s.sectionTitle}>{altOffer.alternativeEvent.title}</Text><Text style={s.meta}>{when(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</Text><Text style={s.bodyStrong}>{money(altOffer.alternativeEvent.priceCents)}</Text><View style={{flexDirection:"row",gap:10,marginTop:10}}><View style={{flex:1}}><GoldButton title={submitting?"…":"Accepter"} onPress={()=>respondAltOffer(true)} disabled={submitting}/></View><View style={{flex:1}}><GoldButton title={submitting?"…":"Refuser"} secondary onPress={()=>respondAltOffer(false)} disabled={submitting}/></View></View></View>}
     {application?<View>
+      {waitlistEntry?<View style={s.reservationCard}><Text style={s.eyebrow}>LISTE D’ATTENTE</Text><Text style={s.bodyStrong}>Position {waitlistEntry.rank??waitlistEntry.position}</Text><GoldButton title={submitting?"…":"Quitter la liste d’attente"} secondary onPress={leaveWaitlist} disabled={submitting}/></View>
+      :full&&canCancel?<GoldButton title={submitting?"…":"Rejoindre la liste d’attente"} secondary onPress={joinWaitlist} disabled={submitting}/>
+      :null}
       {canCancel?<GoldButton title={submitting?"…":"Annuler mon inscription"} secondary onPress={cancel} disabled={submitting}/>
       :<Text style={s.meta}>Statut : {application.status}</Text>}
     </View>
