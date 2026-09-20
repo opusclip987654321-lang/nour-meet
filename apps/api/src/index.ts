@@ -237,26 +237,20 @@ const releaseReservationSlot = async (tx: Prisma.TransactionClient, reservation:
   }
 };
 
-// Dès qu'une place se libère, la propose automatiquement au premier inscrit (ordre chronologique) de la
-// liste d'attente correspondante, avec le même délai de paiement que pour une acceptation classique.
-// La catégorie ne partitionne la liste d'attente que si l'événement a de vrais quotas : un tarif
-// différencié seul (sans quota) ne doit jamais créer de file d'attente séparée par catégorie.
+// Arbitrage final 07 (2026-09-20) : PLUS d'offre exclusive à une seule personne pendant 24h. Dès
+// qu'une place se libère, TOUS les inscrits éligibles de la liste d'attente sont notifiés
+// simultanément ; aucune réservation n'est pré-attribuée ici. Le premier qui ouvre réellement le
+// paiement (POST /applications/:id/payment-intent, plus bas) obtient le verrou atomique via
+// claimReservation — exactement le même mécanisme qui protège déjà une inscription directe contre
+// la survente, jamais une exclusivité posée à l'avance. La catégorie ne partitionne la liste
+// d'attente que si l'événement a de vrais quotas.
 const offerNextWaitlistEntry = async (eventId: string, category: QuotaCategory | null) => {
   const hasQuotas = (await prisma.eventQuota.count({ where: { eventId } })) > 0;
   const candidates = await prisma.waitlistEntry.findMany({ where: { eventId, offeredAt: null, ...(hasQuotas ? { quotaCategory: category } : {}) }, orderBy: { createdAt: "asc" }, include: { application: true } });
-  for (const entry of candidates) {
-    // Fenêtre d'offre exclusive (pas un verrou de paiement : pas de risque de survente, la place est
-    // déjà décomptée de façon atomique pour cette seule personne) — délai généreux car il s'agit de
-    // laisser le temps de remarquer la notification, pas de protéger une vente simultanée.
-    const result = await claimReservation(eventId, entry.application, paymentDeadline(new Date(), getSetting("WAITLIST_OFFER_WINDOW_HOURS")));
-    // Un chevauchement horaire (§11) avec une autre réservation active ne doit jamais bloquer toute la
-    // file : on passe au suivant plutôt que de laisser la place sans preneur indéfiniment.
-    if (!result.ok) continue;
-    await prisma.waitlistEntry.update({ where: { id: entry.id }, data: { offeredAt: new Date(), expiresAt: result.reservation.expiresAt } });
-    const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
-    await notify(entry.userId, "Une place s’est libérée !", `Une place pour « ${event.title} » vous est proposée. Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet, sans quoi elle sera proposée au participant suivant.`, "/dashboard?tab=reservations");
-    return;
-  }
+  if (candidates.length === 0) return;
+  const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
+  await prisma.waitlistEntry.updateMany({ where: { id: { in: candidates.map(c => c.id) } }, data: { offeredAt: new Date() } });
+  await Promise.all(candidates.map(entry => notify(entry.userId, "Une place s’est libérée !", `Une place pour « ${event.title} » est disponible. Réglez votre billet dès maintenant : elle revient au premier qui finalise son paiement.`, "/dashboard?tab=reservations")));
 };
 
 // Une place existe réellement pour cette catégorie (ou en capacité globale si l'événement n'a pas
@@ -356,7 +350,6 @@ const publicEvent = (event: any, revealAddress = false, viewerQuotaCategory: str
   // Jamais exposés publiquement tant que ENABLE_GENDER_PRICING est désactivé (§6) : sinon le web
   // afficherait un tarif différencié que resolvePriceCents n'appliquerait pas réellement au paiement.
   priceTiers: getSetting("ENABLE_GENDER_PRICING") ? (event.priceTiers ?? []).map((t: any) => ({ category: t.category, amountCents: t.amountCents })) : [],
-  proposedStartsAt: event.proposedStartsAt ?? null, proposedEndsAt: event.proposedEndsAt ?? null,
   organizer: event.controllerRestaurant ? { id: event.controllerRestaurant.id, name: event.controllerRestaurant.name } : { id: null, name: "Nūr Meet" },
   // Instructions définitives 2026-09-20 (A3) : mise en avant réelle mais qui ne doit jamais changer
   // le tri chronologique de la page Événements — seulement un badge visuel, jamais un ré-ordonnancement.
@@ -442,6 +435,27 @@ app.post("/auth/verify-otp", { config: { rateLimit: { max: smsVerification.mode 
   if (user.deletedAt) return reply.code(403).send({ error: "Compte supprimé" });
   const token = app.jwt.sign({ sub: user.id, role: user.role, phone: user.phone }, { expiresIn: "30d" });
   return { token, isNewUser, user: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profileCompleted: user.profile?.profileCompleted ?? false } };
+});
+// Section 9.2 : le mobile crée ce jeton opaque (jamais son vrai jeton de session) avant d'ouvrir le
+// navigateur intégré vers /pay/:applicationId ; à usage unique, expire en quelques minutes.
+app.post("/me/payment-sessions", { preHandler: auth }, async (request, reply) => {
+  const { applicationId } = z.object({ applicationId: z.string() }).parse(request.body);
+  const userId = currentId(request);
+  const application = await prisma.application.findFirst({ where: { id: applicationId, userId } });
+  if (!application) return reply.code(404).send({ error: "Candidature introuvable" });
+  const session = await prisma.paymentSession.create({ data: { token: randomUUID(), userId, applicationId, expiresAt: new Date(Date.now() + 10 * 60_000) } });
+  return { token: session.token };
+});
+// Échange à usage unique : ce jeton opaque devient un vrai jeton de session, mais éphémère (15 min)
+// — jamais les 30 jours habituels — puisqu'il ne sert qu'à finaliser un paiement déjà en cours.
+app.post("/auth/payment-session-exchange", async (request, reply) => {
+  const { token } = z.object({ token: z.string() }).parse(request.body);
+  const session = await prisma.paymentSession.findUnique({ where: { token } });
+  if (!session || session.usedAt || session.expiresAt < new Date()) return reply.code(401).send({ error: "Session de paiement invalide ou expirée" });
+  await prisma.paymentSession.update({ where: { id: session.id }, data: { usedAt: new Date() } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: session.userId } });
+  const jwt = app.jwt.sign({ sub: user.id, role: user.role, phone: user.phone }, { expiresIn: "15m" });
+  return { token: jwt, applicationId: session.applicationId };
 });
 
 app.get("/me", { preHandler: auth }, async (request) => {
@@ -820,6 +834,32 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
   // jamais rétroactivement à cette vente.
   const amountCents = resolvePriceCents(event, reservation.quotaCategory, getSetting("ENABLE_GENDER_PRICING"));
 
+  // Cahier des charges consolidé final (2026-09-20, section 3) : une soirée gratuite ne doit jamais
+  // créer de PaymentIntent Stripe à 0 € (Stripe le refuse de toute façon, sous son minimum de
+  // perception) — confirmation transactionnelle directe, avec la même protection anti-survente que
+  // le webhook de paiement réel (place déjà verrouillée de façon atomique par claimReservation
+  // ci-dessus ; on ne fait ici que transformer ce verrou en billet, jamais l'inverse).
+  if (amountCents === 0) {
+    const outcome = await prisma.$transaction(async (tx) => {
+      await tx.payment.upsert({ where: { reservationId: reservation!.id }, update: { amountCents: 0, status: PaymentStatus.SUCCEEDED, provider: "free", paidAt: new Date() }, create: { reservationId: reservation!.id, amountCents: 0, status: PaymentStatus.SUCCEEDED, provider: "free", paidAt: new Date() } });
+      const reservationUpdate = await tx.reservation.updateMany({ where: { id: reservation!.id, cancelledAt: null, confirmedAt: null }, data: { confirmedAt: new Date() } });
+      if (reservationUpdate.count !== 1) return "ALREADY_CONFIRMED" as const;
+      const ticketCode = `NOUR-${randomUUID().toUpperCase()}`;
+      await tx.ticket.upsert({ where: { reservationId: reservation!.id }, update: {}, create: { reservationId: reservation!.id, code: ticketCode } });
+      await tx.application.update({ where: { id: application.id }, data: { status: ApplicationStatus.CONFIRMED } });
+      return "CONFIRMED" as const;
+    });
+    if (outcome === "CONFIRMED") {
+      await notify(userId, "Place confirmée", `Votre billet gratuit pour « ${event.title} » est disponible.`, "/dashboard?tab=tickets");
+      if (event.controllerRestaurantId) {
+        const controllerRestaurant = await prisma.restaurant.findUnique({ where: { id: event.controllerRestaurantId } });
+        if (controllerRestaurant) await notify(controllerRestaurant.ownerId, "Nouvelle inscription gratuite", `Une place gratuite pour « ${event.title} » vient d’être confirmée.`, `/admin/events?highlight=${event.id}`);
+      }
+      await audit(userId, "FREE_RESERVATION_CONFIRMED", "Reservation", reservation.id);
+    }
+    return { free: true, confirmed: outcome === "CONFIRMED" };
+  }
+
   let clientSecret: string | null = null;
   if (payment?.providerRef) {
     const existing = await stripe.paymentIntents.retrieve(payment.providerRef);
@@ -952,6 +992,26 @@ await app.register(async (webhooks) => {
           await notify(existing.restaurant.ownerId, "Abonnement activé", `Votre essai gratuit est terminé : l’abonnement « ${existing.plan.name} » est maintenant actif.`, "/restaurant?tab=subscription");
         }
         await audit(existing.restaurant.ownerId, "SUBSCRIPTION_STRIPE_SYNCED", "RestaurantSubscription", existing.id, { stripeStatus: stripeSub.status });
+      }
+    } else if (event.type === "invoice.payment_succeeded") {
+      // Arbitrage final 01 (cahier des charges consolidé 2026-09-20) : le premier paiement
+      // d'abonnement RÉELLEMENT réussi (jamais le simple enregistrement d'une carte ni le seul
+      // démarrage de l'essai) approuve automatiquement une candidature encore en attente. Un
+      // paiement échoué (invoice.payment_failed, déjà couvert par la synchronisation de statut
+      // ci-dessus via PAST_DUE) n'approuve jamais rien.
+      const invoice = event.data.object as Stripe.Invoice;
+      const subscriptionRef = invoice.parent?.subscription_details?.subscription;
+      const stripeSubscriptionId = typeof subscriptionRef === "string" ? subscriptionRef : subscriptionRef?.id;
+      if (stripeSubscriptionId) {
+        const existing = await prisma.restaurantSubscription.findFirst({ where: { stripeSubscriptionId }, include: { restaurant: { include: { owner: true } } } });
+        if (existing && existing.restaurant.status === "PENDING") {
+          await prisma.$transaction([
+            prisma.restaurant.update({ where: { id: existing.restaurant.id }, data: { status: "APPROVED", verifiedAt: new Date() } }),
+            prisma.user.update({ where: { id: existing.restaurant.ownerId }, data: { role: existing.restaurant.owner.role === UserRole.PARTICIPANT ? UserRole.ORGANIZER : existing.restaurant.owner.role } })
+          ]);
+          await notify(existing.restaurant.ownerId, "Compte restaurateur approuvé automatiquement", "Votre premier paiement d’abonnement a été confirmé : votre établissement est approuvé. Vous pouvez proposer des soirées, chacune restant soumise à validation.", "/restaurant?tab=subscription");
+          await audit(undefined, "AUTO_APPROVE_RESTAURANT_ON_PAYMENT", "Restaurant", existing.restaurant.id, { invoiceId: invoice.id });
+        }
       }
     }
     return reply.send({ received: true });
@@ -2021,31 +2081,20 @@ app.patch("/admin/events/:id", { preHandler: roles(UserRole.ADMIN, UserRole.ORGA
   if (token.role !== UserRole.ADMIN) delete data.flow;
   if (input.minParticipantsDeadline !== undefined) data.minParticipantsDeadline = input.minParticipantsDeadline ? new Date(input.minParticipantsDeadline) : null;
   const dateChanged = (input.startsAt && new Date(input.startsAt).getTime() !== event.startsAt.getTime()) || (input.endsAt && new Date(input.endsAt).getTime() !== event.endsAt.getTime());
-  if (dateChanged && activeReservations > 0) {
-    data.proposedStartsAt = input.startsAt ? new Date(input.startsAt) : event.startsAt;
-    data.proposedEndsAt = input.endsAt ? new Date(input.endsAt) : event.endsAt;
-    data.dateChangeRequestedAt = new Date();
-    const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
-    await Promise.all(admins.map(a => notify(a.id, "Changement de date proposé", `« ${event.title} » : nouvelle date proposée, en attente de votre approbation.`, `/admin/events?highlight=${event.id}`)));
-  } else if (dateChanged) {
+  // Cahier des charges consolidé final (2026-09-20, section 3) : une soirée PUBLIÉE ne peut plus être
+  // déplacée, ni pour un restaurateur ni pour un événement Nour — l'ancien mécanisme de proposition/
+  // approbation de changement de date est retiré. Seule issue désormais : annuler cette soirée
+  // (remboursement immédiat automatique) puis en créer une nouvelle. Un brouillon reste librement
+  // modifiable, y compris sa date, puisque rien n'a encore été vendu ni publiquement annoncé.
+  if (dateChanged && (event.status === EventStatus.PUBLISHED || event.status === EventStatus.FULL)) {
+    return reply.code(409).send({ error: "Une soirée publiée ne peut pas être déplacée. Annulez-la (remboursement automatique) puis créez une nouvelle soirée à la date souhaitée." });
+  }
+  if (dateChanged) {
     if (input.startsAt) data.startsAt = new Date(input.startsAt);
     if (input.endsAt) data.endsAt = new Date(input.endsAt);
   }
   const updated = await prisma.event.update({ where: { id }, data });
   await audit(currentId(request), "UPDATE_EVENT", "Event", id, input);
-  return updated;
-});
-app.post("/admin/events/:id/date-change/decision", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
-  const { id } = z.object({ id: z.string() }).parse(request.params);
-  const { accept } = z.object({ accept: z.boolean() }).parse(request.body);
-  const event = await prisma.event.findUniqueOrThrow({ where: { id } });
-  if (!event.dateChangeRequestedAt || !event.proposedStartsAt || !event.proposedEndsAt) return reply.code(409).send({ error: "Aucun changement de date en attente" });
-  const affected = await prisma.reservation.findMany({ where: { eventId: id, cancelledAt: null }, select: { userId: true } });
-  const updated = await prisma.event.update({ where: { id }, data: accept
-    ? { startsAt: event.proposedStartsAt, endsAt: event.proposedEndsAt, proposedStartsAt: null, proposedEndsAt: null, dateChangeRequestedAt: null }
-    : { proposedStartsAt: null, proposedEndsAt: null, dateChangeRequestedAt: null } });
-  if (accept) await Promise.all(affected.map(r => notify(r.userId, "Date de l’événement modifiée", `« ${event.title} » a désormais lieu le ${event.proposedStartsAt!.toLocaleString("fr-FR")}.`, "/dashboard?tab=reservations")));
-  await audit(currentId(request), accept ? "APPROVE_DATE_CHANGE" : "REJECT_DATE_CHANGE", "Event", id);
   return updated;
 });
 // Tarifs : un événement garde un tarif unique par défaut ; la différenciation homme/femme reste

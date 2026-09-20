@@ -120,8 +120,6 @@ export interface PublicEvent {
   hasQuotas: boolean;
   priceCents: number;
   priceTiers: { category: QuotaCategory; amountCents: number }[];
-  proposedStartsAt: string | null;
-  proposedEndsAt: string | null;
   status: EventStatus;
   organizer: {id: string | null; name: string};
   venue: {id: string; name: string} | null;

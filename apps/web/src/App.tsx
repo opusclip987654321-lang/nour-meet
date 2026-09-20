@@ -343,17 +343,25 @@ function PaymentModal({ applicationId, eventId, amountCents, onClose, onConfirme
 // L'authentification se fait par un jeton passé en paramètre d'URL (le mobile n'a pas de cookie ou
 // de localStorage partagé avec le navigateur web) : il est stocké avant tout appel à l'API, jamais
 // après, pour éviter toute course avec PaymentModal ci-dessus qui lit le jeton dès son montage.
+// Cahier des charges consolidé final (2026-09-20, section 9.2) : la page n'accepte plus le jeton de
+// session (30 jours) directement dans l'URL — seulement un jeton de paiement opaque, à usage unique
+// et de courte durée, échangé ici contre un vrai jeton de session éphémère (voir
+// POST /auth/payment-session-exchange). Jamais stocké ni journalisé tel quel.
 function PayStandalone(){
   const { applicationId } = useParams();
   const [searchParams] = useSearchParams();
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState(false);
   const [done, setDone] = useState(false);
   useEffect(() => {
-    const token = searchParams.get("token");
-    if (token) setToken(token);
-    setReady(true);
+    const session = searchParams.get("session");
+    if (!session) { setError(true); setReady(true); return; }
+    api<{ token: string }>("/auth/payment-session-exchange", { method: "POST", body: JSON.stringify({ token: session }) })
+      .then(r => { setToken(r.token); setReady(true); })
+      .catch(() => { setError(true); setReady(true); });
   }, []);
   if (!ready) return <div className="state-page"><div className="spinner"/></div>;
+  if (error) return <div className="state-page"><h2>Lien de paiement invalide ou expiré.</h2><p>Retournez dans l’application et réessayez.</p></div>;
   if (done) return <div className="state-page"><h2>C’est terminé ici.</h2><p>Vous pouvez fermer cette fenêtre et retourner dans l’application Nūr Meet.</p></div>;
   const eventId = searchParams.get("eventId") ?? "";
   const amountCents = Number(searchParams.get("amount") ?? "0");
@@ -883,6 +891,17 @@ function Dashboard() {
     catch(err){setMessage({kind:"error",text:(err as Error).message})}
     finally{setBusyId(null)}
   };
+  // Cahier des charges consolidé final (2026-09-20, section 3) : une soirée gratuite ne passe jamais
+  // par Stripe (aucun PaymentIntent à 0 €) — confirmation directe, billet immédiat si une place est
+  // réellement disponible, sinon liste d'attente comme pour un événement payant.
+  const confirmFree=async(appId:string)=>{
+    setBusyId(appId);setMessage(null);
+    try{
+      const result=await api<{free:boolean;confirmed:boolean}>(`/applications/${appId}/payment-intent`,{method:"POST"});
+      setMessage({kind:"success",text:result.confirmed?"Votre billet gratuit est confirmé.":"Votre place a déjà été confirmée."});await load();
+    }catch(err){setMessage({kind:"error",text:(err as Error).message});await load()}
+    finally{setBusyId(null)}
+  };
   const respondOffer=async(offerId:string, accept:boolean)=>{
     setBusyId(offerId);setMessage(null);
     try{await api(`/alternative-offers/${offerId}/respond`,{method:"POST",body:JSON.stringify({accept})});setMessage({kind:"success",text:accept?"Place réservée : réglez votre billet avant expiration.":"Proposition refusée."});await load()}
@@ -893,7 +912,7 @@ function Dashboard() {
   const ticketsLabel=tickets.length===1?"Mon billet":"Mes billets";
   const tabs=[["interview",user?.profile?.validatedAt?"Entretien ✓":"Entretien"],["reservations","Réservations"],["tickets",ticketsLabel],["profile","Profil"],["notifications","Notifications"]];
   const titles:Record<string,string>={interview:"Entretien de validation",reservations:"Mes événements",tickets:ticketsLabel,profile:"Mon profil",notifications:"Notifications"};
-  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><span>◇</span><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=>{const offersForEvent=pendingOffers.filter(o=>o.originalEventId===a.eventId);return <article className="reservation" key={a.id}><img className="reservation-photo" src={imgUrl(a.event.imageUrl)} alt=""/><div><div className="admin-event-meta"><CategoryBadge category={a.event.category} className="inline"/><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small></div><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}{offersForEvent.map(offer=><article className="alt-offer nested" key={offer.id}><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{offer.alternativeEvent.title}</h3><p>{dateTime(offer.alternativeEvent.startsAt)} · {offer.alternativeEvent.district}</p><p><b>{money(offer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,false)}>Pas intéressé</button></div></article>)}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler ma participation</button>}</div></article>;})}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{t.reservation.event.controllerRestaurant&&<p>{t.reservation.event.controllerRestaurant.name}</p>}<p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/><PrivacyPanel/></div>}{tab==="notifications"&&<NotificationList items={notifications} onRead={id=>setNotifications(notifications.map(n=>n.id===id?{...n,readAt:new Date().toISOString()}:n))}/>}</div></section>
+  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><span>◇</span><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=>{const offersForEvent=pendingOffers.filter(o=>o.originalEventId===a.eventId);return <article className="reservation" key={a.id}><img className="reservation-photo" src={imgUrl(a.event.imageUrl)} alt=""/><div><div className="admin-event-meta"><CategoryBadge category={a.event.category} className="inline"/><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small></div><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}{offersForEvent.map(offer=><article className="alt-offer nested" key={offer.id}><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{offer.alternativeEvent.title}</h3><p>{dateTime(offer.alternativeEvent.startsAt)} · {offer.alternativeEvent.district}</p><p><b>{money(offer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,false)}>Pas intéressé</button></div></article>)}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&(a.event.priceCents===0?<button className="button" disabled={busyId===a.id} onClick={()=>confirmFree(a.id)}>{busyId===a.id?"…":"Confirmer ma place (gratuit)"}</button>:<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>)}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler ma participation</button>}</div></article>;})}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{t.reservation.event.controllerRestaurant&&<p>{t.reservation.event.controllerRestaurant.name}</p>}<p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/><PrivacyPanel/></div>}{tab==="notifications"&&<NotificationList items={notifications} onRead={id=>setNotifications(notifications.map(n=>n.id===id?{...n,readAt:new Date().toISOString()}:n))}/>}</div></section>
   {payingFor&&<PaymentModal applicationId={payingFor.applicationId} eventId={payingFor.eventId} amountCents={payingFor.amountCents} onClose={()=>setPayingFor(null)} onConfirmed={()=>{setPayingFor(null);load()}} onWaitlisted={()=>{setPayingFor(null);load()}}/>}
   </Layout>;
 }
@@ -1146,19 +1165,15 @@ function AdminEventPhotos() {
     setEditForm({title:ev.title,description:ev.description,capacity:ev.capacity,startsAt:toLocalInput(ev.startsAt),endsAt:toLocalInput(ev.endsAt),includesDrink:ev.includesDrink,includesStarter:ev.includesStarter,includesMain:ev.includesMain,includesDessert:ev.includesDessert,perksDescription:ev.perksDescription??""});
     setEditFor(ev.id);
   };
+  // Cahier des charges consolidé final (2026-09-20) : une soirée publiée ne peut plus être déplacée
+  // — le serveur refuse désormais la requête (409) plutôt que de créer une proposition à approuver.
   const saveEdit=async(eventId:string)=>{
     setActingOn(eventId);setNotice(null);
     try{
-      const res=await api<any>(`/admin/events/${eventId}`,{method:"PATCH",body:JSON.stringify({...editForm,startsAt:new Date(editForm.startsAt).toISOString(),endsAt:new Date(editForm.endsAt).toISOString()})});
-      setNotice({kind:"success",text:res.dateChangeRequestedAt?"Modifications enregistrées ; le changement de date attend l’approbation du super-admin.":"Modifications enregistrées."});
+      await api<any>(`/admin/events/${eventId}`,{method:"PATCH",body:JSON.stringify({...editForm,startsAt:new Date(editForm.startsAt).toISOString(),endsAt:new Date(editForm.endsAt).toISOString()})});
+      setNotice({kind:"success",text:"Modifications enregistrées."});
       setEditFor(null);await load();
     }catch(err){setNotice({kind:"error",text:(err as Error).message})}
-    finally{setActingOn(null)}
-  };
-  const decideDateChange=async(eventId:string, accept:boolean)=>{
-    setActingOn(eventId);setNotice(null);
-    try{await api(`/admin/events/${eventId}/date-change/decision`,{method:"POST",body:JSON.stringify({accept})});setNotice({kind:"success",text:accept?"Changement de date approuvé.":"Changement de date refusé."});await load()}
-    catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setActingOn(null)}
   };
 
@@ -1197,14 +1212,13 @@ function AdminEventPhotos() {
         {rejectNoteFor===ev.id?<div className="reject-note"><input value={rejectNote} onChange={e=>setRejectNote(e.target.value)} placeholder="Motif (optionnel)"/><button className="button small danger" disabled={actingOn===ev.id} onClick={()=>reviewDecision(ev.id,false,rejectNote)}>Confirmer le refus</button></div>:<button className="button small danger" onClick={()=>setRejectNoteFor(ev.id)}>Renvoyer en brouillon</button>}
       </div>}
 
-      {user?.role==="ADMIN"&&ev.dateChangeRequestedAt&&<div className="reject-note"><span className="fine left">Changement de date proposé : {dateTime(ev.proposedStartsAt)}</span><div className="decision-buttons"><button className="button small" disabled={actingOn===ev.id} onClick={()=>decideDateChange(ev.id,true)}>Approuver</button><button className="button small danger" disabled={actingOn===ev.id} onClick={()=>decideDateChange(ev.id,false)}>Refuser</button></div></div>}
 
       {editFor===ev.id?<div className="event-edit-form">
         <label>Titre<input value={editForm.title} onChange={e=>setEditForm({...editForm,title:e.target.value})}/></label>
         <label>Description<textarea value={editForm.description} onChange={e=>setEditForm({...editForm,description:e.target.value})}/></label>
         <div className="time-row"><label>Capacité<input type="number" min={5} value={editForm.capacity} onChange={e=>setEditForm({...editForm,capacity:Number(e.target.value)})}/></label></div>
-        <div className="time-row"><label>Début<input type="datetime-local" value={editForm.startsAt} onChange={e=>setEditForm({...editForm,startsAt:e.target.value})}/></label><label>Fin<input type="datetime-local" value={editForm.endsAt} onChange={e=>setEditForm({...editForm,endsAt:e.target.value})}/></label></div>
-        <p className="fine left">Si des places sont déjà payées ou bloquées, un changement de date devient une proposition soumise à l’approbation du super-admin.</p>
+        <div className="time-row"><label>Début<input type="datetime-local" disabled={ev.status==="PUBLISHED"||ev.status==="FULL"} value={editForm.startsAt} onChange={e=>setEditForm({...editForm,startsAt:e.target.value})}/></label><label>Fin<input type="datetime-local" disabled={ev.status==="PUBLISHED"||ev.status==="FULL"} value={editForm.endsAt} onChange={e=>setEditForm({...editForm,endsAt:e.target.value})}/></label></div>
+        {(ev.status==="PUBLISHED"||ev.status==="FULL")&&<p className="fine left">Une soirée publiée ne peut plus être déplacée : annulez-la puis créez-en une nouvelle à la date souhaitée.</p>}
         <small>PRESTATIONS RÉELLEMENT INCLUSES</small>
         <div className="perks-checks">
           <label><input type="checkbox" checked={editForm.includesDrink} onChange={e=>setEditForm({...editForm,includesDrink:e.target.checked})}/> Boisson</label>

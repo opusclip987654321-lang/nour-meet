@@ -649,6 +649,21 @@ model OutboxMessage {
 // visiteur est déjà connecté (corrélation avec son propre compte, jamais un nouveau traçage).
 // Désactivé par défaut (AppSetting ANALYTICS_ENABLED) : ne jamais collecter silencieusement — voir
 // settings.ts pour la mise en garde légale avant activation en production.
+// Cahier des charges consolidé final (2026-09-20, section 9.2) : jamais le jeton de session
+// (30 jours) dans l'URL de paiement ouverte depuis le navigateur intégré mobile — un jeton aussi
+// long durerait dans l'historique du navigateur. Ce jeton opaque à usage unique et à courte durée
+// de vie sert uniquement à l'échanger contre un vrai jeton de session, éphémère, une fois la page
+// de paiement web ouverte (voir POST /auth/payment-session-exchange).
+model PaymentSession {
+  id            String    @id @default(cuid())
+  token         String    @unique
+  userId        String
+  applicationId String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+}
+
 model PageView {
   id           String   @id @default(cuid())
   path         String
