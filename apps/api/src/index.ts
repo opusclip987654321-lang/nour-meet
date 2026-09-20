@@ -1,5 +1,6 @@
 import Fastify, { FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
@@ -49,6 +50,13 @@ const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
 // candidature côté navigateur, sortie de liste d'attente, mise à jour de profil, etc.) — invisible en
 // curl, qui ne fait pas respecter le CORS.
 await app.register(cors, { origin: env.WEB_ORIGIN === "*" ? true : env.WEB_ORIGIN.split(","), credentials: true, methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] });
+// Préparation mise en production : en-têtes de sécurité de base (X-Content-Type-Options,
+// X-Frame-Options, Referrer-Policy, HSTS une fois HTTPS en place...). Cette API ne sert jamais de
+// HTML (uniquement du JSON et les images statiques d'/static/) : la CSP par défaut de helmet est
+// désactivée pour éviter tout effet de bord sur des réponses qui n'en ont pas besoin, et la
+// politique de ressources cross-origin est ouverte pour que le site web (autre sous-domaine en
+// production) puisse continuer à afficher les images téléversées.
+await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" } });
 await app.register(jwt, { secret: env.JWT_SECRET });
 await app.register(rateLimit, { global: false });
 await app.register(multipart, { limits: { fileSize: MAX_IMAGE_BYTES, files: 1 } });
