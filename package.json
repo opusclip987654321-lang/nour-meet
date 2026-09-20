@@ -10,7 +10,7 @@
     "dev:mobile": "npm run start -w @nour/mobile",
     "build": "npm run build -w @nour/shared && npm run build -w @nour/api && npm run build -w @nour/web",
     "typecheck": "npm run build -w @nour/shared && npm run typecheck --workspaces --if-present",
-    "test": "npm run test -w @nour/api",
+    "test": "npm run test -w @nour/api && npm run test -w @nour/mobile",
     "db:generate": "npm run prisma:generate -w @nour/api",
     "db:migrate": "npm run prisma:migrate -w @nour/api",
     "db:migrate:deploy": "npm run prisma:migrate:deploy -w @nour/api",

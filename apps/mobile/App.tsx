@@ -9,21 +9,14 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Image, ImageBackground, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { API_URL, WEB_URL, api, getToken, setToken } from "./src/api";
+import { categoryColor, money, when, dayLabel, timeLabel, imgUrl } from "./src/format";
 import { SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening, EVENT_CATEGORIES } from "@nour/shared";
 
-// §15 : même code couleur par type d'événement que le web, pour une identité cohérente entre les
-// deux plateformes (§2). Une catégorie inconnue retombe sur la couleur or par défaut.
-const categoryColor = (category: string) => EVENT_CATEGORIES.find(c => c.name === category)?.color ?? "#cba969";
 const APPLICATION_STATUS_LABEL: Record<string,string> = { PENDING_CALL: "En attente de choix d’un créneau", CALL_SCHEDULED: "Entretien programmé", CALL_COMPLETED: "Entretien réalisé", ACCEPTED: "Candidature acceptée", REFUSED: "Candidature refusée", PAYMENT_PENDING: "Acceptée · paiement à finaliser", CONFIRMED: "Place confirmée", CANCELLED: "Annulée", NO_SHOW: "Absence à l’entretien" };
-const dayLabel = (v: string) => new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "2-digit", month: "short" }).format(new Date(v));
-const timeLabel = (v: string) => new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(new Date(v));
 
 const C={bg:"#0B0B0C",panel:"#171718",line:"#34322E",gold:"#C9A765",cream:"#F6F0E5",muted:"#918C82",green:"#62D89A",red:"#F0747C"};
 type Tab="home"|"events"|"scan"|"messages"|"profile"|"concept"|"blog";
 const BLOG_CATEGORIES=["Couple","Rencontre","Solitude","Mariage","Communication","Vie relationnelle"];
-const money=(n:number)=>`${(n/100).toFixed(2).replace(".",",")} €`;
-const when=(v:string)=>new Intl.DateTimeFormat("fr-FR",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}).format(new Date(v));
-const imgUrl=(src:string)=>src.startsWith("http")?src:`${API_URL}${src}`;
 // Stripe n'a pas de module natif installable dans Expo Go (seuls les modules Expo officiels le
 // sont) : plutôt que de dupliquer PaymentModal en React Native derrière un client de développement
 // natif, le paiement carte ouvre la page web déjà testée (voir PayStandalone dans

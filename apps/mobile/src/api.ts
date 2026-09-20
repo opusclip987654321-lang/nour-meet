@@ -1,10 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { API_URL, WEB_URL } from "./env";
 
-export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:4000";
-// Sert à ouvrir la page de paiement web dans un navigateur intégré (voir PayStandalone côté web) :
-// Stripe n'a pas de module natif installable dans Expo Go, donc le paiement carte réutilise la
-// page web déjà testée plutôt que de dupliquer son intégration Stripe en React Native.
-export const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? "http://localhost:5173";
+export { API_URL, WEB_URL };
 const TOKEN_KEY = "nour_token";
 export const getToken = () => AsyncStorage.getItem(TOKEN_KEY);
 export const setToken = (token: string | null) => token ? AsyncStorage.setItem(TOKEN_KEY, token) : AsyncStorage.removeItem(TOKEN_KEY);
