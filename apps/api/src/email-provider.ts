@@ -26,7 +26,10 @@ export class ResendEmailProvider implements EmailProvider {
   }
 }
 
-export function createEmailProvider(config: { apiKey?: string; from?: string }): EmailProvider {
-  if (config.apiKey && config.from) return new ResendEmailProvider(config.apiKey, config.from);
+export function createEmailProvider(config: { apiKey?: string; from?: string; fromName?: string }): EmailProvider {
+  if (config.apiKey && config.from) {
+    const sender = config.fromName ? `${config.fromName} <${config.from}>` : config.from;
+    return new ResendEmailProvider(config.apiKey, sender);
+  }
   return new MockEmailProvider();
 }

@@ -25,6 +25,12 @@ const envSchema = z.object({
     (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
     z.string().email().optional()
   ),
+  // Nom affiché à côté de l'adresse (« Nūr Meet <notifications@...> »). Séparé de l'adresse pour
+  // que celle-ci reste validée strictement ; les caractères qui casseraient l'en-tête From sont refusés.
+  RESEND_FROM_NAME: z.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().regex(/^[^<>",;\r\n]+$/, "RESEND_FROM_NAME ne doit contenir ni chevron, guillemet, virgule, point-virgule ni retour à la ligne").optional()
+  ),
   // Surveillance d'erreurs (Sentry) : désactivée tant qu'aucun DSN n'est fourni, jamais activée
   // par défaut — voir sentry.ts pour le filtrage des données personnelles avant tout envoi.
   SENTRY_DSN: optionalEnvironmentSecret,
