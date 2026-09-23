@@ -4,7 +4,6 @@ import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import QRCode from "qrcode";
 import Stripe from "stripe";
 import { PrismaClient, Prisma, UserRole, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, EventStatus, QuotaCategory, AlternativeOfferStatus } from "@prisma/client";
 import { z, ZodError } from "zod";
@@ -22,6 +21,8 @@ import { createAIProvider } from "./ai-provider.js";
 import { loadSettings, updateSetting, getSetting, listSettingsForAdmin, SETTINGS_SCHEMA } from "./settings.js";
 import { workerCount } from "./cluster-config.js";
 import cluster from "node:cluster";
+import { cachedQrDataUrl } from "./qr-cache.js";
+import { paginationQuery, paginated, toSkipTake } from "./pagination.js";
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const uploadsDir = path.join(publicDir, "uploads", "events");
@@ -66,7 +67,11 @@ const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
 // curl, qui ne fait pas respecter le CORS.
 await app.register(cors, { origin: env.WEB_ORIGIN === "*" ? true : env.WEB_ORIGIN.split(","), credentials: true, methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] });
 await app.register(jwt, { secret: env.JWT_SECRET });
-await app.register(rateLimit, { global: false });
+// Sane default so every route is protected against abuse even without an explicit
+// per-route limit (below); routes that need a stricter one keep their own override.
+// Tunable via env because the right ceiling depends on deployment shape (behind a
+// CDN/LB, per-IP traffic looks different than hitting the origin directly).
+await app.register(rateLimit, { global: true, max: env.RATE_LIMIT_MAX, timeWindow: env.RATE_LIMIT_WINDOW });
 await app.register(multipart, { limits: { fileSize: MAX_IMAGE_BYTES, files: 1 } });
 await app.register(fastifyStatic, { root: publicDir, prefix: "/static/" });
 const smsVerification = createSmsVerificationProvider({
@@ -483,9 +488,13 @@ app.post("/me/request-deletion", { preHandler: auth }, async (request, reply) =>
 });
 
 app.get("/events", async (request) => {
-  const query = z.object({ category: z.string().optional(), q: z.string().optional() }).parse(request.query);
-  const events = await prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" } }, { description: { contains: query.q, mode: "insensitive" } }] : undefined }, include: { controllerRestaurant: true, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" } });
-  return events.map(e => publicEvent(e));
+  const query = z.object({ category: z.string().optional(), q: z.string().optional() }).merge(paginationQuery).parse(request.query);
+  const where = { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" as const } }, { description: { contains: query.q, mode: "insensitive" as const } }] : undefined };
+  const [events, total] = await Promise.all([
+    prisma.event.findMany({ where, include: { controllerRestaurant: true, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" }, ...toSkipTake(query) }),
+    prisma.event.count({ where })
+  ]);
+  return paginated(events.map(e => publicEvent(e)), total, query);
 });
 
 app.get("/events/:id", async (request) => {
@@ -861,12 +870,12 @@ await app.register(async (webhooks) => {
 
 app.get("/me/tickets", { preHandler: auth }, async (request) => {
   const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: true } } } } }, orderBy: { createdAt: "desc" } });
-  return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await QRCode.toDataURL(t.code) })));
+  return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await cachedQrDataUrl(t.code) })));
 });
 
 app.get("/me/share-qr", { preHandler: auth }, async (request) => {
   const profile = await prisma.profile.findUniqueOrThrow({ where: { userId: currentId(request) } });
-  return { code: profile.shareCode, qrDataUrl: await QRCode.toDataURL(profile.shareCode) };
+  return { code: profile.shareCode, qrDataUrl: await cachedQrDataUrl(profile.shareCode) };
 });
 
 app.get("/profiles/code/:code", { preHandler: auth }, async (request, reply) => {

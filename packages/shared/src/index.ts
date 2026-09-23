@@ -127,3 +127,11 @@ export interface PublicEvent {
 }
 
 export interface ApiError { error: string; details?: unknown }
+
+export interface Paginated<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
