@@ -51,6 +51,7 @@ et la confiance passe par la clarté.
 | `--danger` | `#B3261E` / fond `#FCE9E7` | Erreur, annulation |
 | `--rencontre` | `#B0406A` | Catégorie Speed dating (texte sur fond clair, 5,5:1) |
 | `--networking` | `#1F6F8B` | Catégorie Networking (5,6:1) |
+| `--chart-1` | `#4A5BB0` | Barres du graphique d’activité (admin) — validé par le script dataviz (bande de luminosité, contraste sur blanc) |
 
 Sur fond nuit : texte `#FFFFFF`, secondaire `#C8CDE4` (9,2:1), safran pour l’accent (6,9:1).
 

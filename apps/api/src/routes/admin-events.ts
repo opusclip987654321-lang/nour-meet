@@ -162,7 +162,7 @@ app.patch("/admin/events/:id", { preHandler: roles(UserRole.ADMIN, UserRole.ORGA
 });
 // Tarifs : un événement garde un tarif unique par défaut ; la différenciation homme/femme reste
 // facultative et sa conformité légale doit être vérifiée avant toute activation en production.
-app.post("/admin/events/:id/pricing", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
+app.post("/admin/events/:id/pricing", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, _reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   await assertEventAccess(request, id);
   const input = z.discriminatedUnion("mode", [

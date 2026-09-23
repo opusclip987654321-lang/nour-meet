@@ -52,6 +52,7 @@ Monorepo npm : `apps/api` (Fastify + Prisma + Postgres), `apps/web` (React + Vit
 
 ```bash
 npm run typecheck                         # shared + api + web + mobile
+npm run lint                              # ESLint (web, api, shared ; mobile exclu)
 npm test                                  # tests unitaires api + mobile
 npm run build                             # shared + api + web
 npm run typecheck:integration -w @nour/api

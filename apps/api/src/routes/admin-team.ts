@@ -67,7 +67,7 @@ app.delete("/admin/moderators/:id", { preHandler: roles(UserRole.ADMIN) }, async
 // File de modération des signalements (Report), jusqu'ici sans aucune interface : accessible au
 // super-admin et aux modérateurs nommés, jamais aux restaurateurs.
 app.get("/admin/reports", { preHandler: roles(UserRole.ADMIN, UserRole.MODERATOR) }, async () => prisma.report.findMany({ include: { reporter: true, reported: true }, orderBy: { createdAt: "desc" } }));
-app.post("/admin/reports/:id/decision", { preHandler: roles(UserRole.ADMIN, UserRole.MODERATOR) }, async (request, reply) => {
+app.post("/admin/reports/:id/decision", { preHandler: roles(UserRole.ADMIN, UserRole.MODERATOR) }, async (request, _reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const { status } = z.object({ status: z.enum(["REVIEWING", "RESOLVED", "DISMISSED"]) }).parse(request.body);
   const updated = await prisma.report.update({ where: { id }, data: { status } });

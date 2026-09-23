@@ -13,7 +13,7 @@ app.get("/admin/outbox", { preHandler: roles(UserRole.ADMIN) }, async () => pris
 // renvoie que les trois clés nécessaires à la page « Le concept ».
 app.get("/concept-video", async () => ({ url: getSetting("CONCEPT_VIDEO_URL"), thumbnail: getSetting("CONCEPT_VIDEO_THUMBNAIL_URL"), subtitles: getSetting("CONCEPT_VIDEO_SUBTITLES_URL") }));
 app.get("/admin/settings", { preHandler: roles(UserRole.ADMIN) }, async () => listSettingsForAdmin());
-app.patch("/admin/settings/:key", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+app.patch("/admin/settings/:key", { preHandler: roles(UserRole.ADMIN) }, async (request, _reply) => {
   const { key } = z.object({ key: z.enum(Object.keys(SETTINGS_SCHEMA) as [string, ...string[]]) }).parse(request.params);
   const { value } = z.object({ value: z.unknown() }).parse(request.body);
   const updated = await updateSetting(prisma, key as keyof typeof SETTINGS_SCHEMA, value, currentId(request));

@@ -7,7 +7,7 @@ import { useAuth } from "../../auth";
 import { Layout } from "../../components/Layout";
 import { Loading } from "../../components/ui";
 import { money } from "../../lib/format";
-import { EVENT_STATUS_LABEL, SUBSCRIPTION_STATUS_LABEL } from "../../lib/labels";
+import { EVENT_STATUS_LABEL } from "../../lib/labels";
 import { AdminNav, Stat } from "./AdminNav";
 
 const emptyDashboardFilters={eventId:"",category:"",status:"",city:"",minAge:"",maxAge:""};
@@ -64,5 +64,27 @@ export function Admin() {
     {stats.shareAttributedApplications!=null&&<Stat label="Inscriptions attribuées" value={stats.shareAttributedApplications}/>}
     {stats.shareAttributedPurchases!=null&&<Stat label="Ventes attribuées" value={stats.shareAttributedPurchases}/>}
     {stats.subscriptionsByStatus?.map((s:any)=><Stat key={s.status} label={`Abonnements ${SUBSCRIPTION_STATUS_LABEL[s.status]??s.status}`} value={s.count}/>)}
-  </div><div className="admin-grid"><div className="panel chart"><div className="panel-title"><h2>Activité sur 30 jours</h2><span>Données de démonstration</span></div><div className="bars">{[32,50,42,68,60,82,75,94,70,85,97,88].map((n,i)=><i key={i} style={{height:`${n}%`}}/>)}</div></div><div className="panel quick"><h2>Actions rapides</h2>{user?.role==="ADMIN"&&<Link to="/admin/applications">Traiter les entretiens <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to="/admin/attendees">Voir les participants <ArrowRight size={18} aria-hidden="true"/></Link><Link to="/admin/scanner">Scanner un billet <ArrowRight size={18} aria-hidden="true"/></Link>{user?.role==="ADMIN"&&<Link to="/admin/restaurants">Demandes restaurateurs <ArrowRight size={18} aria-hidden="true"/></Link>}{user?.role==="ADMIN"&&<Link to="/admin/finance">Voir les finances <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to="/events">Voir les événements <ArrowRight size={18} aria-hidden="true"/></Link></div></div></>}</div></section></Layout>;
+  </div><div className="admin-grid"><ActivityChart data={stats.activity??[]} periodDays={periodDays}/><div className="panel quick"><h2>Actions rapides</h2>{user?.role==="ADMIN"&&<Link to="/admin/applications">Traiter les entretiens <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to="/admin/attendees">Voir les participants <ArrowRight size={18} aria-hidden="true"/></Link><Link to="/admin/scanner">Scanner un billet <ArrowRight size={18} aria-hidden="true"/></Link>{user?.role==="ADMIN"&&<Link to="/admin/restaurants">Demandes restaurateurs <ArrowRight size={18} aria-hidden="true"/></Link>}{user?.role==="ADMIN"&&<Link to="/admin/finance">Voir les finances <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to="/events">Voir les événements <ArrowRight size={18} aria-hidden="true"/></Link></div></div></>}</div></section></Layout>;
+}
+
+// Activité réelle (inscriptions aux événements par jour) sur la période filtrée — une seule série :
+// le titre la nomme, pas de légende. Survol et focus clavier affichent la valeur de chaque barre ;
+// la même donnée est disponible en tableau pour les lecteurs d'écran.
+function ActivityChart({ data, periodDays }: { data: { day: string; applications: number }[]; periodDays: number }) {
+  const max = Math.max(0, ...data.map(d => d.applications));
+  const total = data.reduce((n, d) => n + d.applications, 0);
+  const fmt = (day: string) => new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" }).format(new Date(`${day}T12:00:00`));
+  return <div className="panel chart">
+    <div className="panel-title"><h2>Inscriptions par jour</h2><span>{total} sur {periodDays} jours</span></div>
+    {total === 0 ? <p className="chart-empty">Aucune inscription sur cette période.</p> : <>
+      <div className="chart-plot">
+        <span className="chart-max" aria-hidden="true">{max}</span>
+        <div className="bars" role="img" aria-label={`Inscriptions par jour, du ${fmt(data[0].day)} au ${fmt(data[data.length - 1].day)} : ${total} au total, maximum ${max} en une journée.`}>
+          {data.map(d => <span key={d.day} className="bar" tabIndex={0} data-tip={`${fmt(d.day)} · ${d.applications}`} aria-label={`${fmt(d.day)} : ${d.applications} inscription${d.applications > 1 ? "s" : ""}`}><i style={{ height: `${max ? Math.max((d.applications / max) * 100, d.applications ? 3 : 0) : 0}%` }}/></span>)}
+        </div>
+      </div>
+      <div className="chart-axis" aria-hidden="true"><span>{fmt(data[0].day)}</span><span>{fmt(data[data.length - 1].day)}</span></div>
+      <details className="chart-table"><summary>Voir les données</summary><div className="table-scroll"><table><thead><tr><th scope="col">Jour</th><th scope="col">Inscriptions</th></tr></thead><tbody>{data.map(d => <tr key={d.day}><td>{fmt(d.day)}</td><td>{d.applications}</td></tr>)}</tbody></table></div></details>
+    </>}
+  </div>;
 }

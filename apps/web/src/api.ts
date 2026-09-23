@@ -1,7 +1,7 @@
 export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
 export function getToken() { return localStorage.getItem("nour_token"); }
-export function setToken(token: string | null) { token ? localStorage.setItem("nour_token", token) : localStorage.removeItem("nour_token"); }
+export function setToken(token: string | null) { if (token) localStorage.setItem("nour_token", token); else localStorage.removeItem("nour_token"); }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();

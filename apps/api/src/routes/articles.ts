@@ -1,4 +1,3 @@
-import rateLimit from "@fastify/rate-limit";
 import { UserRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";

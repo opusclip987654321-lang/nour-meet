@@ -1187,3 +1187,306 @@
   width: auto;
   min-width: 200px;
 }
+
+/* ---------- Contacts et messagerie (espace participant) ---------- */
+.contacts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--s-4);
+  align-items: start;
+}
+
+.contact-code-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  align-items: center;
+}
+
+.contact-code-body img {
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.contact-code-body > div {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.contact-code-body p {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.contact-code-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.contact-lookup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--s-2);
+  align-items: end;
+}
+
+@media (max-width: 480px) {
+  .contact-lookup {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.contact-preview {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--s-4);
+  margin-top: var(--s-4);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line);
+}
+
+.contact-preview > div {
+  display: grid;
+  gap: var(--s-2);
+  justify-items: start;
+}
+
+.contact-preview p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.contact-meta {
+  font-size: var(--fs-sm);
+}
+
+.contact-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.contact-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--line);
+}
+
+.contact-list li:first-child {
+  border-top: 0;
+}
+
+.contact-list li > div:nth-child(2) {
+  display: grid;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.contact-list span {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.contact-subtitle {
+  margin: var(--s-4) 0 var(--s-1);
+  color: var(--ink-2);
+  font-family: var(--font-text);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+.messages-list > button > div {
+  display: grid;
+  min-width: 0;
+  text-align: left;
+}
+
+.messages-list > button span {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.messages-list > button:hover {
+  background: var(--canvas);
+}
+
+.chat-empty {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--s-2);
+  color: var(--ink-3);
+}
+
+.chat-back {
+  display: none;
+}
+
+.chat-closed {
+  margin: 0;
+  padding: var(--s-4);
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.chat-body {
+  max-height: 60dvh;
+}
+
+@media (max-width: 768px) {
+  .messages {
+    min-height: 0;
+  }
+
+  .messages > aside.messages-list {
+    display: grid;
+    overflow: visible;
+    border-bottom: 0;
+  }
+
+  .messages > aside.messages-list > button {
+    width: 100%;
+    max-width: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .messages-list.has-active,
+  .chat:not(.has-active) {
+    display: none !important;
+  }
+
+  .chat-back {
+    display: inline-grid;
+  }
+}
+
+/* Graphique d'activité (tableau de bord) */
+.chart {
+  min-height: 0;
+}
+
+.chart-plot {
+  position: relative;
+  margin-top: var(--s-5);
+  padding-left: var(--s-6);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.chart-max {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart .bars {
+  height: 200px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: var(--s-2) 0 0;
+  border-top: 1px dashed var(--line);
+}
+
+/* Chaque jour est une colonne pleine hauteur (zone de survol et de focus), la barre est dedans :
+   une journée à zéro reste ciblable au survol comme au clavier. */
+.chart .bars .bar {
+  position: relative;
+  flex: 1;
+  min-width: 2px;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  outline-offset: 2px;
+  cursor: default;
+}
+
+.chart .bars i {
+  width: 100%;
+  background: var(--chart-1);
+  border-radius: 4px 4px 0 0;
+}
+
+.chart .bars .bar:hover i,
+.chart .bars .bar:focus-visible i {
+  background: var(--night);
+}
+
+.chart .bars .bar:hover::after,
+.chart .bars .bar:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: var(--ink);
+  color: #fff;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--s-2) 0 0 var(--s-6);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+.chart-empty {
+  margin: 0;
+  padding: var(--s-6) 0;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.chart-table {
+  margin-top: var(--s-3);
+  font-size: var(--fs-sm);
+}
+
+.chart-table summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--saffron-ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chart-table table {
+  width: 100%;
+}
+
+.chart-table th,
+.chart-table td {
+  padding: var(--s-1) var(--s-3);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}

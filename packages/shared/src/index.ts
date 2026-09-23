@@ -148,7 +148,7 @@ export const LEGAL_VERSIONS = { CGU: "2026-09-23", CGV: "2026-09-23" } as const;
 export const MINIMUM_AGE = 18;
 export const ageInYears = (birthDate: Date | string, now: Date = new Date()): number => {
   const birth = new Date(birthDate);
-  let age = now.getUTCFullYear() - birth.getUTCFullYear();
+  const age = now.getUTCFullYear() - birth.getUTCFullYear();
   const beforeBirthday = now.getUTCMonth() < birth.getUTCMonth() || (now.getUTCMonth() === birth.getUTCMonth() && now.getUTCDate() < birth.getUTCDate());
   return beforeBirthday ? age - 1 : age;
 };

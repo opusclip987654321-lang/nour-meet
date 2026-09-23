@@ -1,6 +1,5 @@
 import { ApplicationStatus, EventStatus, PaymentStatus, Prisma, TicketStatus, UserRole } from "@prisma/client";
 import ExcelJS from "exceljs";
-import path from "node:path";
 import { z } from "zod";
 import { app, prisma } from "../context.js";
 import { TokenUser, ownRestaurant, roles } from "../services/auth.js";
@@ -76,7 +75,19 @@ app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZ
   // ici à l'échelle de la plateforme.
   const shareAttributedApplications = restaurant ? null : await prisma.application.count({ where: { attributedShareLinkId: { not: null }, createdAt: createdRange } });
   const shareAttributedPurchases = restaurant ? null : await prisma.application.count({ where: { attributedShareLinkId: { not: null }, createdAt: createdRange, reservation: { payment: { status: PaymentStatus.SUCCEEDED } } } });
+  // Courbe d'activité réelle : inscriptions aux événements par jour sur la période et le périmètre
+  // filtrés (remplace des barres d'exemple codées en dur côté web). Jours sans inscription à zéro.
+  const applicationDates = await prisma.application.findMany({ where: { ...applicationEventScope, createdAt: createdRange, ...(birthDateRange ? { user: { profile: { birthDate: birthDateRange } } } : {}) }, select: { createdAt: true } });
+  const dayKey = (d: Date) => d.toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
+  const counts = new Map<string, number>();
+  for (const a of applicationDates) counts.set(dayKey(a.createdAt), (counts.get(dayKey(a.createdAt)) ?? 0) + 1);
+  const activity: { day: string; applications: number }[] = [];
+  for (let t = since.getTime(), end = (until ?? new Date()).getTime(); t <= end && activity.length < 366; t += 86_400_000) {
+    const day = dayKey(new Date(t));
+    if (activity.at(-1)?.day !== day) activity.push({ day, applications: counts.get(day) ?? 0 });
+  }
   return {
+    activity,
     events, upcomingEvents, applications, acceptanceRate, ticketsSold,
     remainingSpots: (remainingSpots._sum.capacity ?? 0) - confirmedReservations,
     waitlisted, revenueCents: payments._sum.amountCents ?? 0,
