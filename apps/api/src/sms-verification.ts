@@ -13,7 +13,22 @@ export class MockSmsVerificationProvider implements SmsVerificationProvider {
   async checkCode(_phone: string, code: string): Promise<boolean> { return code === this.code; }
 }
 
-type TwilioConfig = { accountSid: string; authToken: string; serviceSid: string };
+// Codes d'erreur Twilio (twilio.com/docs/api/errors) traduits en un message utile : un refus
+// générique « impossible d'envoyer » masquait en production une erreur de configuration du compte
+// (identifiants, service Verify, pays non autorisé, compte d'essai), impossible à diagnostiquer.
+// Une erreur de configuration est une panne côté plateforme (503, journalisée), pas une faute
+// de l'utilisateur.
+export function describeTwilioFailure(httpStatus: number, code?: number): { statusCode: number; message: string } {
+  if (httpStatus === 429 || code === 60203 || code === 60202) return { statusCode: 429, message: "Trop de demandes de SMS. Réessayez plus tard." };
+  if (code === 60200 || code === 21211 || code === 21614) return { statusCode: 400, message: "Ce numéro de téléphone n’est pas valide. Vérifiez-le (ex. +33612345678)." };
+  if (code === 60205) return { statusCode: 400, message: "Ce numéro ne peut pas recevoir de SMS (ligne fixe ?). Utilisez un numéro de mobile." };
+  if (code === 60410 || code === 60605 || code === 21408) return { statusCode: 400, message: "L’envoi de SMS vers ce pays n’est pas encore ouvert." };
+  if (httpStatus === 401 || httpStatus === 403 || httpStatus === 404 || httpStatus >= 500 || code === 20003 || code === 20404 || code === 21608 || code === 60223)
+    return { statusCode: 503, message: "Le service SMS est temporairement indisponible. Réessayez dans quelques instants." };
+  return { statusCode: 400, message: "Impossible d’envoyer ou de vérifier ce code SMS." };
+}
+
+type TwilioConfig ={ accountSid: string; authToken: string; serviceSid: string };
 
 export class TwilioVerifyProvider implements SmsVerificationProvider {
   readonly mode = "twilio" as const;
@@ -31,13 +46,8 @@ export class TwilioVerifyProvider implements SmsVerificationProvider {
     });
     const data = await response.json().catch(() => ({})) as { status?: string; message?: string; code?: number };
     if (!response.ok) {
-      const statusCode = response.status === 429 ? 429 : response.status >= 500 ? 503 : 400;
-      const message = response.status === 429
-        ? "Trop de demandes de SMS. Réessayez plus tard."
-        : response.status >= 500
-          ? "Le service SMS est temporairement indisponible."
-          : "Impossible d’envoyer ou de vérifier ce code SMS.";
-      throw Object.assign(new Error(message), { statusCode, providerCode: data.code });
+      const { statusCode, message } = describeTwilioFailure(response.status, data.code);
+      throw Object.assign(new Error(message), { statusCode, providerStatus: response.status, providerCode: data.code, providerMessage: data.message });
     }
     return data;
   }
@@ -51,7 +61,10 @@ export class TwilioVerifyProvider implements SmsVerificationProvider {
       const result = await this.post("VerificationCheck", { To: phone, Code: code });
       return result.status === "approved";
     } catch (error) {
-      if ((error as { statusCode?: number }).statusCode === 400) return false;
+      // Twilio répond 404 (20404) quand aucune vérification n'est en attente (code expiré ou déjà
+      // utilisé) : c'est un code refusé pour l'utilisateur, pas une panne du service.
+      const failure = error as { statusCode?: number; providerStatus?: number; providerCode?: number };
+      if (failure.statusCode === 400 || failure.providerStatus === 404 || failure.providerCode === 20404) return false;
       throw error;
     }
   }
