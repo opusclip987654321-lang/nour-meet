@@ -93,7 +93,7 @@ const smsVerification = createSmsVerificationProvider({
   authToken: env.TWILIO_AUTH_TOKEN,
   serviceSid: env.TWILIO_VERIFY_SERVICE_SID
 });
-const emailProvider = createEmailProvider({ apiKey: env.RESEND_API_KEY, from: env.RESEND_FROM_EMAIL });
+const emailProvider = createEmailProvider({ apiKey: env.RESEND_API_KEY, from: env.RESEND_FROM_EMAIL, fromName: env.RESEND_FROM_NAME });
 const aiProvider = createAIProvider();
 
 type TokenUser = { sub: string; role: UserRole; phone: string };

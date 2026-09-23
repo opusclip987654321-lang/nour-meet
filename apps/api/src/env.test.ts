@@ -31,6 +31,16 @@ describe("validation des variables d'environnement", () => {
     expect(env.RESEND_FROM_EMAIL).toBe("notifications@nour-meet.fr");
   });
 
+  it("accepte un nom d’expéditeur avec accents et traite une valeur vide comme absente", async () => {
+    expect((await loadEnv({ RESEND_FROM_NAME: "Nūr Meet" })).RESEND_FROM_NAME).toBe("Nūr Meet");
+    expect((await loadEnv({ RESEND_FROM_NAME: "" })).RESEND_FROM_NAME).toBeUndefined();
+  });
+
+  it("refuse un nom d’expéditeur qui casserait l’en-tête From", async () => {
+    await expect(loadEnv({ RESEND_FROM_NAME: "Nūr <Meet>" })).rejects.toThrow();
+    await expect(loadEnv({ RESEND_FROM_NAME: "Nūr, Meet" })).rejects.toThrow();
+  });
+
   it("refuse SMS_MODE=mock en production", async () => {
     await expect(loadEnv({ NODE_ENV: "production", SMS_MODE: "mock", JWT_SECRET: "a-real-production-secret-value", STRIPE_SECRET_KEY: "sk_test", STRIPE_WEBHOOK_SECRET: "whsec_test" })).rejects.toThrow();
   });

@@ -16,6 +16,20 @@ describe("envoi d’e-mail", () => {
     expect(createEmailProvider({ apiKey: "re_test", from: "notifications@nour-meet.fr" }).mode).toBe("resend");
   });
 
+  it("affiche le nom de l’expéditeur devant l’adresse quand il est configuré", async () => {
+    const http = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({ id: "abc" }), { status: 200 }));
+    vi.stubGlobal("fetch", http);
+    try {
+      await createEmailProvider({ apiKey: "re_test", from: "notifications@nour-meet.fr", fromName: "Nūr Meet" }).send("client@example.com", "Sujet", "Corps");
+      expect(JSON.parse(http.mock.calls[0]![1]!.body as string).from).toBe("Nūr Meet <notifications@nour-meet.fr>");
+      http.mockClear();
+      await createEmailProvider({ apiKey: "re_test", from: "notifications@nour-meet.fr" }).send("client@example.com", "Sujet", "Corps");
+      expect(JSON.parse(http.mock.calls[0]![1]!.body as string).from).toBe("notifications@nour-meet.fr");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("envoie une requête signée à l’API Resend", async () => {
     const http = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({ id: "abc" }), { status: 200 }));
     const provider = new ResendEmailProvider("re_test", "notifications@nour-meet.fr", http as typeof fetch);
