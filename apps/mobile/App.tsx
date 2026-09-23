@@ -55,7 +55,7 @@ function EventCard({event,onPress}:{event:any,onPress:()=>void}){
 }
 
 function Home({user,setTab}:{user:any,setTab:(t:Tab)=>void}){
-  const [events,setEvents]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]);useEffect(()=>{api<any[]>("/events").then(setEvents);api<any[]>("/me/tickets").then(setTickets)},[]);
+  const [events,setEvents]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]);useEffect(()=>{api<{items:any[]}>("/events").then(r=>setEvents(r.items));api<any[]>("/me/tickets").then(setTickets)},[]);
   return <ScrollView contentContainerStyle={s.content}><View style={s.hello}><View><Text style={s.eyebrow}>BONJOUR {user.displayName.toUpperCase()}</Text><Text style={s.homeTitle}>Votre prochaine{`\n`}rencontre commence ici.</Text></View><Avatar name={user.displayName} photoUrl={user.profile?.photoUrl}/></View>{tickets[0]&&<Pressable style={s.ticketMini} onPress={()=>setTab("profile")}><View><Text style={s.eyebrow}>{when(tickets[0].reservation.event.startsAt).toUpperCase()}</Text><Text style={s.ticketTitle}>{tickets[0].reservation.event.title}</Text><Text style={{color:C.green,fontWeight:"700"}}>Billet confirmé</Text></View><Image source={{uri:tickets[0].qrDataUrl}} style={s.miniQr}/></Pressable>}<ScreenTitle title="À découvrir" action={<Pressable onPress={()=>setTab("events")}><Text style={s.link}>Voir tout</Text></Pressable>}/>{events.slice(0,2).map(e=><EventCard event={e} onPress={()=>setTab("events")} key={e.id}/>)}<ScreenTitle title="Pour vous"/><View style={s.chips}><Text style={s.chipGold}>Rencontres</Text><Text style={s.chip}>Networking</Text><Text style={s.chip}>Culture</Text></View><View style={{flexDirection:"row",gap:20}}><Pressable onPress={()=>setTab("concept")}><Text style={s.link}>Le concept →</Text></Pressable><Pressable onPress={()=>setTab("blog")}><Text style={s.link}>Le blog →</Text></Pressable></View></ScrollView>
 }
 
@@ -137,7 +137,7 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
   // §5 (cahier des charges 2026-09) : un lien depuis le blog (ex. « nos soirées speed dating »)
   // arrive ici déjà filtré sur la bonne catégorie, voir App() et Blog() plus bas.
   const [q,setQ]=useState(""),[category,setCategory]=useState(initialCategory??"");
-  useEffect(()=>{const params=new URLSearchParams({...(q?{q}:{}),...(category?{category}:{})});api<any[]>(`/events?${params}`).then(setEvents)},[q,category]);
+  useEffect(()=>{const params=new URLSearchParams({...(q?{q}:{}),...(category?{category}:{})});api<{items:any[]}>(`/events?${params}`).then(r=>setEvents(r.items))},[q,category]);
   const loadApplication=(eventId:string)=>api<any>(`/events/${eventId}/my-application`).then(setApplication).catch(()=>setApplication(null));
   const loadWaitlist=(eventId:string)=>api<any>(`/events/${eventId}/waitlist/me`).then(setWaitlistEntry).catch(()=>setWaitlistEntry(null));
   const openEvent=(e:any)=>{
