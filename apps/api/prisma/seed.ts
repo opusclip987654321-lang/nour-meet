@@ -189,6 +189,11 @@ async function main() {
   });
   const existingWaitingApp = await prisma.application.findFirst({ where: { userId: enAttenteEntretien.id, eventId: null } });
   if (!existingWaitingApp) await prisma.application.create({ data: { userId: enAttenteEntretien.id, motivation: "Compte de test : entretien demandé, aucun créneau réservé.", status: ApplicationStatus.PENDING_CALL } });
+
+  // CGU §2 : service réservé aux personnes majeures, l'API refuse toute inscription sans date de
+  // naissance adulte. Les comptes de démonstration qui n'en ont pas en reçoivent une (y compris sur
+  // une base déjà seedée, que les upserts ci-dessus ne modifient pas).
+  await prisma.profile.updateMany({ where: { birthDate: null, user: { phone: { startsWith: "+336000000" } } }, data: { birthDate: new Date("1994-05-10") } });
 }
 
 main().finally(() => prisma.$disconnect());

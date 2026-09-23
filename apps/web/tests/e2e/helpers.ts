@@ -2,9 +2,10 @@ import { PrismaClient } from "@prisma/client";
 
 // Ces tests tournent contre le vrai serveur de développement (docker compose up + seed requis),
 // pas contre une base en mémoire — voir apps/api/tests/integration/helpers.ts pour le même choix
-// côté API. Le port exposé sur l'hôte, pas le nom de service Docker interne.
+// côté API. DATABASE_URL doit désigner LA MÊME base que l'API testée (sinon le nettoyage ci-dessous
+// agit sur une autre base) ; à défaut, le port exposé sur l'hôte par docker-compose.yml.
 export const prisma = new PrismaClient({
-  datasources: { db: { url: "postgresql://nour:nour_dev_password@localhost:5434/nour_meet?schema=public" } }
+  datasources: { db: { url: process.env.DATABASE_URL ?? "postgresql://nour:nour_dev_password@localhost:5434/nour_meet?schema=public" } }
 });
 
 // Les parcours speed dating/networking utilisent les personas de test partagées du seed (§ voir

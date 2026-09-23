@@ -10,7 +10,7 @@ const EVENT_SLUG = "afterwork-entrepreneurs-octobre";
 test.beforeAll(() => forgetApplication(PHONE, EVENT_SLUG));
 test.afterAll(() => forgetApplication(PHONE, EVENT_SLUG));
 
-test("parcours networking : accès direct sans validation, questionnaire, puis paiement proposé", async ({ page }) => {
+test("parcours networking : accès direct sans validation ni questionnaire, puis paiement proposé", async ({ page }) => {
   await page.goto("/login");
   await page.getByRole("button", { name: "Homme non validé" }).click();
   await page.waitForURL("**/dashboard");
@@ -19,19 +19,9 @@ test("parcours networking : accès direct sans validation, questionnaire, puis p
   await expect(page.locator(".category-badge", { hasText: "NETWORKING" })).toBeVisible();
   await expect(page.getByText("● Accès direct")).toBeVisible();
 
+  // Arbitrage 12/E3 : aucun questionnaire à l'inscription networking — il n'est proposé, facultatif,
+  // qu'une fois la place confirmée ; « S’inscrire » mène donc directement au paiement.
   await page.getByRole("button", { name: "S’inscrire" }).click();
-  for (const label of [
-    "Dans quel secteur professionnel évoluez-vous ?",
-    "Quelle est votre activité ou fonction actuelle ?",
-    "Quel est votre niveau ou nombre d’années d’expérience ?",
-    "Quel est votre objectif : associés, clients, emploi, réseau ou autre ?",
-    "Quels profils souhaitez-vous rencontrer ?",
-    "Que pouvez-vous apporter aux autres participants ?",
-    "Sur quels projets ou opportunités souhaitez-vous échanger ?"
-  ]) {
-    await page.getByLabel(label).fill("Réponse de test end-to-end, suffisamment longue pour être valide.");
-  }
-  await page.getByRole("button", { name: "Envoyer ma candidature" }).click();
 
   await expect(page.getByRole("button", { name: /Payer par carte/ })).toBeVisible();
 
