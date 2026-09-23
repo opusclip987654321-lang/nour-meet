@@ -114,16 +114,16 @@ export interface PublicEvent {
   perks: { drink: boolean; starter: boolean; main: boolean; dessert: boolean; description: string | null };
   minAge: number | null;
   maxAge: number | null;
-  capacity: number;
-  confirmedCount: number;
+  // C24 (ordre correctif 2026-09-20) : jamais capacity/quotas bruts au participant, seulement une
+  // disponibilité déjà réduite à ce qui le concerne (voir eventAvailability côté API).
+  availability: { kind: "category"; remaining: number; full: boolean } | { kind: "general"; remaining: number; full: boolean } | { kind: "unknown" };
+  hasQuotas: boolean;
   priceCents: number;
   priceTiers: { category: QuotaCategory; amountCents: number }[];
-  proposedStartsAt: string | null;
-  proposedEndsAt: string | null;
   status: EventStatus;
   organizer: {id: string | null; name: string};
   venue: {id: string; name: string} | null;
-  quotas: {category: QuotaCategory; capacity: number; heldCount: number}[];
+  highlightTier: "simple" | "priority" | null;
 }
 
 export interface ApiError { error: string; details?: unknown }

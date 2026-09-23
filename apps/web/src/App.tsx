@@ -1,11 +1,12 @@
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import jsQR from "jsqr";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { EVENT_CATEGORIES, EVENT_ZONES, SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening } from "@nour/shared";
 import type { PublicEvent, SessionUser, ScreeningAnswers, NetworkingAnswers, Paginated } from "@nour/shared";
 import { API_URL, api, getToken, setToken } from "./api";
+import { MentionsLegales, CGU, CGV, Confidentialite, Cookies } from "./legal";
 
 const imgUrl = (src: string) => src.startsWith("http") ? src : `${API_URL}${src}`;
 // Avatar : vraie photo de profil si elle existe, sinon les initiales — jamais l'inverse, jamais un
@@ -46,40 +47,76 @@ function Header() {
   const isStaff = !!user && STAFF_ROLES.includes(user.role);
   return <header className="site-header"><Logo/><nav>{isStaff?<><NavLink to="/admin">Administration</NavLink><NavLink to="/">Voir le site public</NavLink></>:<><NavLink to="/">Accueil</NavLink><NavLink to="/events">Événements</NavLink><NavLink to="/concept">Le concept</NavLink><NavLink to="/blog">Blog</NavLink>{user && (user.hasRestaurant ? <NavLink to="/restaurant">Mon établissement</NavLink> : <NavLink to="/dashboard">Mon espace</NavLink>)}</>}</nav><div className="header-actions">{user ? <><span className="member-name">{user.displayName}</span><button className="link-button" onClick={logout}>Déconnexion</button></> : <Link className="button small" to="/login">Se connecter</Link>}</div></header>;
 }
-function Layout({ children }: {children: ReactNode}) { return <><Header/><main>{children}</main><footer><Logo/><p>Paris et Île-de-France · Expérience privée · Données protégées</p></footer></>; }
+// C32-C34 (ordre correctif 2026-09-20) : un identifiant anonyme aléatoire (jamais une empreinte
+// technique), posé une seule fois côté navigateur — le serveur n'écrit rien tant que
+// ANALYTICS_ENABLED est désactivé (défaut), donc cet appel est sans effet hors activation explicite.
+// utm_* n'est capturé qu'une fois par session (sessionStorage), pour attribuer toute la visite à sa
+// source d'origine même après plusieurs pages vues sans paramètres dans l'URL.
+const trackPageview = (path: string) => {
+  try {
+    let anonId = localStorage.getItem("nour_anon_id");
+    if (!anonId) { anonId = crypto.randomUUID(); localStorage.setItem("nour_anon_id", anonId); }
+    let utm = sessionStorage.getItem("nour_utm");
+    if (utm === null) {
+      const params = new URLSearchParams(window.location.search);
+      const captured = { utmSource: params.get("utm_source"), utmMedium: params.get("utm_medium"), utmCampaign: params.get("utm_campaign") };
+      utm = JSON.stringify(captured);
+      sessionStorage.setItem("nour_utm", utm);
+    }
+    let referrerHost: string | null = null;
+    try { referrerHost = document.referrer ? new URL(document.referrer).hostname : null; } catch { /* referrer illisible : ignoré */ }
+    api("/analytics/pageview", { method: "POST", body: JSON.stringify({ path, anonId, referrerHost, ...JSON.parse(utm) }) }).catch(() => {});
+  } catch { /* stockage navigateur indisponible (navigation privée...) : la mesure d'audience s'efface, jamais la page */ }
+};
+function Layout({ children }: {children: ReactNode}) {
+  const location=useLocation();
+  useEffect(()=>{trackPageview(location.pathname)},[location.pathname]);
+  return <><Header/><main>{children}</main><footer><Logo/><p>Paris et Île-de-France · Expérience privée · Données protégées</p><nav style={{ display: "flex", gap: 16 }}><Link to="/legal/mentions-legales">Mentions légales</Link><Link to="/legal/cgu">CGU</Link><Link to="/legal/cgv">CGV</Link><Link to="/legal/confidentialite">Confidentialité</Link><Link to="/legal/cookies">Cookies</Link></nav></footer></>;
+}
 function Loading() { return <div className="state-page"><div className="spinner"/><h2>Chargement…</h2></div>; }
+// C13/C14 (ordre correctif 2026-09-20) : liste de notifications partagée (participant, restaurateur,
+// admin) — chronologique, lu/non lu, cliquable vers la destination métier exacte (linkPath), jamais
+// un lien générique. Un clic marque lu puis navigue ; une notification sans linkPath reste affichée
+// mais non cliquable plutôt que de pointer vers un lien mort.
+function NotificationList({ items, onRead }: { items: any[]; onRead: (id: string) => void }) {
+  const navigate = useNavigate();
+  const open = async (n: any) => {
+    if (!n.readAt) { try { await api(`/notifications/${n.id}/read`, { method: "POST" }); onRead(n.id); } catch { /* déjà lue ou introuvable */ } }
+    if (n.linkPath) navigate(n.linkPath);
+  };
+  if (items.length === 0) return <div className="empty small"><span>◇</span><p>Aucune notification pour le moment.</p></div>;
+  return <div className="stack">{items.map(n => {
+    const Tag = n.linkPath ? "button" : "div";
+    return <Tag key={n.id} type={n.linkPath ? "button" : undefined} className={`notification ${n.readAt ? "read" : "unread"}`} onClick={n.linkPath ? () => open(n) : undefined} style={n.linkPath ? { cursor: "pointer", textAlign: "left", border: 0, width: "100%", font: "inherit" } : undefined}>
+      <i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div>
+    </Tag>;
+  })}</div>;
+}
 function Notice({ kind="info", children }: {kind?: "info"|"error"|"success", children: ReactNode}) { return <div className={`notice ${kind}`}>{children}</div>; }
 
-// « J'y vais, viens avec moi » (§12) : Web Share API sur appareils compatibles, sinon copie du
-// lien et boutons Facebook/Instagram/TikTok là où techniquement possible (Instagram et TikTok
-// n'offrant pas d'intention de partage par URL, seule la copie du lien fonctionne pour eux).
+// C23 (ordre correctif 2026-09-20) : un seul bouton principal, libellé 2-3 mots ("Invite un ami"),
+// qui ouvre la feuille de partage native (WhatsApp, SMS, apps installées) si disponible, sinon
+// retombe sur la copie du lien — jamais de boutons séparés Facebook/Instagram/TikTok, dont
+// certains ne pouvaient de toute façon pas déclencher un vrai partage direct par URL.
 function ShareButton({ event }: { event: PublicEvent }) {
   const { user } = useAuth();
-  const [url, setUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const resolveUrl = async () => {
-    if (url) return url;
     let resolved = `${window.location.origin}/events/${event.slug}`;
     if (user) { try { resolved = (await api<{ url: string }>(`/events/${event.id}/share-link`, { method: "POST" })).url; } catch { /* lien public par défaut */ } }
-    setUrl(resolved); return resolved;
+    return resolved;
   };
   const share = async () => {
     setError("");
     const shareUrl = await resolveUrl();
-    const text = `J’y vais, viens avec moi : « ${event.title} » sur Nūr Meet.`;
+    const text = `« ${event.title} » sur Nūr Meet.`;
     if (navigator.share) { try { await navigator.share({ title: event.title, text, url: shareUrl }); return; } catch { /* annulé ou indisponible, on retombe sur la copie */ } }
     try { await navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2500); }
     catch { setError("Impossible de copier le lien automatiquement."); }
   };
-  const copyForInstagramOrTikTok = async () => { const shareUrl = await resolveUrl(); try { await navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { setError("Impossible de copier le lien."); } };
-  const facebookUrl = url ? `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}` : null;
   return <div className="share-block">
-    <button type="button" className="button secondary full" onClick={share}>J’y vais, viens avec moi</button>
-    <div className="share-row">
-      {facebookUrl?<a className="link-button" href={facebookUrl} target="_blank" rel="noopener noreferrer">Facebook</a>:<button type="button" className="link-button" onClick={async()=>{await resolveUrl()}}>Facebook</button>}
-      <button type="button" className="link-button" onClick={copyForInstagramOrTikTok}>Copier pour Instagram / TikTok</button>
-    </div>
+    <button type="button" className="button secondary full" onClick={share}>Inviter un ami</button>
     {copied && <p className="fine share-copied">Lien copié !</p>}
     {error && <p className="fine share-copied">{error}</p>}
   </div>;
@@ -105,10 +142,13 @@ function CategoryBadge({ category, className }: {category: string; className?: s
   return <span className={`category-badge${className ? ` ${className}` : ""}`} style={{ color, borderColor: color }}>{icon}{category}</span>;
 }
 
+// C24 : jamais de chiffre brut de capacité/quota — seulement ce que la disponibilité calculée
+// côté serveur autorise à dire pour CE visiteur.
+const availabilityLabel=(a:PublicEvent["availability"])=>a.kind==="unknown"?"Places selon catégorie":a.full?"Complet":`${a.remaining} place${a.remaining>1?"s":""} restante${a.remaining>1?"s":""}`;
 function EventCard({ event }: {event: PublicEvent}) {
-  const full=event.confirmedCount>=event.capacity;
+  const full=event.availability.kind!=="unknown"&&event.availability.full;
   const priceLabel=event.priceTiers.length>0?`À partir de ${money(Math.min(...event.priceTiers.map(t=>t.amountCents)))}`:money(event.priceCents);
-  return <article className="event-card"><Link to={`/events/${event.slug}`} className="event-art"><img src={imgUrl(event.imageUrl)} alt={event.title} loading="lazy"/><CategoryBadge category={event.category}/>{full&&<span className="full-badge">Complet</span>}</Link><div className="event-copy"><small>{dateTime(event.startsAt).toUpperCase()}</small><h3>{event.title}</h3><p>{event.district} · {full?"Complet":`${event.capacity-event.confirmedCount} places restantes`}</p><div><strong>{priceLabel}</strong><Link to={`/events/${event.slug}`}>Découvrir →</Link></div></div></article>;
+  return <article className="event-card"><Link to={`/events/${event.slug}`} className="event-art"><img src={imgUrl(event.imageUrl)} alt={event.title} loading="lazy"/><CategoryBadge category={event.category}/>{event.highlightTier==="priority"&&<span className="verified-badge" style={{position:"absolute",top:16,right:16}}>★ Mise en avant</span>}{event.highlightTier==="simple"&&<span className="category-badge" style={{position:"absolute",top:16,right:16,color:"#ddd",borderColor:"#555"}}>Partenaire</span>}{full&&<span className="full-badge">Complet</span>}</Link><div className="event-copy"><small>{dateTime(event.startsAt).toUpperCase()}</small><h3>{event.title}</h3><p>{event.district} · {availabilityLabel(event.availability)}</p><div><strong>{priceLabel}</strong><Link to={`/events/${event.slug}`}>Découvrir →</Link></div></div></article>;
 }
 function TestimonialsSection({ eventType }: { eventType?: string }) {
   const [items,setItems]=useState<any[]>([]);
@@ -119,7 +159,10 @@ function TestimonialsSection({ eventType }: { eventType?: string }) {
 
 function Home() {
   const [events,setEvents]=useState<PublicEvent[]>([]); useEffect(()=>{api<Paginated<PublicEvent>>("/events").then(r=>setEvents(r.items)).catch(()=>{})},[]);
-  return <Layout><section className="hero"><div><span className="eyebrow">PARIS · ÎLE-DE-FRANCE</span><h1>Des rencontres<br/><em>qui comptent.</em></h1><p>Des événements élégants et confidentiels, pensés pour créer de vraies connexions dans un cadre respectueux.</p><div className="hero-actions"><Link className="button" to="/events">Voir les événements</Link><Link className="button secondary" to="/concept">Découvrir le concept</Link></div><div className="trust"><span>✓ Profils sélectionnés</span><span>✓ Lieux premium</span><span>✓ Cadre confidentiel</span></div></div><div className="hero-art"><div className="arch"><span>ن</span></div><div className="next-card">{events[0]?<img className="next-thumb" src={imgUrl(events[0].imageUrl)} alt=""/>:<div className="avatar">N</div>}<div><small>PROCHAINE SOIRÉE</small><strong>{events[0]?.title??"Dîner & Connexions"}</strong><span>{events[0]?dateTime(events[0].startsAt):"Samedi · Paris"}</span></div></div></div></section><section id="concept" className="section"><div className="section-title"><span className="eyebrow">LE CONCEPT</span><h2>Du réel au numérique, avec votre consentement.</h2></div><div className="feature-grid"><div><b>01</b><h3>Candidature</h3><p>Chaque nouveau membre complète son profil et réserve un court appel.</p></div><div><b>02</b><h3>Rencontre</h3><p>Les événements réunissent 20 à 40 personnes dans un cadre privé.</p></div><div><b>03</b><h3>Contact choisi</h3><p>Un code personnel permet d’envoyer une demande. Le chat s’ouvre après acceptation.</p></div></div><Link to="/concept" className="fine">En savoir plus sur le concept →</Link></section>{events.length>0&&<section className="section"><div className="section-title row"><div><span className="eyebrow">À VENIR</span><h2>Les prochaines rencontres</h2></div><Link to="/events">Tout afficher →</Link></div><div className="event-grid">{events.slice(0,3).map(e=><EventCard key={e.id} event={e}/>)}</div></section>}<TestimonialsSection/></Layout>;
+  return <Layout><section className="hero"><div><span className="eyebrow">PARIS · ÎLE-DE-FRANCE</span><h1>Des rencontres<br/><em>qui comptent.</em></h1><p>Des événements élégants et confidentiels, pensés pour créer de vraies connexions dans un cadre respectueux.</p><div className="hero-actions"><Link className="button" to="/events">Voir les événements</Link><Link className="button secondary" to="/concept">Découvrir le concept</Link></div><div className="trust"><span>✓ Profils sélectionnés</span><span>✓ Lieux premium</span><span>✓ Cadre confidentiel</span></div></div><div className="hero-art"><div className="arch"><span>ن</span></div>{
+/* G2 (cahier des charges consolidé 2026-09-20) : jamais de soirée fictive affichée comme réelle —
+   si aucun événement n'est publié, un message neutre remplace la carte plutôt qu'un exemple inventé. */
+}<div className="next-card">{events[0]?<><img className="next-thumb" src={imgUrl(events[0].imageUrl)} alt=""/><div><small>PROCHAINE SOIRÉE</small><strong>{events[0].title}</strong><span>{dateTime(events[0].startsAt)}</span></div></>:<><div className="avatar">N</div><div><small>PROCHAINE SOIRÉE</small><strong>Revenez bientôt</strong><span>De nouvelles soirées seront bientôt annoncées</span></div></>}</div></div></section><section id="concept" className="section"><div className="section-title"><span className="eyebrow">LE CONCEPT</span><h2>Du réel au numérique, avec votre consentement.</h2></div><div className="feature-grid"><div><b>01</b><h3>Candidature</h3><p>Chaque nouveau membre complète son profil et réserve un court appel.</p></div><div><b>02</b><h3>Rencontre</h3><p>Les événements réunissent 20 à 40 personnes dans un cadre privé.</p></div><div><b>03</b><h3>Contact choisi</h3><p>Un code personnel permet d’envoyer une demande. Le chat s’ouvre après acceptation.</p></div></div><Link to="/concept" className="fine">En savoir plus sur le concept →</Link></section>{events.length>0&&<section className="section"><div className="section-title row"><div><span className="eyebrow">À VENIR</span><h2>Les prochaines rencontres</h2></div><Link to="/events">Tout afficher →</Link></div><div className="event-grid">{events.slice(0,3).map(e=><EventCard key={e.id} event={e}/>)}</div></section>}<TestimonialsSection/></Layout>;
 }
 
 function Concept() {
@@ -140,13 +183,15 @@ function Concept() {
   </section></Layout>;
 }
 
-const BLOG_CATEGORIES=["Couple","Rencontre","Solitude","Mariage","Communication","Vie relationnelle"];
+// Architecture éditoriale (instructions définitives 2026-09-20) : couvre explicitement les
+// rencontres amoureuses, l'amitié, la solitude et le networking professionnel.
+const BLOG_CATEGORIES=["Rencontres amoureuses","Amitié","Solitude et vie sociale","Networking professionnel"];
 
 function Blog() {
   const [articles,setArticles]=useState<any[]>([]);
   const [category,setCategory]=useState("");
   useEffect(()=>{api<any[]>(`/articles${category?`?category=${encodeURIComponent(category)}`:""}`).then(setArticles).catch(()=>{})},[category]);
-  return <Layout><section className="page"><span className="eyebrow">LE BLOG</span><h1>Couple, rencontre et vie relationnelle.</h1>
+  return <Layout><section className="page"><span className="eyebrow">LE BLOG</span><h1>Rencontres, amitié et vie sociale.</h1>
     <div className="filters"><select value={category} onChange={e=>setCategory(e.target.value)}><option value="">Tous les thèmes</option>{BLOG_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
     {articles.length===0?<div className="empty"><span>◇</span><h2>Aucun article pour le moment</h2></div>:<div className="event-grid">{articles.map(a=><Link key={a.id} to={`/blog/${a.slug}`} className="event-card"><div className="event-art">{a.imageUrl?<img src={imgUrl(a.imageUrl)} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span className="eyebrow">{a.category.toUpperCase()}</span>}</div><div className="event-copy"><small>{a.category.toUpperCase()}</small><h3>{a.title}</h3><p>{a.excerpt}</p></div></Link>)}</div>}
   </section></Layout>;
@@ -177,7 +222,20 @@ function ArticlePage() {
     let meta=document.querySelector('meta[name="description"]');
     if(!meta){meta=document.createElement("meta");meta.setAttribute("name","description");document.head.appendChild(meta)}
     meta.setAttribute("content",article.metaDescription||article.excerpt||"");
-    return ()=>{document.title="Nūr Meet"};
+    // C31 : données structurées réelles (Article), jamais un graphique/schéma décoratif — uniquement
+    // les champs dont on dispose vraiment (pas d'auteur générique inventé si l'article n'en a pas).
+    const script=document.createElement("script");
+    script.type="application/ld+json";
+    script.text=JSON.stringify({
+      "@context":"https://schema.org","@type":"Article",
+      headline:article.title, description:article.excerpt??undefined,
+      image:article.imageUrl?imgUrl(article.imageUrl):undefined,
+      datePublished:article.publishedAt??undefined, dateModified:article.updatedAt??article.publishedAt??undefined,
+      author:article.author?{"@type":"Person",name:article.author.displayName}:undefined,
+      publisher:{"@type":"Organization",name:"Nūr Meet"}
+    });
+    document.head.appendChild(script);
+    return ()=>{document.title="Nūr Meet";script.remove()};
   },[article]);
   if(notFound)return <Layout><div className="empty"><span>◇</span><h2>Article introuvable</h2></div></Layout>;
   if(!article)return <Layout><Loading/></Layout>;
@@ -289,17 +347,25 @@ function PaymentModal({ applicationId, eventId, amountCents, onClose, onConfirme
 // L'authentification se fait par un jeton passé en paramètre d'URL (le mobile n'a pas de cookie ou
 // de localStorage partagé avec le navigateur web) : il est stocké avant tout appel à l'API, jamais
 // après, pour éviter toute course avec PaymentModal ci-dessus qui lit le jeton dès son montage.
+// Cahier des charges consolidé final (2026-09-20, section 9.2) : la page n'accepte plus le jeton de
+// session (30 jours) directement dans l'URL — seulement un jeton de paiement opaque, à usage unique
+// et de courte durée, échangé ici contre un vrai jeton de session éphémère (voir
+// POST /auth/payment-session-exchange). Jamais stocké ni journalisé tel quel.
 function PayStandalone(){
   const { applicationId } = useParams();
   const [searchParams] = useSearchParams();
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState(false);
   const [done, setDone] = useState(false);
   useEffect(() => {
-    const token = searchParams.get("token");
-    if (token) setToken(token);
-    setReady(true);
+    const session = searchParams.get("session");
+    if (!session) { setError(true); setReady(true); return; }
+    api<{ token: string }>("/auth/payment-session-exchange", { method: "POST", body: JSON.stringify({ token: session }) })
+      .then(r => { setToken(r.token); setReady(true); })
+      .catch(() => { setError(true); setReady(true); });
   }, []);
   if (!ready) return <div className="state-page"><div className="spinner"/></div>;
+  if (error) return <div className="state-page"><h2>Lien de paiement invalide ou expiré.</h2><p>Retournez dans l’application et réessayez.</p></div>;
   if (done) return <div className="state-page"><h2>C’est terminé ici.</h2><p>Vous pouvez fermer cette fenêtre et retourner dans l’application Nūr Meet.</p></div>;
   const eventId = searchParams.get("eventId") ?? "";
   const amountCents = Number(searchParams.get("amount") ?? "0");
@@ -308,11 +374,39 @@ function PayStandalone(){
   </div>;
 }
 
+// Arbitrage 12/E3 (cahier des charges consolidé 2026-09-20) : proposé uniquement une fois la place
+// confirmée, jamais avant ou pendant le paiement, et entièrement facultatif — "Plus tard" ne bloque
+// rien et ne réapparaît que lors d'une prochaine visite de cette page.
+function NetworkingFollowUp({ applicationId }: { applicationId: string }) {
+  const [dismissed, setDismissed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  if (dismissed || done) return done ? <Notice kind="success">Merci, vos informations professionnelles ont été enregistrées.</Notice> : null;
+  const submit = async (e: FormEvent) => {
+    e.preventDefault(); setSubmitting(true);
+    try { await api(`/applications/${applicationId}/networking-answers`, { method: "POST", body: JSON.stringify(answers) }); setDone(true); }
+    catch { setDismissed(true); }
+    finally { setSubmitting(false); }
+  };
+  return <form className="questionnaire" onSubmit={submit}>
+    <p className="fine">Facultatif : quelques informations professionnelles pour mieux organiser la soirée.</p>
+    {NETWORKING_QUESTIONS.map(q => <label key={q.key}>{q.label}<textarea value={answers[q.key] ?? ""} onChange={e => setAnswers({ ...answers, [q.key]: e.target.value })}/></label>)}
+    <div className="decision-buttons">
+      <button className="button" disabled={submitting}>{submitting ? "Envoi…" : "Envoyer"}</button>
+      <button type="button" className="button secondary" onClick={() => setDismissed(true)}>Plus tard</button>
+    </div>
+  </form>;
+}
+
 function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { application: any; event: PublicEvent; onPaid: () => void; onWaitlisted: () => void }) {
   const [showPayment, setShowPayment] = useState(false);
   if (application.status === "REFUSED") return <Notice kind="error">Votre candidature n’a pas été retenue pour cet événement.</Notice>;
   if (application.status === "CANCELLED") return <Notice kind="error">Cette candidature a été annulée.</Notice>;
-  if (application.status === "CONFIRMED") return <Notice kind="success">Votre place est confirmée. Retrouvez votre billet dans votre espace personnel.</Notice>;
+  if (application.status === "CONFIRMED") return <>
+    <Notice kind="success">Votre place est confirmée. Retrouvez votre billet dans votre espace personnel.</Notice>
+    {!eventRequiresScreening(event) && !application.networkingAnswer && <NetworkingFollowUp applicationId={application.id}/>}
+  </>;
   // La candidature autorise à tenter le paiement, elle ne garantit jamais de place à elle seule
   // (§5) : le clic sur "Payer" est ce qui pose réellement le verrou, via PaymentModal.
   if (application.status === "PAYMENT_PENDING") return <div className="payment-block">
@@ -376,21 +470,29 @@ function EventDetail() {
 
   const requiresScreening = eventRequiresScreening(event);
   const profileValidated = !!user?.profile?.validatedAt;
-  const myQuota = event.quotas.length>0 ? event.quotas.find(q=>q.category===user?.profile?.quotaCategory) ?? null : null;
-  const categoryUnknown = event.quotas.length>0 && !user?.profile?.quotaCategory;
-  const bucketFull = event.quotas.length>0 ? (myQuota ? myQuota.heldCount>=myQuota.capacity : false) : event.confirmedCount>=event.capacity;
+  // C24 : plus de lecture directe de quotas bruts — la disponibilité déjà calculée côté serveur
+  // pour ce visiteur (event.availability) porte toute l'information nécessaire à l'écran.
+  const categoryUnknown = event.availability.kind==="unknown";
+  const bucketFull = event.availability.kind!=="unknown" && event.availability.full;
   const canCancel = application && !["REFUSED","CANCELLED"].includes(application.status);
 
   const refreshApplication=()=>api<any>(`/events/${event.id}/my-application`).then(setApplication).catch(()=>{});
   const markWaitlisted=()=>{api<any>(`/events/${event.id}/waitlist/me`).then(setWaitlistEntry).catch(()=>{});setNotice({kind:"info",text:"Cet événement est complet pour votre catégorie : vous avez été placé(e) sur liste d’attente."})};
 
-  // La candidature ne garantit jamais de place (§5) : elle enregistre le questionnaire et autorise
-  // seulement à tenter le paiement ensuite (voir ApplicationStatusPanel → PaymentModal).
-  const apply=async(answers:Record<string,string>)=>{
+  // La candidature ne garantit jamais de place (§5) : elle enregistre le questionnaire (spéciale
+  // dating uniquement) et autorise seulement à tenter le paiement ensuite (voir
+  // ApplicationStatusPanel → PaymentModal). Arbitrage 12/E3 : un événement networking ne pose plus
+  // aucune question professionnelle à ce stade — voir le formulaire facultatif post-paiement dans
+  // ApplicationStatusPanel.
+  const apply=async(answers?:Record<string,string>)=>{
     setBusy(true);setNotice(null);
     try{
-      const storedRef=sessionStorage.getItem(`nour_ref_${event.id}`)??undefined;
-      const body=requiresScreening?{screeningAnswers:answers,shareCode:storedRef}:{networkingAnswers:answers,shareCode:storedRef};
+      // Bug historique (cahier des charges consolidé 2026-09-20) : le clic est enregistré sous la
+      // clé de l'URL (slug), mais la candidature relisait sous l'id réel de l'événement — deux
+      // valeurs différentes qui ne coïncident jamais, donc l'attribution était silencieusement
+      // perdue. On relit désormais sous la même clé que celle utilisée à l'écriture (id ci-dessus).
+      const storedRef=sessionStorage.getItem(`nour_ref_${id}`)??undefined;
+      const body=requiresScreening?{screeningAnswers:answers,shareCode:storedRef}:{shareCode:storedRef};
       const result=await api<any>(`/events/${event.id}/apply`,{method:"POST",body:JSON.stringify(body)});
       setApplication(result.application);setShowQuestionnaire(false);
       setNotice({kind:"success",text:"Candidature envoyée : vous pouvez maintenant régler votre billet."});
@@ -435,7 +537,7 @@ function EventDetail() {
   };
 
   const perkLabels=[event.perks.drink&&"Boisson incluse",event.perks.starter&&"Entrée incluse",event.perks.main&&"Plat inclus",event.perks.dessert&&"Dessert inclus"].filter(Boolean) as string[];
-  return <Layout><section className="event-hero" style={{backgroundImage:`linear-gradient(180deg,#0b0b0cb0,#0b0b0ce6),url(${imgUrl(event.imageUrl)})`}}><CategoryBadge category={event.category} className="inline"/> <span className={`flow-badge ${requiresScreening?"screening":"direct"}`}>{requiresScreening?"◆ Sélection":"● Accès direct"}</span><h1>{event.title}</h1><p>{event.description}</p></section>{event.photos.length>0&&<section className="event-gallery">{event.photos.map((url,i)=><img key={i} src={imgUrl(url)} alt=""/>)}</section>}<section className="event-layout"><article><div className="facts"><div><small>DATE</small><b>{dateTime(event.startsAt)}</b></div><div><small>LIEU</small><b>{event.district}</b></div><div><small>CAPACITÉ</small><b>{event.capacity} participants</b></div>{(event.minAge||event.maxAge)&&<div><small>TRANCHE D’ÂGE</small><b>{event.minAge&&event.maxAge?`${event.minAge}-${event.maxAge} ans`:event.minAge?`${event.minAge} ans et plus`:`Jusqu’à ${event.maxAge} ans`}</b></div>}<div><small>ORGANISATEUR</small><b>{event.organizer.name}</b></div></div>{event.quotas.length>0&&<div className="quota-breakdown"><small>PLACES PAR CATÉGORIE</small><div className="quota-rows">{event.quotas.map(q=><div key={q.category} className="quota-row"><span>{q.category==="HOMME"?"Hommes":"Femmes"}</span><b>{q.heldCount>=q.capacity?"Complet":`${q.capacity-q.heldCount} places`}</b></div>)}</div></div>}<h2>Une expérience pensée pour de vraies rencontres</h2><p>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité.</p>{(perkLabels.length>0||event.perks.description)&&<div className="event-perks">{perkLabels.map(l=><span key={l}>{l}</span>)}{event.perks.description&&<span>{event.perks.description}</span>}</div>}<ul><li>{requiresScreening?"Profils sélectionnés":"Inscription directe"}</li><li>QR code d’entrée unique</li><li>Code de contact privé</li><li>Équipe présente sur place</li></ul><div className="cancellation-policy"><small>POLITIQUE D’ANNULATION</small><p>Annulation gratuite jusqu’à 24 heures avant l’événement : remboursement intégral automatique. Passé ce délai, aucun remboursement n’est possible de plein droit (une exception peut être accordée par l’administration selon les circonstances).</p></div></article><aside className="booking"><ShareButton event={event}/><small>{event.priceTiers.length>0?"TARIFS":"À PARTIR DE"}</small>{event.priceTiers.length>0?<div className="quota-rows">{event.priceTiers.map(t=><div key={t.category} className="quota-row"><span>{t.category==="HOMME"?"Hommes":"Femmes"}</span><b>{money(t.amountCents)}</b></div>)}</div>:<strong>{money(event.priceCents)}</strong>}<div><span>Disponibilité</span><b>{event.quotas.length>0?(myQuota?(bucketFull?"Complet pour votre catégorie":`${myQuota.capacity-myQuota.heldCount} places pour vous`):"Places selon catégorie"):(bucketFull?"Complet":`${event.capacity-event.confirmedCount} places`)}</b></div>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
+  return <Layout><section className="event-hero" style={{backgroundImage:`linear-gradient(180deg,#0b0b0cb0,#0b0b0ce6),url(${imgUrl(event.imageUrl)})`}}><CategoryBadge category={event.category} className="inline"/> <span className={`flow-badge ${requiresScreening?"screening":"direct"}`}>{requiresScreening?"◆ Sélection":"● Accès direct"}</span><h1>{event.title}</h1><p>{event.description}</p></section>{event.photos.length>0&&<section className="event-gallery">{event.photos.map((url,i)=><img key={i} src={imgUrl(url)} alt=""/>)}</section>}<section className="event-layout"><article><div className="facts"><div><small>DATE</small><b>{dateTime(event.startsAt)}</b></div><div><small>LIEU</small><b>{event.district}</b></div>{(event.minAge||event.maxAge)&&<div><small>TRANCHE D’ÂGE</small><b>{event.minAge&&event.maxAge?`${event.minAge}-${event.maxAge} ans`:event.minAge?`${event.minAge} ans et plus`:`Jusqu’à ${event.maxAge} ans`}</b></div>}<div><small>ORGANISATEUR</small><b>{event.organizer.name}</b></div></div><h2>Une expérience pensée pour de vraies rencontres</h2><p>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité.</p>{(perkLabels.length>0||event.perks.description)&&<div className="event-perks">{perkLabels.map(l=><span key={l}>{l}</span>)}{event.perks.description&&<span>{event.perks.description}</span>}</div>}<ul><li>{requiresScreening?"Profils sélectionnés":"Inscription directe"}</li><li>QR code d’entrée unique</li><li>Code de contact privé</li><li>Équipe présente sur place</li></ul><div className="cancellation-policy"><small>POLITIQUE D’ANNULATION</small><p>Annulation gratuite jusqu’à 24 heures avant l’événement : remboursement intégral automatique. Passé ce délai, aucun remboursement n’est possible de plein droit.</p></div></article><aside className="booking"><ShareButton event={event}/><small>{event.priceTiers.length>0?"TARIFS":"À PARTIR DE"}</small>{event.priceTiers.length>0?<div className="quota-rows">{event.priceTiers.map(t=><div key={t.category} className="quota-row"><span>{t.category==="HOMME"?"Hommes":"Femmes"}</span><b>{money(t.amountCents)}</b></div>)}</div>:<strong>{money(event.priceCents)}</strong>}<div><span>Disponibilité</span><b>{availabilityLabel(event.availability)}</b></div>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
     {altOffer&&<div className="alt-offer"><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{altOffer.alternativeEvent.title}</h3><p>{dateTime(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</p><p><b>{money(altOffer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busy} onClick={()=>respondAltOffer(true)}>Accepter</button><button className="button secondary" disabled={busy} onClick={()=>respondAltOffer(false)}>Refuser</button></div></div>}
     {!user?<Link className="button full" to="/login">Se connecter pour vous inscrire</Link>
     :loadingApplication?<div className="calendar-state"><div className="spinner small"/><span>Chargement…</span></div>
@@ -448,9 +550,9 @@ function EventDetail() {
     :user.hasRestaurant?<Notice kind="info">Votre compte restaurateur vous permet de découvrir les événements proposés, mais ne permet pas d’y participer.</Notice>
     :requiresScreening&&!profileValidated?<Notice kind="error">Votre profil doit d’abord être validé lors d’un entretien avec Nour Meet avant de vous inscrire à un speed dating. <Link to="/dashboard">Demander mon entretien →</Link></Notice>
     :categoryUnknown?<Notice kind="error">Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement.</Notice>
-    :showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>
-    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même candidater : une liste d’attente et une éventuelle proposition alternative vous seront proposées au moment de payer.</Notice>}<button className="button full" onClick={()=>setShowQuestionnaire(true)}>{requiresScreening?"Candidater":"S’inscrire"}</button></>}
-    <p className="fine">Le paiement est proposé immédiatement après le questionnaire ; la place n’est acquise qu’une fois le paiement confirmé.</p></aside></section></Layout>;
+    :requiresScreening&&showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>
+    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même candidater : une liste d’attente et une éventuelle proposition alternative vous seront proposées au moment de payer.</Notice>}<button className="button full" disabled={busy} onClick={()=>requiresScreening?setShowQuestionnaire(true):apply()}>{requiresScreening?"Candidater":busy?"…":"S’inscrire"}</button></>}
+    <p className="fine">{requiresScreening?"Le paiement est proposé immédiatement après le questionnaire ; la place n’est acquise qu’une fois le paiement confirmé.":"Le paiement est proposé immédiatement après l’inscription ; la place n’est acquise qu’une fois le paiement confirmé."}</p></aside></section></Layout>;
 }
 
 // Comptes de test créés par prisma/seed.ts (voir ce fichier pour le détail de chaque état) : ces
@@ -650,8 +752,99 @@ function RestaurantApplication() {
 // du dashboard participant (§5), car un restaurateur n'a plus le droit d'y accéder aux fonctions de
 // participation. Un compte en attente d'approbation garde par ailleurs un accès normal au reste du
 // site public (événements, concept, blog) ; seule la participation elle-même est bloquée côté serveur.
+// C01/C13 (ordre correctif 2026-09-20) : cette page reste accessible AUSSI après approbation (rôle
+// ORGANIZER) — jusqu'ici /restaurant n'acceptait que PARTICIPANT et redirigeait tout restaurateur
+// déjà approuvé vers /admin, le laissant sans aucun moyen d'atteindre son abonnement ou ses
+// notifications propres. Onglets Abonnement/Notifications pilotables par ?tab= (ex. depuis une
+// notification cliquable) une fois qu'un dossier restaurateur existe (en attente ou approuvé).
 function RestaurantSpace() {
-  return <Layout><section className="page"><span className="eyebrow">ESPACE RESTAURATEUR</span><h1>Mon établissement</h1><RestaurantApplication/></section></Layout>;
+  const [searchParams]=useSearchParams();
+  const [restaurant,setRestaurant]=useState<any>(undefined);
+  const [tab,setTab]=useState(searchParams.get("tab")??"establishment");
+  const [unread,setUnread]=useState(0);
+  const loadRestaurant=()=>api<any>("/restaurants/me").then(setRestaurant).catch(()=>setRestaurant(null));
+  useEffect(()=>{loadRestaurant()},[]);
+  // C14 : une notification cliquée navigue vers /restaurant?tab=X sans démonter ce composant (même
+  // route) — sans cette synchronisation, l'onglet affiché resterait celui d'avant le clic.
+  useEffect(()=>{const t=searchParams.get("tab");if(t)setTab(t)},[searchParams]);
+  useEffect(()=>{if(restaurant)api<{count:number}>("/notifications/unread-count").then(r=>setUnread(r.count)).catch(()=>{})},[restaurant,tab]);
+  if(restaurant===undefined)return <Layout><Loading/></Layout>;
+  const hasTabs=restaurant&&(restaurant.status==="PENDING"||restaurant.status==="APPROVED");
+  return <Layout><section className="page"><span className="eyebrow">ESPACE RESTAURATEUR</span><h1>Mon établissement</h1>
+    {hasTabs&&<div className="filters">
+      <button type="button" className={tab==="establishment"?"button small":"button small secondary"} onClick={()=>setTab("establishment")}>Mon établissement</button>
+      <button type="button" className={tab==="subscription"?"button small":"button small secondary"} onClick={()=>setTab("subscription")}>Abonnement</button>
+      <button type="button" className={tab==="notifications"?"button small":"button small secondary"} onClick={()=>setTab("notifications")}>🔔 Notifications{unread>0?` (${unread})`:""}</button>
+    </div>}
+    {(!hasTabs||tab==="establishment")&&<RestaurantApplication/>}
+    {hasTabs&&tab==="subscription"&&<RestaurantSubscriptionPanel restaurant={restaurant} onChanged={loadRestaurant}/>}
+    {hasTabs&&tab==="notifications"&&<RestaurantNotificationsPanel onUnreadChange={setUnread}/>}
+  </section></Layout>;
+}
+// C01-C09 (instructions définitives 2026-09-20) : vraie page abonnement — deux formules, bascule
+// mensuel/annuel, tunnel Stripe Checkout réel (carte obligatoire, essai 7 jours géré par Stripe),
+// résiliation programmée en fin de période, portail de facturation. Accessible dès PENDING.
+function RestaurantSubscriptionPanel({restaurant,onChanged}:{restaurant:any;onChanged:()=>void}){
+  const [searchParams]=useSearchParams();
+  const [plans,setPlans]=useState<any[]>([]);
+  const [period,setPeriod]=useState<"MONTHLY"|"ANNUAL">("MONTHLY");
+  const [busy,setBusy]=useState<string|null>(null);
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(
+    searchParams.get("checkout")==="success"?{kind:"success",text:"Moyen de paiement enregistré. Votre essai de 7 jours a commencé."}:
+    searchParams.get("checkout")==="cancel"?{kind:"error",text:"Souscription annulée avant la fin du paiement."}:null
+  );
+  useEffect(()=>{api<any[]>("/plans").then(setPlans).catch(()=>{})},[]);
+  const subscription=restaurant.subscription;
+  const checkout=async(planId:string)=>{
+    setBusy(planId);setNotice(null);
+    try{const {url}=await api<{url:string}>("/restaurants/me/subscription/checkout",{method:"POST",body:JSON.stringify({planId,billingPeriod:period})});window.location.href=url}
+    catch(err){setNotice({kind:"error",text:(err as Error).message});setBusy(null)}
+  };
+  const cancel=async()=>{
+    setBusy("cancel");setNotice(null);
+    try{await api("/restaurants/me/subscription/cancel",{method:"POST"});setNotice({kind:"success",text:"Résiliation programmée : vos avantages restent actifs jusqu’à la fin de la période déjà payée."});onChanged()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+  const openPortal=async()=>{
+    setBusy("portal");setNotice(null);
+    try{const {url}=await api<{url:string}>("/restaurants/me/subscription/portal",{method:"POST"});window.location.href=url}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(null)}
+  };
+  return <div className="stack">
+    {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    {subscription?<div className="panel">
+      <div className="panel-title"><h2>Mon abonnement</h2><span>{SUBSCRIPTION_STATUS_LABEL[subscription.status]??subscription.status}</span></div>
+      <p className="fine left">Formule <b>{subscription.plan.name}</b> ({subscription.billingPeriod==="ANNUAL"?"annuel":"mensuel"}) — {subscription.cancelAtPeriodEnd?"résiliation programmée, ":""}
+        {subscription.status==="CANCELLED"?"résilié":`échéance le ${new Date(subscription.currentPeriodEnd).toLocaleDateString("fr-FR")}`}.</p>
+      <p className="fine left">Quota ce mois-ci : {restaurant.currentMonthEventsPublished}{subscription.plan.monthlyEventQuota==null?" événements publiés (illimité)":`/${subscription.plan.monthlyEventQuota} événements publiés`}.</p>
+      <div className="decision-buttons">
+        {subscription.stripeCustomerId&&<button type="button" className="button secondary" disabled={!!busy} onClick={openPortal}>Gérer mon moyen de paiement</button>}
+        {!subscription.cancelAtPeriodEnd&&subscription.status!=="CANCELLED"&&<button type="button" className="button danger" disabled={!!busy} onClick={cancel}>Résilier</button>}
+      </div>
+    </div>:<>
+      <div className="filters"><button type="button" className={period==="MONTHLY"?"button small":"button small secondary"} onClick={()=>setPeriod("MONTHLY")}>Mensuel</button><button type="button" className={period==="ANNUAL"?"button small":"button small secondary"} onClick={()=>setPeriod("ANNUAL")}>Annuel (2 mois offerts)</button></div>
+      <div className="feature-grid">{plans.map(p=><div key={p.id}>
+        <b style={{color:"var(--gold)"}}>{p.name}</b>
+        <h3>{money(period==="ANNUAL"?p.annualPriceCents:p.monthlyPriceCents)}{period==="ANNUAL"?"/an":"/mois"}</h3>
+        <p>{p.monthlyEventQuota==null?"Événements illimités":`${p.monthlyEventQuota} événements publiés par mois`}</p>
+        <p>{p.highlightTier==="priority"?"Mise en avant prioritaire des soirées et de l’établissement":p.highlightTier==="simple"?"Mise en avant simple des soirées et de l’établissement":""}</p>
+        <p className="fine">Essai gratuit de 7 jours, carte requise, résiliable avant l’échéance.</p>
+        <button type="button" className="button full" disabled={!!busy} onClick={()=>checkout(p.id)}>{busy===p.id?"…":"Choisir cette formule"}</button>
+      </div>)}</div>
+      <p className="fine">Le choix de la formule est indépendant de la publication de vos soirées, qui reste soumise à validation admin.</p>
+    </>}
+  </div>;
+}
+const SUBSCRIPTION_STATUS_LABEL:Record<string,string>={TRIALING:"Essai en cours",ACTIVE:"Actif",PAST_DUE:"Paiement en échec",CANCELLED:"Résilié",INCOMPLETE:"Incomplet"};
+function RestaurantNotificationsPanel({onUnreadChange}:{onUnreadChange:(n:number)=>void}){
+  const [items,setItems]=useState<any[]>([]);
+  const load=()=>api<any[]>("/notifications").then(setItems);
+  useEffect(()=>{load()},[]);
+  return <div className="panel"><div className="panel-title"><h2>Notifications</h2></div>
+    <NotificationList items={items} onRead={id=>{setItems(items.map(n=>n.id===id?{...n,readAt:new Date().toISOString()}:n));onUnreadChange(items.filter(n=>!n.readAt&&n.id!==id).length)}}/>
+  </div>;
 }
 
 function GlobalInterviewPanel() {
@@ -713,8 +906,12 @@ function GlobalInterviewPanel() {
 }
 
 function Dashboard() {
-  const {user,refresh}=useAuth(); const [apps,setApps]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]),[offers,setOffers]=useState<any[]>([]),[tab,setTab]=useState("reservations"),[payingFor,setPayingFor]=useState<{applicationId:string;eventId:string;amountCents:number}|null>(null),[busyId,setBusyId]=useState<string|null>(null),[message,setMessage]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const {user,refresh}=useAuth(); const [searchParams]=useSearchParams();
+  // C14 (ordre correctif 2026-09-20) : permet aux notifications de renvoyer vers un onglet précis,
+  // ex. /dashboard?tab=tickets, plutôt qu'un lien générique vers l'espace participant.
+  const [apps,setApps]=useState<any[]>([]),[tickets,setTickets]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]),[offers,setOffers]=useState<any[]>([]),[tab,setTab]=useState(searchParams.get("tab")??"reservations"),[payingFor,setPayingFor]=useState<{applicationId:string;eventId:string;amountCents:number}|null>(null),[busyId,setBusyId]=useState<string|null>(null),[message,setMessage]=useState<{kind:"error"|"success";text:string}|null>(null);
   const load=()=>Promise.all([api<any[]>("/me/applications"),api<any[]>("/me/tickets"),api<any[]>("/notifications"),api<any[]>("/me/alternative-offers")]).then(([a,t,n,o])=>{setApps(a);setTickets(t);setNotifications(n);setOffers(o)}); useEffect(()=>{load()},[]);
+  useEffect(()=>{const t=searchParams.get("tab");if(t)setTab(t)},[searchParams]);
   // Un compte restaurateur n'a rien à faire dans l'espace participant (§5) : on le renvoie vers sa
   // propre fiche établissement plutôt que de lui laisser voir un tableau de bord vide. Ce contrôle
   // vient après tous les hooks du composant : jamais avant, pour ne pas en varier le nombre au fil des
@@ -733,6 +930,17 @@ function Dashboard() {
     catch(err){setMessage({kind:"error",text:(err as Error).message})}
     finally{setBusyId(null)}
   };
+  // Cahier des charges consolidé final (2026-09-20, section 3) : une soirée gratuite ne passe jamais
+  // par Stripe (aucun PaymentIntent à 0 €) — confirmation directe, billet immédiat si une place est
+  // réellement disponible, sinon liste d'attente comme pour un événement payant.
+  const confirmFree=async(appId:string)=>{
+    setBusyId(appId);setMessage(null);
+    try{
+      const result=await api<{free:boolean;confirmed:boolean}>(`/applications/${appId}/payment-intent`,{method:"POST"});
+      setMessage({kind:"success",text:result.confirmed?"Votre billet gratuit est confirmé.":"Votre place a déjà été confirmée."});await load();
+    }catch(err){setMessage({kind:"error",text:(err as Error).message});await load()}
+    finally{setBusyId(null)}
+  };
   const respondOffer=async(offerId:string, accept:boolean)=>{
     setBusyId(offerId);setMessage(null);
     try{await api(`/alternative-offers/${offerId}/respond`,{method:"POST",body:JSON.stringify({accept})});setMessage({kind:"success",text:accept?"Place réservée : réglez votre billet avant expiration.":"Proposition refusée."});await load()}
@@ -743,7 +951,7 @@ function Dashboard() {
   const ticketsLabel=tickets.length===1?"Mon billet":"Mes billets";
   const tabs=[["interview",user?.profile?.validatedAt?"Entretien ✓":"Entretien"],["reservations","Réservations"],["tickets",ticketsLabel],["profile","Profil"],["notifications","Notifications"]];
   const titles:Record<string,string>={interview:"Entretien de validation",reservations:"Mes événements",tickets:ticketsLabel,profile:"Mon profil",notifications:"Notifications"};
-  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><span>◇</span><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=>{const offersForEvent=pendingOffers.filter(o=>o.originalEventId===a.eventId);return <article className="reservation" key={a.id}><img className="reservation-photo" src={imgUrl(a.event.imageUrl)} alt=""/><div><div className="admin-event-meta"><CategoryBadge category={a.event.category} className="inline"/><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small></div><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}{offersForEvent.map(offer=><article className="alt-offer nested" key={offer.id}><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{offer.alternativeEvent.title}</h3><p>{dateTime(offer.alternativeEvent.startsAt)} · {offer.alternativeEvent.district}</p><p><b>{money(offer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,false)}>Pas intéressé</button></div></article>)}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler ma participation</button>}</div></article>;})}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{t.reservation.event.controllerRestaurant&&<p>{t.reservation.event.controllerRestaurant.name}</p>}<p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/><PrivacyPanel/></div>}{tab==="notifications"&&<div className="stack">{notifications.map(n=><article className={`notification ${n.readAt?"read":"unread"}`} key={n.id}><i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div></article>)}</div>}</div></section>
+  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><span>◇</span><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=>{const offersForEvent=pendingOffers.filter(o=>o.originalEventId===a.eventId);return <article className="reservation" key={a.id}><img className="reservation-photo" src={imgUrl(a.event.imageUrl)} alt=""/><div><div className="admin-event-meta"><CategoryBadge category={a.event.category} className="inline"/><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small></div><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}{offersForEvent.map(offer=><article className="alt-offer nested" key={offer.id}><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{offer.alternativeEvent.title}</h3><p>{dateTime(offer.alternativeEvent.startsAt)} · {offer.alternativeEvent.district}</p><p><b>{money(offer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,false)}>Pas intéressé</button></div></article>)}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&(a.event.priceCents===0?<button className="button" disabled={busyId===a.id} onClick={()=>confirmFree(a.id)}>{busyId===a.id?"…":"Confirmer ma place (gratuit)"}</button>:<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>)}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler ma participation</button>}</div></article>;})}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{t.reservation.event.controllerRestaurant&&<p>{t.reservation.event.controllerRestaurant.name}</p>}<p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/><PrivacyPanel/></div>}{tab==="notifications"&&<NotificationList items={notifications} onRead={id=>setNotifications(notifications.map(n=>n.id===id?{...n,readAt:new Date().toISOString()}:n))}/>}</div></section>
   {payingFor&&<PaymentModal applicationId={payingFor.applicationId} eventId={payingFor.eventId} amountCents={payingFor.amountCents} onClose={()=>setPayingFor(null)} onConfirmed={()=>{setPayingFor(null);load()}} onWaitlisted={()=>{setPayingFor(null);load()}}/>}
   </Layout>;
 }
@@ -801,19 +1009,31 @@ function Admin() {
     {stats.subscriptionsByStatus?.map((s:any)=><Stat key={s.status} label={`Abonnements ${SUBSCRIPTION_STATUS_LABEL[s.status]??s.status}`} value={s.count}/>)}
   </div><div className="admin-grid"><div className="panel chart"><div className="panel-title"><h2>Activité sur 30 jours</h2><span>Données de démonstration</span></div><div className="bars">{[32,50,42,68,60,82,75,94,70,85,97,88].map((n,i)=><i key={i} style={{height:`${n}%`}}/>)}</div></div><div className="panel quick"><h2>Actions rapides</h2>{user?.role==="ADMIN"&&<Link to="/admin/applications">Traiter les entretiens <span>→</span></Link>}<Link to="/admin/attendees">Voir les participants <span>→</span></Link><Link to="/admin/scanner">Scanner un billet <span>→</span></Link>{user?.role==="ADMIN"&&<Link to="/admin/restaurants">Demandes restaurateurs <span>→</span></Link>}{user?.role==="ADMIN"&&<Link to="/admin/finance">Voir les finances <span>→</span></Link>}<Link to="/events">Voir les événements <span>→</span></Link></div></div></>}</div></section></Layout>;
 }
-function Stat({label,value}:{label:string;value:string|number}){return <div className="stat"><small>{label.toUpperCase()}</small><strong>{value}</strong><span>Mis à jour maintenant</span></div>}
+// C35 : jamais de mention "mis à jour maintenant" statique — trompeur pour une période choisie
+// par l'admin (ex. "cette année"), qui n'a rien à voir avec l'instant présent.
+function Stat({label,value}:{label:string;value:ReactNode}){return <div className="stat"><small>{label.toUpperCase()}</small><strong>{value}</strong></div>}
 function AdminNav(){
   const {user}=useAuth(); const role=user?.role;
   const manages = role==="ADMIN"||role==="ORGANIZER";
+  const [unread,setUnread]=useState(0);
+  const [searchParams]=useSearchParams();
+  const location=useLocation();
+  useEffect(()=>{if(role==="ORGANIZER")api<{count:number}>("/notifications/unread-count").then(r=>setUnread(r.count)).catch(()=>{})},[role]);
+  // Deux liens partagent le même chemin ("/restaurant") avec un ?tab= différent : NavLink ne
+  // distingue pas les search params (bug identique à C18 sinon), donc l'état actif se calcule ici.
+  const onRestaurant=location.pathname==="/restaurant";
+  const restaurantTab=searchParams.get("tab");
   return <aside className="admin-nav"><Logo/>
     {manages&&<NavLink end to="/admin">Vue générale</NavLink>}
     {role==="ADMIN"&&<NavLink to="/admin/applications">Entretiens</NavLink>}
     {role==="ADMIN"&&<NavLink to="/admin/availability">Agenda</NavLink>}
-    {manages&&<NavLink to="/admin/events/new">Créer une soirée</NavLink>}
-    {manages&&<NavLink to="/admin/events">Mes événements</NavLink>}
+    {manages&&<NavLink end to="/admin/events/new">Créer une soirée</NavLink>}
+    {manages&&<NavLink end to="/admin/events">Mes événements</NavLink>}
     {manages&&<NavLink to="/admin/attendees">Participants</NavLink>}
     {manages&&<NavLink to="/admin/finance">Finances</NavLink>}
     {manages&&<NavLink to="/admin/staff">Personnel d’accueil</NavLink>}
+    {role==="ORGANIZER"&&<Link className={onRestaurant&&restaurantTab==="subscription"?"active":undefined} to="/restaurant?tab=subscription">Abonnement</Link>}
+    {role==="ORGANIZER"&&<Link className={onRestaurant&&restaurantTab==="notifications"?"active":undefined} to="/restaurant?tab=notifications">🔔 Notifications{unread>0?` (${unread})`:""}</Link>}
     <NavLink to="/admin/scanner">Scanner les billets</NavLink>
     {role==="ADMIN"&&<NavLink to="/admin/restaurants">Demandes restaurateurs</NavLink>}
     {role==="ADMIN"&&<NavLink to="/admin/stats">Statistiques</NavLink>}
@@ -887,6 +1107,8 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
 
 function AdminEventPhotos() {
   const {user}=useAuth();
+  const [searchParams]=useSearchParams();
+  const highlightId=searchParams.get("highlight");
   const [events,setEvents]=useState<any[]>([]);
   const [uploadingFor,setUploadingFor]=useState<string|null>(null);
   const [actingOn,setActingOn]=useState<string|null>(null);
@@ -904,6 +1126,14 @@ function AdminEventPhotos() {
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const load=()=>api<any[]>("/admin/events").then(setEvents);
   useEffect(()=>{load()},[]);
+  // C14 (ordre correctif 2026-09-20) : une notification "soirée approuvée/à valider/..." doit ouvrir
+  // CETTE soirée, pas seulement la liste — /admin/events?highlight=<id> défile jusqu'à sa carte et
+  // la met en évidence brièvement plutôt que de forcer le restaurateur à la rechercher lui-même.
+  useEffect(()=>{
+    if(!highlightId||events.length===0)return;
+    const el=document.getElementById(`event-${highlightId}`);
+    if(el){el.scrollIntoView({behavior:"smooth",block:"center"});el.classList.add("highlighted");setTimeout(()=>el.classList.remove("highlighted"),3000)}
+  },[highlightId,events]);
 
   const toLocalInput=(iso:string)=>new Date(iso).toISOString().slice(0,16);
 
@@ -974,19 +1204,15 @@ function AdminEventPhotos() {
     setEditForm({title:ev.title,description:ev.description,capacity:ev.capacity,startsAt:toLocalInput(ev.startsAt),endsAt:toLocalInput(ev.endsAt),includesDrink:ev.includesDrink,includesStarter:ev.includesStarter,includesMain:ev.includesMain,includesDessert:ev.includesDessert,perksDescription:ev.perksDescription??""});
     setEditFor(ev.id);
   };
+  // Cahier des charges consolidé final (2026-09-20) : une soirée publiée ne peut plus être déplacée
+  // — le serveur refuse désormais la requête (409) plutôt que de créer une proposition à approuver.
   const saveEdit=async(eventId:string)=>{
     setActingOn(eventId);setNotice(null);
     try{
-      const res=await api<any>(`/admin/events/${eventId}`,{method:"PATCH",body:JSON.stringify({...editForm,startsAt:new Date(editForm.startsAt).toISOString(),endsAt:new Date(editForm.endsAt).toISOString()})});
-      setNotice({kind:"success",text:res.dateChangeRequestedAt?"Modifications enregistrées ; le changement de date attend l’approbation du super-admin.":"Modifications enregistrées."});
+      await api<any>(`/admin/events/${eventId}`,{method:"PATCH",body:JSON.stringify({...editForm,startsAt:new Date(editForm.startsAt).toISOString(),endsAt:new Date(editForm.endsAt).toISOString()})});
+      setNotice({kind:"success",text:"Modifications enregistrées."});
       setEditFor(null);await load();
     }catch(err){setNotice({kind:"error",text:(err as Error).message})}
-    finally{setActingOn(null)}
-  };
-  const decideDateChange=async(eventId:string, accept:boolean)=>{
-    setActingOn(eventId);setNotice(null);
-    try{await api(`/admin/events/${eventId}/date-change/decision`,{method:"POST",body:JSON.stringify({accept})});setNotice({kind:"success",text:accept?"Changement de date approuvé.":"Changement de date refusé."});await load()}
-    catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setActingOn(null)}
   };
 
@@ -1014,7 +1240,7 @@ function AdminEventPhotos() {
   const HISTORY_LABEL:Record<string,string>={CREATE_EVENT:"Création",SUBMIT_EVENT_FOR_REVIEW:"Soumis à validation",APPROVE_EVENT:"Publié",REJECT_EVENT:"Renvoyé en brouillon",UPDATE_EVENT:"Modifié",SET_EVENT_PRICING:"Tarifs modifiés",SET_EVENT_QUOTAS:"Quotas modifiés",ADD_EVENT_PHOTO:"Photo ajoutée",CANCEL_EVENT:"Annulé",APPROVE_DATE_CHANGE:"Changement de date approuvé",REJECT_DATE_CHANGE:"Changement de date refusé"};
 
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ADMINISTRATION</span><h1>Mes événements</h1><p className="fine left">Formats acceptés : JPEG, PNG, WEBP · 5 Mo maximum. Sans photo personnalisée, l’illustration de la catégorie est utilisée.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
-    <div className="event-photo-grid">{events.map(ev=><div key={ev.id} className="panel event-photo-card"><img src={imgUrl(ev.imageUrl)} alt={ev.title}/><div><b>{ev.title}</b><div className="admin-event-meta"><CategoryBadge category={ev.category} className="inline"/><small>{EVENT_STATUS_LABEL[ev.status]??ev.status}</small></div>
+    <div className="event-photo-grid">{events.map(ev=><div key={ev.id} id={`event-${ev.id}`} className="panel event-photo-card"><img src={imgUrl(ev.imageUrl)} alt={ev.title}/><div><b>{ev.title}</b><div className="admin-event-meta"><CategoryBadge category={ev.category} className="inline"/><small>{EVENT_STATUS_LABEL[ev.status]??ev.status}</small></div>
       <label className="button small secondary">{uploadingFor===ev.id?"Envoi…":"Changer la photo principale"}<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploadingFor===ev.id} onChange={e=>{const f=e.target.files?.[0];if(f)upload(ev.id,f);e.target.value=""}}/></label>
 
       <div className="gallery-editor"><small>GALERIE ({ev.photos?.length??0}/5)</small><div className="gallery-thumbs">{(ev.photos??[]).map((p:any)=><div key={p.id} className="gallery-thumb"><img src={imgUrl(p.url)} alt=""/><button type="button" onClick={()=>removeGalleryPhoto(ev.id,p.id)} aria-label="Supprimer la photo">×</button></div>)}</div><label className="button small secondary" style={{opacity:(ev.photos?.length??0)>=5?0.5:1}}>{uploadingFor===ev.id?"Envoi…":"Ajouter une photo"}<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploadingFor===ev.id||(ev.photos?.length??0)>=5} onChange={e=>{const f=e.target.files?.[0];if(f)uploadGalleryPhoto(ev.id,f);e.target.value=""}}/></label></div>
@@ -1025,14 +1251,13 @@ function AdminEventPhotos() {
         {rejectNoteFor===ev.id?<div className="reject-note"><input value={rejectNote} onChange={e=>setRejectNote(e.target.value)} placeholder="Motif (optionnel)"/><button className="button small danger" disabled={actingOn===ev.id} onClick={()=>reviewDecision(ev.id,false,rejectNote)}>Confirmer le refus</button></div>:<button className="button small danger" onClick={()=>setRejectNoteFor(ev.id)}>Renvoyer en brouillon</button>}
       </div>}
 
-      {user?.role==="ADMIN"&&ev.dateChangeRequestedAt&&<div className="reject-note"><span className="fine left">Changement de date proposé : {dateTime(ev.proposedStartsAt)}</span><div className="decision-buttons"><button className="button small" disabled={actingOn===ev.id} onClick={()=>decideDateChange(ev.id,true)}>Approuver</button><button className="button small danger" disabled={actingOn===ev.id} onClick={()=>decideDateChange(ev.id,false)}>Refuser</button></div></div>}
 
       {editFor===ev.id?<div className="event-edit-form">
         <label>Titre<input value={editForm.title} onChange={e=>setEditForm({...editForm,title:e.target.value})}/></label>
         <label>Description<textarea value={editForm.description} onChange={e=>setEditForm({...editForm,description:e.target.value})}/></label>
         <div className="time-row"><label>Capacité<input type="number" min={5} value={editForm.capacity} onChange={e=>setEditForm({...editForm,capacity:Number(e.target.value)})}/></label></div>
-        <div className="time-row"><label>Début<input type="datetime-local" value={editForm.startsAt} onChange={e=>setEditForm({...editForm,startsAt:e.target.value})}/></label><label>Fin<input type="datetime-local" value={editForm.endsAt} onChange={e=>setEditForm({...editForm,endsAt:e.target.value})}/></label></div>
-        <p className="fine left">Si des places sont déjà payées ou bloquées, un changement de date devient une proposition soumise à l’approbation du super-admin.</p>
+        <div className="time-row"><label>Début<input type="datetime-local" disabled={ev.status==="PUBLISHED"||ev.status==="FULL"} value={editForm.startsAt} onChange={e=>setEditForm({...editForm,startsAt:e.target.value})}/></label><label>Fin<input type="datetime-local" disabled={ev.status==="PUBLISHED"||ev.status==="FULL"} value={editForm.endsAt} onChange={e=>setEditForm({...editForm,endsAt:e.target.value})}/></label></div>
+        {(ev.status==="PUBLISHED"||ev.status==="FULL")&&<p className="fine left">Une soirée publiée ne peut plus être déplacée : annulez-la puis créez-en une nouvelle à la date souhaitée.</p>}
         <small>PRESTATIONS RÉELLEMENT INCLUSES</small>
         <div className="perks-checks">
           <label><input type="checkbox" checked={editForm.includesDrink} onChange={e=>setEditForm({...editForm,includesDrink:e.target.checked})}/> Boisson</label>
@@ -1163,28 +1388,97 @@ function AdminRestaurants() {
 // §6 (cahier des charges 2026-09) : tableau exclusivement super-admin — la route serveur elle-même
 // (roles(UserRole.ADMIN) seul) refuse déjà tout autre rôle ; cette page n'est de toute façon jamais
 // listée ni routée pour un restaurateur ou modérateur (voir AdminNav et App()).
+// C33 : préréglages de période. Chaque préréglage calcule aussi la période précédente de même
+// durée, pour la comparaison — jamais une comparaison approximative ou inventée.
+const STATS_PRESETS: [string, () => {since:string;until:string;compareSince:string;compareUntil:string}][] = [
+  ["Aujourd’hui", () => { const d=new Date().toISOString().slice(0,10); const y=new Date(Date.now()-86_400_000).toISOString().slice(0,10); return {since:d,until:d,compareSince:y,compareUntil:y}; }],
+  ["Hier", () => { const y=new Date(Date.now()-86_400_000).toISOString().slice(0,10); const y2=new Date(Date.now()-2*86_400_000).toISOString().slice(0,10); return {since:y,until:y,compareSince:y2,compareUntil:y2}; }],
+  ["7 derniers jours", () => { const until=new Date().toISOString().slice(0,10); const since=new Date(Date.now()-7*86_400_000).toISOString().slice(0,10); const compareUntil=new Date(Date.now()-7*86_400_000).toISOString().slice(0,10); const compareSince=new Date(Date.now()-14*86_400_000).toISOString().slice(0,10); return {since,until,compareSince,compareUntil}; }],
+  ["30 derniers jours", () => { const until=new Date().toISOString().slice(0,10); const since=new Date(Date.now()-30*86_400_000).toISOString().slice(0,10); const compareUntil=new Date(Date.now()-30*86_400_000).toISOString().slice(0,10); const compareSince=new Date(Date.now()-60*86_400_000).toISOString().slice(0,10); return {since,until,compareSince,compareUntil}; }],
+  ["Ce mois-ci", () => { const now=new Date(); const since=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10); const until=now.toISOString().slice(0,10); const compareUntil=new Date(now.getFullYear(),now.getMonth(),0).toISOString().slice(0,10); const compareSince=new Date(now.getFullYear(),now.getMonth()-1,1).toISOString().slice(0,10); return {since,until,compareSince,compareUntil}; }],
+  ["Cette année", () => { const now=new Date(); const since=new Date(now.getFullYear(),0,1).toISOString().slice(0,10); const until=now.toISOString().slice(0,10); const compareUntil=new Date(now.getFullYear()-1,11,31).toISOString().slice(0,10); const compareSince=new Date(now.getFullYear()-1,0,1).toISOString().slice(0,10); return {since,until,compareSince,compareUntil}; }]
+];
+function StatDelta({current,previous,invert}:{current:number;previous:number|null|undefined;invert?:boolean}){
+  if(previous==null)return null;
+  const diff=previous===0?(current>0?100:0):Math.round(((current-previous)/previous)*100);
+  const good=invert?diff<=0:diff>=0;
+  return <span style={{fontSize:11,color:good?"var(--green)":"var(--red)",marginLeft:6}}>{diff>0?"+":""}{diff}%</span>;
+}
 function AdminStats() {
   const [stats,setStats]=useState<any>(null);
-  const [since,setSince]=useState(new Date(Date.now()-30*86_400_000).toISOString().slice(0,10));
-  const [until,setUntil]=useState(new Date().toISOString().slice(0,10));
-  const load=()=>api<any>(`/admin/stats?since=${since}&until=${until}`).then(setStats);
-  useEffect(()=>{load()},[since,until]);
-  const exportCsv=async()=>{
-    const response=await fetch(`${API_URL}/admin/stats/export.csv?since=${since}&until=${until}`,{headers:{Authorization:`Bearer ${getToken()}`}});
+  const [range,setRange]=useState(STATS_PRESETS[3][1]());
+  const [scope,setScope]=useState<"all"|"participants"|"restaurants">("all");
+  const load=()=>api<any>(`/admin/stats?since=${range.since}&until=${range.until}&compareSince=${range.compareSince}&compareUntil=${range.compareUntil}`).then(setStats);
+  useEffect(()=>{load()},[range]);
+  const exportFile=async(ext:"csv"|"xlsx")=>{
+    const response=await fetch(`${API_URL}/admin/stats/export.${ext}?since=${range.since}&until=${range.until}`,{headers:{Authorization:`Bearer ${getToken()}`}});
     const blob=await response.blob();
     const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");a.href=url;a.download=`ventes-${since}-${until}.csv`;a.click();URL.revokeObjectURL(url);
+    const a=document.createElement("a");a.href=url;a.download=`statistiques-${range.since}-${range.until}.${ext}`;a.click();URL.revokeObjectURL(url);
   };
   if(!stats)return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><Loading/></div></section></Layout>;
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Statistiques</h1>
-    <div className="filters"><label>Depuis<input type="date" value={since} onChange={e=>setSince(e.target.value)}/></label><label>Jusqu’au<input type="date" value={until} onChange={e=>setUntil(e.target.value)}/></label><button type="button" className="button small secondary" onClick={exportCsv}>Exporter les ventes (CSV)</button></div>
-    <div className="panel-title"><h2>Tunnel de conversion</h2></div>
-    <div className="stat-grid"><Stat label="Entretiens demandés" value={stats.funnel.interviewsRequested}/><Stat label="Profils validés" value={stats.funnel.interviewsAccepted}/><Stat label="Taux d’acceptation" value={stats.funnel.interviewAcceptanceRate!=null?`${stats.funnel.interviewAcceptanceRate}%`:"—"}/><Stat label="Candidatures à un événement" value={stats.funnel.applicationsCreated}/><Stat label="Paiements réussis" value={stats.funnel.paymentsSucceeded}/><Stat label="Taux de succès paiement" value={stats.funnel.paymentSuccessRate!=null?`${stats.funnel.paymentSuccessRate}%`:"—"}/><Stat label="Billets confirmés" value={stats.funnel.ticketsConfirmed}/></div>
+    <div className="filters">{STATS_PRESETS.map(([label,fn])=><button key={label} type="button" className="button small secondary" onClick={()=>setRange(fn())}>{label}</button>)}</div>
+    <div className="filters"><label>Depuis<input type="date" value={range.since} onChange={e=>setRange({...range,since:e.target.value})}/></label><label>Jusqu’au<input type="date" value={range.until} onChange={e=>setRange({...range,until:e.target.value})}/></label>
+      <select value={scope} onChange={e=>setScope(e.target.value as any)}><option value="all">Participants + restaurateurs</option><option value="participants">Participants</option><option value="restaurants">Restaurateurs</option></select>
+      <button type="button" className="button small secondary" onClick={()=>exportFile("csv")}>Exporter les ventes (CSV)</button>
+      <button type="button" className="button small secondary" onClick={()=>exportFile("xlsx")}>Exporter tout (Excel)</button>
+    </div>
+    {(stats.alerts.cancellationRate24h>=stats.alerts.cancellationThreshold||stats.alerts.subscriptionsExpiringSoon>0||stats.alerts.blockedPayments24h>0||stats.alerts.pendingRefundRequests>0||stats.alerts.underfilledEventsPending>0)&&<Notice kind="error">
+      {stats.alerts.cancellationRate24h>=stats.alerts.cancellationThreshold&&<>Taux d’annulation sur 24h : {stats.alerts.cancellationRate24h}% (seuil {stats.alerts.cancellationThreshold}%). </>}
+      {stats.alerts.subscriptionsExpiringSoon>0&&<>{stats.alerts.subscriptionsExpiringSoon} abonnement{stats.alerts.subscriptionsExpiringSoon>1?"s":""} restaurateur{stats.alerts.subscriptionsExpiringSoon>1?"s":""} arrivent à échéance bientôt. </>}
+      {stats.alerts.blockedPayments24h>0&&<>{stats.alerts.blockedPayments24h} paiement{stats.alerts.blockedPayments24h>1?"s":""} bloqué{stats.alerts.blockedPayments24h>1?"s":""} sur 24h. </>}
+      {stats.alerts.pendingRefundRequests>0&&<>{stats.alerts.pendingRefundRequests} demande{stats.alerts.pendingRefundRequests>1?"s":""} de remboursement en attente. </>}
+      {stats.alerts.underfilledEventsPending>0&&<>{stats.alerts.underfilledEventsPending} soirée{stats.alerts.underfilledEventsPending>1?"s":""} sous le seuil de participants, décision attendue.</>}
+    </Notice>}
+    {!stats.analyticsEnabled&&<Notice kind="info">Mesure d’audience désactivée (visiteurs, sources, entonnoir haut) : à activer dans Réglages après mise en place d’un consentement conforme.</Notice>}
+
+    {(scope==="all"||scope==="participants")&&<>
+      <div className="panel-title"><h2>Audience</h2></div>
+      {stats.audience.instrumented?<div className="stat-grid">
+        <Stat label="Visites" value={stats.audience.totalViews}/>
+        <Stat label="Visiteurs uniques" value={stats.audience.uniqueVisitors}/>
+      </div>:<p className="fine left">Non instrumenté (mesure d’audience désactivée).</p>}
+      {stats.audience.instrumented&&stats.audience.bySource.length>0&&<p className="fine left">Sources : {stats.audience.bySource.map((s:any)=>`${s.source} (${s.visits})`).join(" · ")}</p>}
+
+      <div className="panel-title"><h2>Tunnel participant</h2></div>
+      <div className="stat-grid">
+        {stats.funnelParticipant.top.instrumented&&<><Stat label="Visiteurs accueil" value={stats.funnelParticipant.top.homeVisitors}/><Stat label="Visiteurs catalogue" value={stats.funnelParticipant.top.catalogVisitors}/></>}
+        <Stat label="Entretiens demandés" value={stats.funnelParticipant.interviewsRequested}/>
+        <Stat label="Profils validés" value={stats.funnelParticipant.interviewsAccepted}/>
+        <Stat label="Taux d’acceptation" value={stats.funnelParticipant.interviewAcceptanceRate!=null?`${stats.funnelParticipant.interviewAcceptanceRate}%`:"—"}/>
+        <Stat label="Candidatures à un événement" value={stats.funnelParticipant.applicationsCreated}/>
+        <Stat label="Paiements réussis" value={stats.funnelParticipant.paymentsSucceeded}/>
+        <Stat label="Taux de succès paiement" value={stats.funnelParticipant.paymentSuccessRate!=null?`${stats.funnelParticipant.paymentSuccessRate}%`:"—"}/>
+        <Stat label="Billets confirmés" value={stats.funnelParticipant.ticketsConfirmed}/>
+        <Stat label="Annulations" value={stats.funnelParticipant.cancellationsCount}/>
+        <Stat label="Entrées liste d’attente" value={stats.funnelParticipant.waitlistCount}/>
+      </div>
+    </>}
+
+    {(scope==="all"||scope==="restaurants")&&<>
+      <div className="panel-title"><h2>Tunnel restaurateur</h2></div>
+      <div className="stat-grid"><Stat label="Nouvelles demandes" value={stats.funnelRestaurant.newRequests}/><Stat label="Approuvées" value={stats.funnelRestaurant.approved}/><Stat label="Abonnements souscrits" value={stats.funnelRestaurant.subscriptionsStarted}/><Stat label="Événements créés" value={stats.funnelRestaurant.eventsCreated}/><Stat label="Événements publiés" value={stats.funnelRestaurant.eventsPublished}/></div>
+    </>}
+
     <div className="panel-title"><h2>Finance</h2></div>
-    <div className="stat-grid"><Stat label="Revenu billetterie" value={money(stats.finance.ticketRevenueCents)}/><Stat label="Remboursé" value={money(stats.finance.refundedCents)}/><Stat label="MRR abonnements" value={money(stats.finance.subscriptionMonthlyRevenueCents)}/><Stat label="Abonnements actifs" value={stats.finance.activeSubscriptionsCount}/></div>
+    <div className="stat-grid">
+      <Stat label="Revenu billetterie" value={<>{money(stats.finance.ticketRevenueCents)}<StatDelta current={stats.finance.ticketRevenueCents} previous={stats.previous?.finance.ticketRevenueCents}/></>}/>
+      <Stat label="Remboursé" value={`${money(stats.finance.refundedCents)} (${stats.finance.refundedCount})`}/>
+      <Stat label="MRR abonnements" value={money(stats.finance.subscriptionMonthlyRevenueCents)}/>
+      <Stat label="Abonnements actifs" value={stats.finance.activeSubscriptionsCount}/>
+      <Stat label="Impayés (PAST_DUE)" value={stats.finance.pastDueCount}/>
+    </div>
     <p className="fine left">Abonnements par statut : {stats.finance.subscriptionsByStatus.map((s:any)=>`${s.status} (${s.count})`).join(" · ")||"—"}</p>
-    <div className="panel-title"><h2>Audience</h2></div>
-    <div className="stat-grid"><Stat label="Nouveaux participants" value={stats.audience.newParticipants}/><Stat label="Nouvelles demandes restaurateurs" value={stats.audience.newRestaurantRequests}/><Stat label="Clics de partage (total)" value={stats.audience.shareClicks}/><Stat label="Candidatures via partage" value={stats.audience.shareAttributedApplications}/><Stat label="Achats via partage" value={stats.audience.shareAttributedPurchases}/></div>
+
+    <div className="panel-title"><h2>Blog</h2></div>
+    {stats.blog.instrumented?<div className="stat-grid"><Stat label="Lectures" value={stats.blog.reads}/><Stat label="Lecteurs uniques" value={stats.blog.uniqueReaders}/></div>:<p className="fine left">Non instrumenté (mesure d’audience désactivée).</p>}
+
+    <div className="panel-title"><h2>Search Console</h2></div>
+    <p className="fine left">{stats.searchConsole.connected?"Connecté.":"Non configuré — aucune donnée Search Console à afficher."}</p>
+
+    <div className="panel-title"><h2>Partage</h2></div>
+    <div className="stat-grid"><Stat label="Nouveaux participants" value={stats.audienceLegacy.newParticipants}/><Stat label="Clics de partage (total)" value={stats.audienceLegacy.shareClicks}/><Stat label="Candidatures via partage" value={stats.audienceLegacy.shareAttributedApplications}/><Stat label="Achats via partage" value={stats.audienceLegacy.shareAttributedPurchases}/></div>
   </div></section></Layout>;
 }
 
@@ -1213,6 +1507,9 @@ function AdminFinance() {
       <Stat label="Dû au(x) restaurant(s) (modèle 30/70)" value={money(summary.restaurantDueCents)}/>
       <Stat label="Déjà reversé (modèle 30/70)" value={money(summary.paidOutCents)}/>
       <Stat label="Remboursé (modèle 30/70)" value={money(summary.refundedCents)}/>
+      <Stat label="Frais Stripe (modèle 30/70)" value={money(summary.feesCents)}/>
+      {summary.stripeBalance&&<Stat label="Solde Stripe (test) disponible / en attente" value={`${money(summary.stripeBalance.availableCents)} / ${money(summary.stripeBalance.pendingCents)}`}/>}
+      {summary.disputesCount!=null&&<Stat label="Litiges Stripe en cours" value={summary.disputesCount>0?`${summary.disputesCount} · ${money(summary.disputesAmountCents)}`:"Aucun"}/>}
     </div>}
     {summary&&!summary.commissionLedgerEnabled&&<p className="fine left">Le registre commission 30/70 est désactivé depuis le passage à l’abonnement mensuel : « Commission », « Dû » et « Déjà reversé » ne couvrent que les ventes historiques sous l’ancien modèle, pas les événements récents sous abonnement. Le volume brut reste, lui, toujours à jour.</p>}
     {entries.length===0?<div className="empty"><span>◇</span><h2>Aucune vente pour le moment</h2></div>:<div className="panel table">
@@ -1665,4 +1962,4 @@ function Scanner() {
   </div><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b>✓</b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b>×</b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Présentez le QR code du billet devant la caméra, ou saisissez le code manuellement.</p></>}</aside></div></div></section></Layout>;
 }
 
-export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/concept" element={<Concept/>}/><Route path="/blog" element={<Blog/>}/><Route path="/blog/:id" element={<ArticlePage/>}/><Route path="/login" element={<Login/>}/><Route path="/pay/:applicationId" element={<PayStandalone/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/restaurant" element={<Protected roles={["PARTICIPANT"]}><RestaurantSpace/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/settings" element={<Protected roles={["ADMIN"]}><AdminSettings/></Protected>}/><Route path="/admin/testimonials" element={<Protected roles={["ADMIN"]}><AdminTestimonials/></Protected>}/><Route path="/admin/blog" element={<Protected roles={["ADMIN"]}><AdminBlog/></Protected>}/><Route path="/admin/blog/:id" element={<Protected roles={["ADMIN"]}><AdminArticleEditor/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/stats" element={<Protected roles={["ADMIN"]}><AdminStats/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}
+export function App(){return <AuthProvider><Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<Events/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/concept" element={<Concept/>}/><Route path="/blog" element={<Blog/>}/><Route path="/blog/:id" element={<ArticlePage/>}/><Route path="/login" element={<Login/>}/><Route path="/legal/mentions-legales" element={<Layout><MentionsLegales/></Layout>}/><Route path="/legal/cgu" element={<Layout><CGU/></Layout>}/><Route path="/legal/cgv" element={<Layout><CGV/></Layout>}/><Route path="/legal/confidentialite" element={<Layout><Confidentialite/></Layout>}/><Route path="/legal/cookies" element={<Layout><Cookies/></Layout>}/><Route path="/pay/:applicationId" element={<PayStandalone/>}/><Route path="/dashboard" element={<Protected roles={["PARTICIPANT"]}><Dashboard/></Protected>}/><Route path="/restaurant" element={<Protected roles={["PARTICIPANT","ORGANIZER"]}><RestaurantSpace/></Protected>}/><Route path="/admin" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION","MODERATOR"]}><Admin/></Protected>}/><Route path="/admin/applications" element={<Protected roles={["ADMIN"]}><AdminGlobalInterviews/></Protected>}/><Route path="/admin/availability" element={<Protected roles={["ADMIN"]}><AdminAvailability/></Protected>}/><Route path="/admin/events/new" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminCreateEvent/></Protected>}/><Route path="/admin/events" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminEventPhotos/></Protected>}/><Route path="/admin/attendees" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminAttendees/></Protected>}/><Route path="/admin/finance" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminFinance/></Protected>}/><Route path="/admin/staff" element={<Protected roles={["ADMIN","ORGANIZER"]}><AdminStaff/></Protected>}/><Route path="/admin/moderation" element={<Protected roles={["ADMIN","MODERATOR"]}><AdminModeration/></Protected>}/><Route path="/admin/outbox" element={<Protected roles={["ADMIN"]}><AdminOutbox/></Protected>}/><Route path="/admin/settings" element={<Protected roles={["ADMIN"]}><AdminSettings/></Protected>}/><Route path="/admin/testimonials" element={<Protected roles={["ADMIN"]}><AdminTestimonials/></Protected>}/><Route path="/admin/blog" element={<Protected roles={["ADMIN"]}><AdminBlog/></Protected>}/><Route path="/admin/blog/:id" element={<Protected roles={["ADMIN"]}><AdminArticleEditor/></Protected>}/><Route path="/admin/restaurants" element={<Protected roles={["ADMIN"]}><AdminRestaurants/></Protected>}/><Route path="/admin/stats" element={<Protected roles={["ADMIN"]}><AdminStats/></Protected>}/><Route path="/admin/scanner" element={<Protected roles={["ADMIN","ORGANIZER","RECEPTION"]}><Scanner/></Protected>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></AuthProvider>}

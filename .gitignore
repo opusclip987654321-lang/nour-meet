@@ -19,6 +19,8 @@ apps/api/public/uploads/*
 .env.*
 !.env.example
 !.env.sample
+!.env.production.example
+!.env.staging.example
 *.pem
 *.p12
 *.p8

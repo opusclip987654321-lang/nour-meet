@@ -32,6 +32,9 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     volumes:
       - nour_uploads_data:/app/apps/api/public/uploads
     ports:
@@ -48,6 +51,7 @@ services:
       args:
         VITE_API_URL: http://localhost:4000
         VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:-}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
     ports:
       - "5173:80"
     depends_on:

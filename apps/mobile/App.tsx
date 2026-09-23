@@ -16,14 +16,17 @@ const APPLICATION_STATUS_LABEL: Record<string,string> = { PENDING_CALL: "En atte
 
 const C={bg:"#0B0B0C",panel:"#171718",line:"#34322E",gold:"#C9A765",cream:"#F6F0E5",muted:"#918C82",green:"#62D89A",red:"#F0747C"};
 type Tab="home"|"events"|"scan"|"messages"|"profile"|"concept"|"blog";
-const BLOG_CATEGORIES=["Couple","Rencontre","Solitude","Mariage","Communication","Vie relationnelle"];
+const BLOG_CATEGORIES=["Rencontres amoureuses","Amitié","Solitude et vie sociale","Networking professionnel"];
 // Stripe n'a pas de module natif installable dans Expo Go (seuls les modules Expo officiels le
 // sont) : plutôt que de dupliquer PaymentModal en React Native derrière un client de développement
 // natif, le paiement carte ouvre la page web déjà testée (voir PayStandalone dans
-// apps/web/src/App.tsx) dans un navigateur intégré, authentifiée par le jeton en paramètre d'URL.
+// apps/web/src/App.tsx) dans un navigateur intégré. Cahier des charges consolidé final (2026-09-20,
+// section 9.2) : on ne met plus jamais le jeton de session (30 jours) dans l'URL — on échange
+// d'abord un jeton de paiement opaque, à usage unique et valable 10 minutes, contre lequel la page
+// web obtiendra elle-même un vrai jeton de session éphémère (voir /auth/payment-session-exchange).
 const payByCard=async(applicationId:string,eventId:string,amountCents:number)=>{
-  const token=await getToken();
-  await WebBrowser.openBrowserAsync(`${WEB_URL}/pay/${applicationId}?token=${encodeURIComponent(token??"")}&eventId=${eventId}&amount=${amountCents}`);
+  const { token }=await api<{token:string}>("/me/payment-sessions",{method:"POST",body:JSON.stringify({applicationId})});
+  await WebBrowser.openBrowserAsync(`${WEB_URL}/pay/${applicationId}?session=${encodeURIComponent(token)}&eventId=${eventId}&amount=${amountCents}`);
 };
 
 function Logo(){return <View style={s.logo}><View style={s.logoMark}><Text style={s.logoN}>N</Text></View><Text style={s.logoText}>NŪR <Text style={{color:C.gold}}>MEET</Text></Text></View>}
@@ -49,9 +52,12 @@ function Login({onLogin}:{onLogin:(opts?:{restaurateur?:boolean})=>void}){
   return <SafeAreaView style={s.safe}><StatusBar style="light"/><KeyboardAvoidingView style={s.login} behavior={Platform.OS==="ios"?"padding":undefined}><Logo/><View style={s.loginHero}><Text style={s.eyebrow}>BIENVENUE</Text><Text style={s.loginTitle}>{step===1?"Votre numéro\nouvre la porte.":"Entrez le code\nreçu par SMS."}</Text><Text style={s.paragraph}>{step===1?"Connexion rapide et sécurisée, sans mot de passe.":`Code envoyé au ${phone}`}</Text></View>{error?<Notice text={error} error/>:null}<Text style={s.label}>{step===1?"NUMÉRO DE TÉLÉPHONE":"CODE À SIX CHIFFRES"}</Text><TextInput style={[s.input,step===2&&s.otp]} value={step===1?phone:code} onChangeText={step===1?setPhone:v=>setCode(v.replace(/\D/g,"").slice(0,6))} keyboardType="phone-pad" textContentType={step===2?"oneTimeCode":"telephoneNumber"} placeholderTextColor="#666" placeholder={step===1?"+33612345678":"••••••"}/><GoldButton title={busy?"Patientez…":step===1?"Recevoir mon code":"Vérifier"} onPress={submit} disabled={busy}/>{devCode?<View style={s.demo}><Text style={s.demoTitle}>MODE LOCAL — AUCUN SMS FACTURÉ</Text><Text style={s.meta}>Code de développement : {devCode}</Text></View>:null}</KeyboardAvoidingView></SafeAreaView>
 }
 
+// C24 (ordre correctif 2026-09-20) : jamais de capacité/quota brut affiché — seulement la
+// disponibilité déjà réduite par le serveur à ce qui concerne ce visiteur (event.availability).
+const availabilityLabel=(a:any)=>a.kind==="unknown"?"Places selon catégorie":a.full?"Complet":`${a.remaining} place${a.remaining>1?"s":""}`;
 function EventCard({event,onPress}:{event:any,onPress:()=>void}){
   const priceLabel=event.priceTiers?.length>0?`À partir de ${money(Math.min(...event.priceTiers.map((t:any)=>t.amountCents)))}`:money(event.priceCents);
-  return <Pressable onPress={onPress} style={s.eventCard}><View style={s.eventArt}><Text style={s.eventDay}>{new Date(event.startsAt).getDate()}</Text><Text style={s.eventMonth}>{new Date(event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</Text></View><View style={s.eventCopy}><Text style={[s.eyebrow,{color:categoryColor(event.category)}]}>{event.category.toUpperCase()} · {when(event.startsAt)}</Text><Text style={s.eventTitle}>{event.title}</Text><Text style={s.meta}>{event.district} · {event.capacity-event.confirmedCount} places</Text><Text style={s.price}>{priceLabel}</Text></View></Pressable>;
+  return <Pressable onPress={onPress} style={s.eventCard}><View style={s.eventArt}><Text style={s.eventDay}>{new Date(event.startsAt).getDate()}</Text><Text style={s.eventMonth}>{new Date(event.startsAt).toLocaleString("fr-FR",{month:"short"}).toUpperCase()}</Text></View><View style={s.eventCopy}><Text style={[s.eyebrow,{color:categoryColor(event.category)}]}>{event.category.toUpperCase()} · {when(event.startsAt)}</Text><Text style={s.eventTitle}>{event.title}</Text><Text style={s.meta}>{event.district} · {availabilityLabel(event.availability)}</Text><Text style={s.price}>{priceLabel}</Text></View></Pressable>;
 }
 
 function Home({user,setTab}:{user:any,setTab:(t:Tab)=>void}){
@@ -115,7 +121,7 @@ function Blog({setTab,goToEvents}:{setTab:(t:Tab)=>void,goToEvents:(category:str
 
   return <ScrollView contentContainerStyle={s.content}>
     <Pressable onPress={()=>setTab("home")}><Text style={s.back}>‹ Retour</Text></Pressable>
-    <ScreenTitle eyebrow="LE BLOG" title="Couple, rencontre et vie relationnelle."/>
+    <ScreenTitle eyebrow="LE BLOG" title="Rencontres, amitié et vie sociale."/>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:16}} contentContainerStyle={{gap:8}}>
       <Pressable onPress={()=>setCategory("")} style={[s.choiceChip,!category&&s.choiceChipActive]}><Text style={[s.choiceChipText,!category&&{color:"#111"}]}>Tous les thèmes</Text></Pressable>
       {BLOG_CATEGORIES.map(c=><Pressable key={c} onPress={()=>setCategory(c)} style={[s.choiceChip,category===c&&s.choiceChipActive]}><Text style={[s.choiceChipText,category===c&&{color:"#111"}]}>{c}</Text></Pressable>)}
@@ -133,6 +139,9 @@ function Blog({setTab,goToEvents}:{setTab:(t:Tab)=>void,goToEvents:(category:str
 
 function Events({user,initialCategory}:{user:any,initialCategory?:string}){
   const [events,setEvents]=useState<any[]>([]),[selected,setSelected]=useState<any>(null),[application,setApplication]=useState<any>(null),[message,setMessage]=useState(""),[showForm,setShowForm]=useState(false),[answers,setAnswers]=useState<Record<string,string>>({}),[submitting,setSubmitting]=useState(false);
+  // Arbitrage 12/E3 (cahier des charges consolidé 2026-09-20) : formulaire professionnel facultatif
+  // proposé une fois la place confirmée, jamais avant/pendant le paiement.
+  const [netAnswers,setNetAnswers]=useState<Record<string,string>>({}),[netDone,setNetDone]=useState(false),[netDismissed,setNetDismissed]=useState(false);
   const [waitlistEntry,setWaitlistEntry]=useState<any>(null),[altOffer,setAltOffer]=useState<any>(null);
   // §5 (cahier des charges 2026-09) : un lien depuis le blog (ex. « nos soirées speed dating »)
   // arrive ici déjà filtré sur la bonne catégorie, voir App() et Blog() plus bas.
@@ -141,14 +150,14 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
   const loadApplication=(eventId:string)=>api<any>(`/events/${eventId}/my-application`).then(setApplication).catch(()=>setApplication(null));
   const loadWaitlist=(eventId:string)=>api<any>(`/events/${eventId}/waitlist/me`).then(setWaitlistEntry).catch(()=>setWaitlistEntry(null));
   const openEvent=(e:any)=>{
-    setSelected(e);setMessage("");setShowForm(false);setAnswers({});
+    setSelected(e);setMessage("");setShowForm(false);setAnswers({});setNetAnswers({});setNetDone(false);setNetDismissed(false);
     loadApplication(e.id);loadWaitlist(e.id);
     api<any[]>("/me/alternative-offers").then(list=>setAltOffer(list.find(o=>o.originalEventId===e.id&&o.status==="PENDING")??null)).catch(()=>{});
   };
   const requiresScreening=selected?eventRequiresScreening(selected):false;
   const questions=requiresScreening?SCREENING_QUESTIONS:NETWORKING_QUESTIONS;
-  const full=selected?selected.confirmedCount>=selected.capacity:false;
-  const categoryUnknown=selected?selected.quotas?.length>0&&!user.profile?.quotaCategory:false;
+  const full=selected?(selected.availability.kind!=="unknown"&&selected.availability.full):false;
+  const categoryUnknown=selected?selected.availability.kind==="unknown":false;
   const canCancel=application&&!["REFUSED","CANCELLED"].includes(application.status);
   // La candidature ne garantit jamais de place (elle enregistre le questionnaire et autorise
   // seulement à tenter le paiement) : c'est le clic sur "Payer par carte" ci-dessous qui pose
@@ -156,12 +165,27 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
   const apply=async()=>{
     setSubmitting(true);
     try{
-      const body=requiresScreening?{screeningAnswers:answers}:{networkingAnswers:answers};
+      const body=requiresScreening?{screeningAnswers:answers}:{};
       const result=await api<any>(`/events/${selected.id}/apply`,{method:"POST",body:JSON.stringify(body)});
       setApplication(result.application);
       setMessage("Candidature envoyée. Vous pouvez régler votre billet ci-dessous.");
       setShowForm(false);
     }catch(e){setMessage((e as Error).message)}
+    finally{setSubmitting(false)}
+  };
+  const confirmFree=async()=>{
+    setSubmitting(true);
+    try{
+      const result=await api<{free:boolean;confirmed:boolean}>(`/applications/${application.id}/payment-intent`,{method:"POST"});
+      setMessage(result.confirmed?"Votre billet gratuit est confirmé.":"Votre place a déjà été confirmée.");
+      await loadApplication(selected.id);
+    }catch(e){setMessage((e as Error).message)}
+    finally{setSubmitting(false)}
+  };
+  const submitNetworkingFollowUp=async()=>{
+    setSubmitting(true);
+    try{await api(`/applications/${application.id}/networking-answers`,{method:"POST",body:JSON.stringify(netAnswers)});setNetDone(true)}
+    catch(e){setMessage((e as Error).message)}
     finally{setSubmitting(false)}
   };
   const cancel=async()=>{
@@ -195,7 +219,7 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
   const share=async()=>{
     try{
       const link=await api<{url:string}>(`/events/${selected.id}/share-link`,{method:"POST"});
-      await Share.share({message:`Je vais à « ${selected.title} », viens avec moi : ${link.url}`});
+      await Share.share({message:`« ${selected.title} » sur Nūr Meet : ${link.url}`});
     }catch(e){setMessage((e as Error).message)}
   };
   if(selected){
@@ -206,18 +230,23 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
     <Text style={s.paragraph}>{selected.description}</Text>
     {selected.photos?.length>0&&<ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginVertical:14}} contentContainerStyle={{gap:10}}>{selected.photos.map((url:string,i:number)=><Image key={i} source={{uri:imgUrl(url)}} style={{width:220,height:140,borderRadius:10}}/>)}</ScrollView>}
     <View style={s.detailFacts}><View><Text style={s.label}>DATE</Text><Text style={s.bodyStrong}>{when(selected.startsAt)}</Text></View><View><Text style={s.label}>LIEU</Text><Text style={s.bodyStrong}>{selected.district}</Text></View></View>
-    <View style={s.detailFacts}><View><Text style={s.label}>CAPACITÉ</Text><Text style={s.bodyStrong}>{selected.capacity} participants</Text></View>{(selected.minAge||selected.maxAge)&&<View><Text style={s.label}>TRANCHE D’ÂGE</Text><Text style={s.bodyStrong}>{selected.minAge&&selected.maxAge?`${selected.minAge}-${selected.maxAge} ans`:selected.minAge?`${selected.minAge} ans et plus`:`Jusqu’à ${selected.maxAge} ans`}</Text></View>}</View>
+    <View style={s.detailFacts}><View><Text style={s.label}>DISPONIBILITÉ</Text><Text style={s.bodyStrong}>{availabilityLabel(selected.availability)}</Text></View>{(selected.minAge||selected.maxAge)&&<View><Text style={s.label}>TRANCHE D’ÂGE</Text><Text style={s.bodyStrong}>{selected.minAge&&selected.maxAge?`${selected.minAge}-${selected.maxAge} ans`:selected.minAge?`${selected.minAge} ans et plus`:`Jusqu’à ${selected.maxAge} ans`}</Text></View>}</View>
     {selected.organizer?.name&&<View style={s.detailFacts}><View><Text style={s.label}>ORGANISATEUR</Text><Text style={s.bodyStrong}>{selected.organizer.name}</Text></View></View>}
-    {selected.quotas?.length>0&&<View style={{marginTop:6,marginBottom:14}}><Text style={s.label}>PLACES PAR CATÉGORIE</Text>{selected.quotas.map((qt:any)=><View key={qt.category} style={{flexDirection:"row",justifyContent:"space-between",marginTop:6}}><Text style={s.meta}>{qt.category==="HOMME"?"Hommes":"Femmes"}</Text><Text style={s.bodyStrong}>{qt.heldCount>=qt.capacity?"Complet":`${qt.capacity-qt.heldCount} places`}</Text></View>)}</View>}
     <Text style={s.sectionTitle}>Une expérience pensée pour de vraies rencontres</Text>
     <Text style={s.paragraph}>Accueil personnalisé, animation légère, temps libres et respect de la confidentialité.</Text>
     {(perkLabels.length>0||selected.perks?.description)&&<View style={s.chips}>{perkLabels.map(l=><Text key={l} style={s.chip}>{l}</Text>)}{selected.perks?.description&&<Text style={s.chip}>{selected.perks.description}</Text>}</View>}
     <Text style={[s.meta,{marginTop:14}]}>{requiresScreening?"Profils sélectionnés":"Inscription directe"} · QR code d’entrée unique · Code de contact privé · Équipe présente sur place</Text>
     <View style={{marginTop:20}}><Text style={s.label}>POLITIQUE D’ANNULATION</Text><Text style={s.paragraph}>Annulation gratuite jusqu’à 24 heures avant l’événement : remboursement intégral automatique. Passé ce délai, aucun remboursement n’est possible de plein droit.</Text></View>
-    <GoldButton title="J’y vais, viens avec moi" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
+    <GoldButton title="Inviter un ami" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
     {altOffer&&<View style={s.altOffer}><Text style={s.eyebrow}>ÉVÉNEMENT ALTERNATIF PROPOSÉ</Text><Text style={s.sectionTitle}>{altOffer.alternativeEvent.title}</Text><Text style={s.meta}>{when(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</Text><Text style={s.bodyStrong}>{money(altOffer.alternativeEvent.priceCents)}</Text><View style={{flexDirection:"row",gap:10,marginTop:10}}><View style={{flex:1}}><GoldButton title={submitting?"…":"Accepter"} onPress={()=>respondAltOffer(true)} disabled={submitting}/></View><View style={{flex:1}}><GoldButton title={submitting?"…":"Refuser"} secondary onPress={()=>respondAltOffer(false)} disabled={submitting}/></View></View></View>}
     {application?<View>
-      {application.status==="PAYMENT_PENDING"&&<View style={s.reservationCard}><Text style={s.meta}>{application.reservation?`Votre place est retenue quelques minutes (jusqu’au ${when(application.reservation.expiresAt)}) : finalisez votre paiement.`:"Vous pouvez régler votre billet dès maintenant."}</Text><GoldButton title={`Payer par carte · ${money(selected.priceCents)}`} onPress={async()=>{await payByCard(application.id,selected.id,selected.priceCents);await loadApplication(selected.id)}}/></View>}
+      {application.status==="PAYMENT_PENDING"&&<View style={s.reservationCard}><Text style={s.meta}>{application.reservation?`Votre place est retenue quelques minutes (jusqu’au ${when(application.reservation.expiresAt)}) : finalisez votre paiement.`:"Vous pouvez régler votre billet dès maintenant."}</Text>{selected.priceCents===0?<GoldButton title={submitting?"…":"Confirmer ma place (gratuit)"} onPress={confirmFree} disabled={submitting}/>:<GoldButton title={`Payer par carte · ${money(selected.priceCents)}`} onPress={async()=>{await payByCard(application.id,selected.id,selected.priceCents);await loadApplication(selected.id)}}/>}</View>}
+      {application.status==="CONFIRMED"&&!requiresScreening&&!application.networkingAnswer&&!netDismissed&&!netDone&&<View style={s.reservationCard}>
+        <Text style={s.meta}>Facultatif : quelques informations professionnelles pour mieux organiser la soirée.</Text>
+        {NETWORKING_QUESTIONS.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={netAnswers[q.key]??""} onChangeText={v=>setNetAnswers({...netAnswers,[q.key]:v})}/></View>)}
+        <View style={{flexDirection:"row",gap:10,marginTop:10}}><View style={{flex:1}}><GoldButton title={submitting?"…":"Envoyer"} onPress={submitNetworkingFollowUp} disabled={submitting}/></View><View style={{flex:1}}><GoldButton title="Plus tard" secondary onPress={()=>setNetDismissed(true)}/></View></View>
+      </View>}
+      {application.status==="CONFIRMED"&&netDone&&<Notice text="Merci, vos informations professionnelles ont été enregistrées."/>}
       {waitlistEntry?<View style={s.reservationCard}><Text style={s.eyebrow}>LISTE D’ATTENTE</Text><Text style={s.bodyStrong}>Position {waitlistEntry.rank??waitlistEntry.position}</Text><GoldButton title={submitting?"…":"Quitter la liste d’attente"} secondary onPress={leaveWaitlist} disabled={submitting}/></View>
       :categoryUnknown?<Notice text="Complétez votre catégorie (homme/femme) dans votre profil avant de rejoindre la liste d’attente." error/>
       :full&&canCancel?<GoldButton title={submitting?"…":"Rejoindre la liste d’attente"} secondary onPress={joinWaitlist} disabled={submitting}/>
@@ -228,9 +257,9 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
     :user.hasRestaurant?<Notice text="Votre compte restaurateur vous permet de découvrir les événements proposés, mais ne permet pas d’y participer."/>
     :requiresScreening&&!user.profile?.validatedAt?<Notice text="Votre profil doit d’abord être validé lors d’un entretien avec Nour Meet avant de vous inscrire à un speed dating. Rendez-vous dans « Mon espace » → « Entretien »." error/>
     :categoryUnknown?<Notice text="Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement." error/>
-    :showForm?<View>{questions.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={answers[q.key]??""} onChangeText={v=>setAnswers({...answers,[q.key]:v})}/></View>)}<GoldButton title={submitting?"Envoi…":"Envoyer ma candidature"} onPress={apply} disabled={submitting}/></View>
+    :requiresScreening&&showForm?<View>{questions.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={answers[q.key]??""} onChangeText={v=>setAnswers({...answers,[q.key]:v})}/></View>)}<GoldButton title={submitting?"Envoi…":"Envoyer ma candidature"} onPress={apply} disabled={submitting}/></View>
     :full?<View style={s.bookingBar}><Text style={s.meta}>Cet événement est complet</Text><GoldButton title={submitting?"…":"Rejoindre la liste d’attente"} onPress={joinWaitlist} disabled={submitting}/></View>
-    :<View style={s.bookingBar}><View>{selected.priceTiers?.length>0?selected.priceTiers.map((t:any)=><Text key={t.category} style={s.meta}>{t.category==="HOMME"?"Hommes":"Femmes"} · <Text style={s.bodyStrong}>{money(t.amountCents)}</Text></Text>):<><Text style={s.meta}>À partir de</Text><Text style={s.bookingPrice}>{money(selected.priceCents)}</Text></>}</View><GoldButton title={requiresScreening?"Candidater":"S’inscrire"} onPress={()=>setShowForm(true)}/></View>}
+    :<View style={s.bookingBar}><View>{selected.priceTiers?.length>0?selected.priceTiers.map((t:any)=><Text key={t.category} style={s.meta}>{t.category==="HOMME"?"Hommes":"Femmes"} · <Text style={s.bodyStrong}>{money(t.amountCents)}</Text></Text>):<><Text style={s.meta}>À partir de</Text><Text style={s.bookingPrice}>{money(selected.priceCents)}</Text></>}</View><GoldButton title={requiresScreening?"Candidater":submitting?"…":"S’inscrire"} onPress={()=>requiresScreening?setShowForm(true):apply()} disabled={submitting}/></View>}
   </ScrollView>;
   }
   return <ScrollView contentContainerStyle={s.content}><ScreenTitle eyebrow="CALENDRIER" title="Événements"/><TextInput style={s.search} value={q} onChangeText={setQ} placeholder="Rechercher un événement" placeholderTextColor="#777"/>

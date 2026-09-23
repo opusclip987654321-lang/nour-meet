@@ -596,6 +596,10 @@ model Notification {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String
   body      String
+  // C14 (ordre correctif 2026-09-20) : chemin frontend exact vers l'objet métier concerné (une
+  // soirée, un billet, un entretien, l'abonnement...), jamais un lien générique. Null uniquement
+  // pour les notifications qui n'ont réellement aucune destination plus précise que l'espace lui-même.
+  linkPath  String?
   readAt    DateTime?
   createdAt DateTime @default(now())
 }
@@ -639,6 +643,42 @@ model OutboxMessage {
   createdAt DateTime     @default(now())
 }
 
+// Mesure d'audience (C32-C34, ordre correctif 2026-09-20) : première partie, anonyme, jamais un
+// identifiant tiers/publicitaire. anonId est un identifiant aléatoire posé côté navigateur
+// (localStorage), jamais une empreinte ni une donnée personnelle ; userId n'est renseigné que si le
+// visiteur est déjà connecté (corrélation avec son propre compte, jamais un nouveau traçage).
+// Désactivé par défaut (AppSetting ANALYTICS_ENABLED) : ne jamais collecter silencieusement — voir
+// settings.ts pour la mise en garde légale avant activation en production.
+// Cahier des charges consolidé final (2026-09-20, section 9.2) : jamais le jeton de session
+// (30 jours) dans l'URL de paiement ouverte depuis le navigateur intégré mobile — un jeton aussi
+// long durerait dans l'historique du navigateur. Ce jeton opaque à usage unique et à courte durée
+// de vie sert uniquement à l'échanger contre un vrai jeton de session, éphémère, une fois la page
+// de paiement web ouverte (voir POST /auth/payment-session-exchange).
+model PaymentSession {
+  id            String    @id @default(cuid())
+  token         String    @unique
+  userId        String
+  applicationId String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+model PageView {
+  id           String   @id @default(cuid())
+  path         String
+  anonId       String
+  userId       String?
+  userRole     String?
+  referrerHost String?
+  utmSource    String?
+  utmMedium    String?
+  utmCampaign  String?
+  createdAt    DateTime @default(now())
+  @@index([createdAt])
+  @@index([anonId])
+}
+
 // Paramètres applicatifs centralisés (voir src/settings.ts) : toute valeur "provisoire" du cahier
 // des charges (verrou de paiement, quota mensuel restaurateur, drapeaux de fonction...) vit ici,
 // jamais en dur dans le code. Une clé absente retombe sur sa valeur par défaut codée dans
@@ -658,9 +698,17 @@ model Plan {
   id                String                   @id @default(cuid())
   name              String
   monthlyPriceCents Int
-  // §7 (cahier des charges 2026-09) : null = illimité (formule Premium). Le tarif annuel n'est pas
-  // stocké : c'est une valeur dérivée (12 × mensuel × 0,8) calculée à l'affichage, jamais persistée.
+  // Instructions définitives 2026-09-20 : prix annuel FIXE (2 mois offerts, -16,67 %), plus une
+  // valeur dérivée à -20 % — remplace l'ancien calcul automatique. Null uniquement pour une formule
+  // qui n'offre pas encore de facturation annuelle.
+  annualPriceCents  Int?
+  // §7 (cahier des charges 2026-09) : null = illimité (formule Premium).
   monthlyEventQuota Int?
+  // Instructions définitives 2026-09-20 : mise en avant réelle (accueil / classement), jamais
+  // seulement mentionnée dans un texte commercial. "simple" ou "priority" ; null = aucune.
+  highlightTier     String?
+  stripePriceMonthlyId String?
+  stripePriceAnnualId  String?
   active            Boolean                  @default(true)
   createdAt         DateTime                 @default(now())
   subscriptions     RestaurantSubscription[]
@@ -681,12 +729,14 @@ model RestaurantSubscription {
   planId               String
   plan                 Plan               @relation(fields: [planId], references: [id])
   status               SubscriptionStatus @default(TRIALING)
+  // Instructions définitives 2026-09-20 : abonnement réel via Stripe Billing (mode TEST), plus une
+  // simulation de statut. billingPeriod choisi au moment du checkout (mensuel ou annuel).
+  billingPeriod        String             @default("MONTHLY")
   currentPeriodStart   DateTime           @default(now())
   currentPeriodEnd     DateTime
   cancelledAt          DateTime?
-  // Réservé à une intégration future de Stripe Billing pour les prélèvements réels — non câblé ici
-  // (voir cahier des charges §2 : aucun encaissement réel sans autorisation explicite). Le statut
-  // est aujourd'hui géré manuellement par l'administration.
+  cancelAtPeriodEnd    Boolean            @default(false)
+  stripeCustomerId     String?
   stripeSubscriptionId String?
   // §3 (cahier des charges 2026-09) : rappel envoyé une seule fois par période avant l'échéance de
   // l'abonnement. Comparé à currentPeriodStart (pas seulement non-null) pour redevenir envoyable dès
