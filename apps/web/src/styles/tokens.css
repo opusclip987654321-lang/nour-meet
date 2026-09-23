@@ -1,0 +1,93 @@
+/* Design tokens Nour Meet — voir apps/web/DESIGN.md pour la justification de chaque valeur.
+   Aucun composant ne doit utiliser une couleur, une taille ou un rayon en dur : toujours un token. */
+:root {
+  /* Couleurs de marque */
+  --night: #1c2653;
+  --night-2: #2a3670;
+  --night-3: #121a3d;
+  --saffron: #f2a33a;
+  --saffron-2: #f7b85c;
+  --saffron-ink: #8a4b00;
+  --saffron-soft: #fdf1de;
+
+  /* Surfaces et texte */
+  --canvas: #f6f6f8;
+  --surface: #ffffff;
+  --surface-2: #eff0f3;
+  --ink: #15171c;
+  --ink-2: #474c58;
+  --ink-3: #687080;
+  --line: #e1e3e8;
+  --line-strong: #c9cdd5;
+  --on-night: #ffffff;
+  --on-night-2: #c8cde4;
+  --on-night-line: #3a4579;
+
+  /* États */
+  --success: #1d7a4c;
+  --success-bg: #e7f4ec;
+  --warning: #9a5b00;
+  --warning-bg: #fff3dd;
+  --danger: #b3261e;
+  --danger-bg: #fce9e7;
+  --info: var(--night-2);
+  --info-bg: #eaedf7;
+
+  /* Catégories d'événements */
+  --rencontre: #b0406a;
+  --rencontre-bg: #fbeaf0;
+  --networking: #1f6f8b;
+  --networking-bg: #e6f2f6;
+
+  /* Alias de l'ancien thème, encore référencés par quelques styles en ligne du JSX */
+  --gold: var(--saffron-ink);
+  --muted: var(--ink-3);
+  --panel: var(--surface);
+  --green: var(--success);
+  --red: var(--danger);
+
+  /* Typographie */
+  --font-display: "Bricolage Grotesque Variable", "Hanken Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-text: "Hanken Grotesk Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-display: clamp(2.375rem, 1.5rem + 3.4vw, 4rem);
+  --fs-h1: clamp(2rem, 1.5rem + 2.2vw, 3.25rem);
+  --fs-h2: clamp(1.625rem, 1.3rem + 1.4vw, 2.375rem);
+  --fs-h3: 1.25rem;
+  --fs-lg: 1.125rem;
+  --fs-md: 1rem;
+  --fs-sm: 0.875rem;
+  --fs-xs: 0.8125rem;
+
+  /* Espacement (base 4 px) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+  --s-9: 96px;
+  --s-10: 128px;
+
+  /* Formes et profondeur */
+  --r-sm: 8px;
+  --r-md: 14px;
+  --r-lg: 22px;
+  --r-pill: 999px;
+  --shadow-sm: 0 1px 2px rgb(21 23 28 / 0.06), 0 1px 1px rgb(21 23 28 / 0.04);
+  --shadow-md: 0 10px 28px -12px rgb(28 38 83 / 0.22), 0 2px 6px -2px rgb(21 23 28 / 0.06);
+  --shadow-lg: 0 28px 56px -20px rgb(28 38 83 / 0.34), 0 6px 14px -6px rgb(21 23 28 / 0.08);
+  --ring: 0 0 0 3px var(--surface), 0 0 0 6px var(--saffron);
+
+  /* Mise en page */
+  --container: 1200px;
+  --gutter: clamp(16px, 4vw, 40px);
+  --header-h: 68px;
+
+  /* Mouvement */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --t-fast: 150ms;
+  --t-base: 220ms;
+}

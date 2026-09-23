@@ -964,3 +964,23 @@ describe("majorité et acceptation des CGU/CGV", () => {
     expect(res.status).toBe(409);
   });
 });
+
+describe("mise en relation fondée sur le consentement", () => {
+  it("n'autorise ni relance après refus, ni double réponse, ni demande à soi-même", async () => {
+    const a = await tracked("ContactA");
+    const b = await tracked("ContactB");
+    expect((await api("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: a.userId }) }, a.token)).status).toBe(400);
+
+    const first = await api<{ id: string }>("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: b.userId }) }, a.token);
+    expect(first.status).toBe(200);
+    // Une demande déjà en attente n'est pas renotifiée.
+    const notificationsBefore = await prisma.notification.count({ where: { userId: b.userId, title: "Nouvelle demande de contact" } });
+    expect((await api("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: b.userId }) }, a.token)).status).toBe(200);
+    expect(await prisma.notification.count({ where: { userId: b.userId, title: "Nouvelle demande de contact" } })).toBe(notificationsBefore);
+
+    expect((await api(`/contacts/${first.body.id}/respond`, { method: "POST", body: JSON.stringify({ accept: false }) }, b.token)).status).toBe(200);
+    expect((await api(`/contacts/${first.body.id}/respond`, { method: "POST", body: JSON.stringify({ accept: true }) }, b.token)).status).toBe(409);
+    expect((await api("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: b.userId }) }, a.token)).status).toBe(409);
+    expect(await prisma.conversationMember.count({ where: { userId: b.userId } })).toBe(0);
+  });
+});

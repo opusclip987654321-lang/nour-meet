@@ -18,7 +18,7 @@ test("parcours speed dating : badge de sélection, questionnaire, paiement propo
 
   await page.goto(`/events/${EVENT_SLUG}`);
   await expect(page.locator(".category-badge", { hasText: "SPEED DATING" })).toBeVisible();
-  await expect(page.getByText("◆ Sélection")).toBeVisible();
+  await expect(page.locator(".flow-badge", { hasText: "Sur sélection" })).toBeVisible();
 
   await page.getByRole("button", { name: "Candidater" }).click();
   for (const label of [

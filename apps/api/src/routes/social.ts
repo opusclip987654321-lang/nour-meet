@@ -28,9 +28,19 @@ app.get("/profiles/code/:code", { preHandler: auth }, async (request, reply) => 
   return { userId: profile.userId, displayName: profile.user.displayName, photoUrl: profile.photoUrl, age: profileAge(profile.birthDate), city: profile.city, profession: profile.profession, interests: profile.interests, bio: profile.bio, validated: true };
 });
 
-app.post("/contacts/request", { preHandler: auth }, async (request) => {
+// Mise en relation fondée sur le consentement : une demande refusée ne peut jamais être relancée
+// (auparavant, le même appel la remettait « en attente » et renotifiait la personne à chaque fois),
+// une demande en attente n'est pas renotifiée, et une relation déjà acceptée n'est pas recréée.
+app.post("/contacts/request", { preHandler: auth }, async (request, reply) => {
   const { recipientId } = z.object({ recipientId: z.string() }).parse(request.body); const requesterId = currentId(request);
-  const requestRow = await prisma.contactRequest.upsert({ where: { requesterId_recipientId: { requesterId, recipientId } }, update: { status: ContactRequestStatus.PENDING }, create: { requesterId, recipientId } });
+  if (recipientId === requesterId) return reply.code(400).send({ error: "Vous ne pouvez pas vous envoyer une demande à vous-même." });
+  const existing = await prisma.contactRequest.findUnique({ where: { requesterId_recipientId: { requesterId, recipientId } } });
+  if (existing?.status === ContactRequestStatus.REFUSED) return reply.code(409).send({ error: "Cette personne a décliné votre demande : elle ne peut pas être renouvelée." });
+  if (existing?.status === ContactRequestStatus.ACCEPTED) return reply.code(409).send({ error: "Vous êtes déjà en contact avec cette personne." });
+  if (existing?.status === ContactRequestStatus.PENDING) return existing;
+  const requestRow = existing
+    ? await prisma.contactRequest.update({ where: { id: existing.id }, data: { status: ContactRequestStatus.PENDING } })
+    : await prisma.contactRequest.create({ data: { requesterId, recipientId } });
   await notify(recipientId, "Nouvelle demande de contact", "Un participant souhaite entrer en contact avec vous.");
   return requestRow;
 });
@@ -43,6 +53,8 @@ app.get("/me/contact-requests", { preHandler: auth }, async (request) => {
 app.post("/contacts/:id/respond", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params); const { accept } = z.object({ accept: z.boolean() }).parse(request.body); const userId = currentId(request);
   const contact = await prisma.contactRequest.findFirstOrThrow({ where: { id, recipientId: userId } });
+  // Une réponse est définitive : répondre deux fois créait une seconde conversation.
+  if (contact.status !== ContactRequestStatus.PENDING) return reply.code(409).send({ error: "Vous avez déjà répondu à cette demande." });
   const updated = await prisma.contactRequest.update({ where: { id }, data: { status: accept ? ContactRequestStatus.ACCEPTED : ContactRequestStatus.REFUSED } });
   if (accept) {
     const conversation = await prisma.conversation.create({ data: { members: { create: [{ userId: contact.requesterId }, { userId: contact.recipientId }] } } });

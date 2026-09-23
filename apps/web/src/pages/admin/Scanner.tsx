@@ -1,3 +1,4 @@
+import { CheckCircle2, XCircle } from "lucide-react";
 import jsQR from "jsqr";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
@@ -66,7 +67,7 @@ export function Scanner() {
     };
   },[]);
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ACCUEIL</span><h1>Scanner un billet</h1><div className="scanner-layout"><div className="scanner panel">
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Scanner un billet</h1><div className="scanner-layout"><div className="scanner panel">
     <div className="scan-frame">
       {cameraError?<div className="camera-fallback"><span>QR</span><p>{cameraError}</p></div>
       :<video ref={videoRef} muted playsInline/>}
@@ -74,5 +75,5 @@ export function Scanner() {
     </div>
     <canvas ref={canvasRef} style={{display:"none"}}/>
     <form className="manual-fallback" onSubmit={submitManual}><label>Saisie manuelle (secours)<input value={code} onChange={e=>setCode(e.target.value)} placeholder="Code du billet"/></label><button className="button full">Vérifier et valider l’entrée</button></form>
-  </div><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b>✓</b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b>×</b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Présentez le QR code du billet devant la caméra, ou saisissez le code manuellement.</p></>}</aside></div></div></section></Layout>;
+  </div><aside className={`scan-result panel ${result?"success":error?"error":""}`}>{result?<><b><CheckCircle2 size={48} aria-hidden="true"/></b><h2>Entrée autorisée</h2><p>{result.participant}</p><span>{result.event}</span></>:error?<><b><XCircle size={48} aria-hidden="true"/></b><h2>Entrée refusée</h2><p>{error}</p></>:<><b>⌗</b><h2>En attente d’un billet</h2><p>Présentez le QR code du billet devant la caméra, ou saisissez le code manuellement.</p></>}</aside></div></div></section></Layout>;
 }

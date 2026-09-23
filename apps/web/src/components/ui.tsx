@@ -1,5 +1,5 @@
-import { EVENT_CATEGORIES } from "@nour/shared";
 import type { PublicEvent } from "@nour/shared";
+import { ArrowRight, BadgeCheck, Bell, CalendarDays, Heart, MapPin, Share2, Users } from "lucide-react";
 import { ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
@@ -13,10 +13,10 @@ export const Avatar = ({ name, photoUrl, size, className, verified }: { name?: s
   const cls = `avatar${size ? ` ${size}` : ""}${className ? ` ${className}` : ""}`;
   const img = photoUrl ? <img className={cls} src={imgUrl(photoUrl)} alt="" /> : <div className={cls}>{(name ?? "?").slice(0, 2).toUpperCase()}</div>;
   if (!verified) return img;
-  return <div className="avatar-wrap">{img}<span className="verified-badge" title="Profil vérifié">✓ Vérifié</span></div>;
+  return <div className="avatar-wrap">{img}<span className="verified-badge" title="Profil vérifié"><BadgeCheck size={13} aria-hidden="true"/>Vérifié</span></div>;
 };
 
-export function Logo() { return <Link className="logo" to="/"><span>N</span><strong>NŪR <b>MEET</b></strong></Link>; }
+export { Logo } from "./brand";
 
 export function Loading() { return <div className="state-page"><div className="spinner"/><h2>Chargement…</h2></div>; }
 // C13/C14 (ordre correctif 2026-09-20) : liste de notifications partagée (participant, restaurateur,
@@ -29,7 +29,7 @@ export function NotificationList({ items, onRead }: { items: any[]; onRead: (id:
     if (!n.readAt) { try { await api(`/notifications/${n.id}/read`, { method: "POST" }); onRead(n.id); } catch { /* déjà lue ou introuvable */ } }
     if (n.linkPath) navigate(n.linkPath);
   };
-  if (items.length === 0) return <div className="empty small"><span>◇</span><p>Aucune notification pour le moment.</p></div>;
+  if (items.length === 0) return <div className="empty small"><Bell size={24} aria-hidden="true"/><p>Aucune notification pour le moment.</p></div>;
   return <div className="stack">{items.map(n => {
     const Tag = n.linkPath ? "button" : "div";
     return <Tag key={n.id} type={n.linkPath ? "button" : undefined} className={`notification ${n.readAt ? "read" : "unread"}`} onClick={n.linkPath ? () => open(n) : undefined} style={n.linkPath ? { cursor: "pointer", textAlign: "left", border: 0, width: "100%", font: "inherit" } : undefined}>
@@ -61,32 +61,47 @@ export function ShareButton({ event }: { event: PublicEvent }) {
     catch { setError("Impossible de copier le lien automatiquement."); }
   };
   return <div className="share-block">
-    <button type="button" className="button secondary full" onClick={share}>Inviter un ami</button>
+    <button type="button" className="button secondary full" onClick={share}><Share2 size={18} aria-hidden="true"/>Inviter un ami</button>
     {copied && <p className="fine share-copied">Lien copié !</p>}
     {error && <p className="fine share-copied">{error}</p>}
   </div>;
 }
 
-// §15 : couleur, icône et badge distincts par type d'événement. La couleur vient de EVENT_CATEGORIES
-// (partagée avec l'API/mobile) ; l'icône reste ici car elle dépend de JSX. Une catégorie ajoutée
-// sans entrée ici retombe sur un simple point de sa couleur plutôt que de casser l'affichage.
+// §15 : couleur, icône et badge distincts par type d'événement. Côté web, la couleur vient des
+// tokens (--rencontre, --networking) via data-category ; une catégorie ajoutée sans entrée ici
+// s'affiche en badge neutre, sans icône, plutôt que de casser l'affichage.
 const CATEGORY_ICON: Record<string, ReactNode> = {
-  "Speed dating": <svg viewBox="0 0 24 16" width="13" height="13" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.4" stroke="currentColor" strokeWidth="1.6"/><circle cx="16" cy="8" r="6.4" stroke="currentColor" strokeWidth="1.6"/></svg>,
-  "Networking": <svg viewBox="0 0 24 24" width="13" height="13" fill="none" aria-hidden="true"><circle cx="6" cy="18" r="2.1" fill="currentColor"/><circle cx="18" cy="18" r="2.1" fill="currentColor"/><circle cx="12" cy="6" r="2.1" fill="currentColor"/><path d="M6 18 12 6 18 18" stroke="currentColor" strokeWidth="1.3" fill="none"/></svg>
+  "Speed dating": <Heart size={14} aria-hidden="true" />,
+  "Networking": <Users size={14} aria-hidden="true" />
 };
 export function CategoryBadge({ category, className }: {category: string; className?: string}) {
-  const color = EVENT_CATEGORIES.find(c => c.name === category)?.color ?? "var(--gold)";
-  const icon = CATEGORY_ICON[category] ?? <svg viewBox="0 0 12 12" width="9" height="9" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="currentColor"/></svg>;
-  return <span className={`category-badge${className ? ` ${className}` : ""}`} style={{ color, borderColor: color }}>{icon}{category}</span>;
+  return <span className={`category-badge${className ? ` ${className}` : ""}`} data-category={category}>{CATEGORY_ICON[category] ?? null}{category}</span>;
 }
 
 // C24 : jamais de chiffre brut de capacité/quota — seulement ce que la disponibilité calculée
 // côté serveur autorise à dire pour CE visiteur.
 export const availabilityLabel=(a:PublicEvent["availability"])=>a.kind==="unknown"?"Places selon catégorie":a.full?"Complet":`${a.remaining} place${a.remaining>1?"s":""} restante${a.remaining>1?"s":""}`;
-export function EventCard({ event }: {event: PublicEvent}) {
+// Carte événement : la carte entière est cliquable (lien étiré depuis le titre, un seul lien
+// pour les lecteurs d'écran), image au ratio fixe 4/3 pour qu'aucune carte ne « saute » au
+// chargement, date et lieu avant le prix — l'ordre dans lequel on décide d'y aller.
+const shortDate = (value: string) => new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value)).replace(":", "h");
+export function EventCard({ event, priority = false, headingLevel = 3 }: {event: PublicEvent; priority?: boolean; headingLevel?: 2 | 3}) {
+  const Title = headingLevel === 2 ? "h2" : "h3";
   const full=event.availability.kind!=="unknown"&&event.availability.full;
-  const priceLabel=event.priceTiers.length>0?`À partir de ${money(Math.min(...event.priceTiers.map(t=>t.amountCents)))}`:money(event.priceCents);
-  return <article className="event-card"><Link to={`/events/${event.slug}`} className="event-art"><img src={imgUrl(event.imageUrl)} alt={event.title} loading="lazy"/><CategoryBadge category={event.category}/>{event.highlightTier==="priority"&&<span className="verified-badge" style={{position:"absolute",top:16,right:16}}>★ Mise en avant</span>}{event.highlightTier==="simple"&&<span className="category-badge" style={{position:"absolute",top:16,right:16,color:"#ddd",borderColor:"#555"}}>Partenaire</span>}{full&&<span className="full-badge">Complet</span>}</Link><div className="event-copy"><small>{dateTime(event.startsAt).toUpperCase()}</small><h3>{event.title}</h3><p>{event.district} · {availabilityLabel(event.availability)}</p><div><strong>{priceLabel}</strong><Link to={`/events/${event.slug}`}>Découvrir →</Link></div></div></article>;
+  const priceLabel=event.priceTiers.length>0?`dès ${money(Math.min(...event.priceTiers.map(t=>t.amountCents)))}`:event.priceCents===0?"Gratuit":money(event.priceCents);
+  return <article className="event-card">
+    <div className="event-art">
+      <img src={imgUrl(event.imageUrl)} alt="" loading={priority?"eager":"lazy"} decoding="async" width={800} height={600}/>
+      <div className="event-art-badges"><CategoryBadge category={event.category}/>{event.highlightTier==="priority"&&<span className="badge neutral">Coup de cœur</span>}{event.highlightTier==="simple"&&<span className="badge neutral">Partenaire</span>}</div>
+      {full&&<span className="full-badge">Complet</span>}
+    </div>
+    <div className="event-copy">
+      <p className="event-date"><CalendarDays size={16} aria-hidden="true"/>{shortDate(event.startsAt)}</p>
+      <Title className="event-title"><Link to={`/events/${event.slug}`} className="stretched">{event.title}</Link></Title>
+      <p className="event-place"><MapPin size={16} aria-hidden="true"/>{event.district}<span aria-hidden="true">·</span>{availabilityLabel(event.availability)}</p>
+      <div className="event-foot"><strong>{priceLabel}</strong><span className="event-more" aria-hidden="true">Voir la soirée<ArrowRight size={16}/></span></div>
+    </div>
+  </article>;
 }
 
 // §5 (cahier des charges 2026-09) : les articles doivent pouvoir renvoyer vers d'autres parties

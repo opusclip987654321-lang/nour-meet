@@ -1,3 +1,4 @@
+import { Inbox } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../api";
 import { useAuth } from "../../auth";
@@ -25,13 +26,13 @@ export function AdminStaff() {
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}
   };
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">ADMINISTRATION</span><h1>Personnel d’accueil</h1><p className="fine">Ces comptes peuvent uniquement scanner les billets de votre établissement. Ils n’ont accès à aucune candidature, aucun client ni aucune donnée financière.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Personnel d’accueil</h1><p className="fine">Ces comptes peuvent uniquement scanner les billets de votre établissement. Ils n’ont accès à aucune candidature, aucun client ni aucune donnée financière.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <form className="panel form-grid" onSubmit={add}>
       <label>Téléphone<input required value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="+33612345678"/></label>
       <label>Nom<input value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})} placeholder="Prénom Nom"/></label>
       <button className="button" disabled={busy}>{busy?"…":"Donner l’accès accueil"}</button>
     </form>
-    {items.length===0?<div className="empty small"><span>◇</span><p>Aucun personnel d’accueil pour le moment.</p></div>:<div className="stack">{items.map(s=><article key={s.id} className="panel restaurant-request"><div><h3>{s.displayName}</h3><p>{s.phone}</p></div><button className="button danger" disabled={busy} onClick={()=>revoke(s.id)}>Retirer l’accès</button></article>)}</div>}
+    {items.length===0?<div className="empty small"><Inbox size={24} aria-hidden="true"/><p>Aucun personnel d’accueil pour le moment.</p></div>:<div className="stack">{items.map(s=><article key={s.id} className="panel restaurant-request"><div><h3>{s.displayName}</h3><p>{s.phone}</p></div><button className="button danger" disabled={busy} onClick={()=>revoke(s.id)}>Retirer l’accès</button></article>)}</div>}
   </div></section></Layout>;
 }
 
@@ -64,11 +65,11 @@ export function AdminModeration() {
     finally{setBusyId(null)}
   };
   const STATUS_LABEL:Record<string,string>={OPEN:"Ouvert",REVIEWING:"En cours d’examen",RESOLVED:"Résolu",DISMISSED:"Classé sans suite"};
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">MODÉRATION</span><h1>Signalements</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Signalements</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     {user?.role==="ADMIN"&&<div className="panel form-grid"><div className="panel-title"><h2>Modérateurs</h2><span>Personnes autorisées à traiter les signalements</span></div>
       {mods.length>0&&<div className="stack">{mods.map(m=><div key={m.id} className="table-row"><span><b>{m.displayName}</b> · {m.phone}</span><button type="button" className="button danger small" disabled={busyId===m.id} onClick={()=>revokeMod(m.id)}>Retirer</button></div>)}</div>}
       <form className="time-row wide" onSubmit={addMod}><input required placeholder="+33612345678" value={modForm.phone} onChange={e=>setModForm({...modForm,phone:e.target.value})}/><input placeholder="Nom" value={modForm.displayName} onChange={e=>setModForm({...modForm,displayName:e.target.value})}/><button className="button" disabled={busyId==="mod"}>Nommer modérateur</button></form>
     </div>}
-    {items.length===0?<div className="empty"><span>◇</span><h2>Aucun signalement</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request"><div><h3>{r.reporter.displayName} → {r.reported.displayName}</h3><p>{r.reason}</p>{r.details&&<p className="fine left">{r.details}</p>}<small>{STATUS_LABEL[r.status]??r.status} · {dateTime(r.createdAt)}</small></div>{!["RESOLVED","DISMISSED"].includes(r.status)&&<div className="decision-buttons"><button className="button" disabled={busyId===r.id} onClick={()=>decide(r.id,"REVIEWING")}>Mettre en examen</button><button className="button" disabled={busyId===r.id} onClick={()=>decide(r.id,"RESOLVED")}>Résoudre</button><button className="button danger" disabled={busyId===r.id} onClick={()=>decide(r.id,"DISMISSED")}>Classer</button></div>}</article>)}</div>}
+    {items.length===0?<div className="empty"><Inbox size={24} aria-hidden="true"/><h2>Aucun signalement</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request"><div><h3>{r.reporter.displayName} → {r.reported.displayName}</h3><p>{r.reason}</p>{r.details&&<p className="fine left">{r.details}</p>}<small>{STATUS_LABEL[r.status]??r.status} · {dateTime(r.createdAt)}</small></div>{!["RESOLVED","DISMISSED"].includes(r.status)&&<div className="decision-buttons"><button className="button" disabled={busyId===r.id} onClick={()=>decide(r.id,"REVIEWING")}>Mettre en examen</button><button className="button" disabled={busyId===r.id} onClick={()=>decide(r.id,"RESOLVED")}>Résoudre</button><button className="button danger" disabled={busyId===r.id} onClick={()=>decide(r.id,"DISMISSED")}>Classer</button></div>}</article>)}</div>}
   </div></section></Layout>;
 }
