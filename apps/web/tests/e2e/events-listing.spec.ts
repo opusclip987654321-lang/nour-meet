@@ -14,17 +14,17 @@ test.describe("liste des événements", () => {
     await page.goto("/events");
     await expect(page.locator(".event-card").first()).toBeVisible();
 
-    await page.getByRole("combobox").selectOption("Speed dating");
+    await page.getByRole("button", { name: "Speed dating", exact: true }).click();
     await expect(page.locator(".category-badge", { hasText: "SPEED DATING" }).first()).toBeVisible();
     await expect(page.locator(".category-badge", { hasText: "NETWORKING" })).toHaveCount(0);
 
-    await page.getByRole("combobox").selectOption("");
+    await page.getByRole("button", { name: "Toutes", exact: true }).click();
     await expect(page.locator(".event-card").first()).toBeVisible();
   });
 
   test("affiche un état vide explicite quand aucun événement ne correspond à la recherche", async ({ page }) => {
     await page.goto("/events");
-    await page.getByPlaceholder("Rechercher un événement").fill("zzzzz-aucun-resultat-possible-zzzzz");
-    await expect(page.getByText("Aucun événement disponible")).toBeVisible();
+    await page.getByPlaceholder("Rechercher par nom ou quartier").fill("zzzzz-aucun-resultat-possible-zzzzz");
+    await expect(page.getByText("Aucune soirée ne correspond")).toBeVisible();
   });
 });

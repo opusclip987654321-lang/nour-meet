@@ -1,9 +1,10 @@
+import { X } from "lucide-react";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, setToken } from "../api";
 import { money } from "../lib/format";
-import { stripePromise } from "../lib/stripe";
+import { getStripe } from "../lib/stripe";
 import { Notice } from "./ui";
 
 function PaymentForm({ amountCents, onSuccess, onCancel }: { amountCents: number; onSuccess: () => void; onCancel: () => void }) {
@@ -64,7 +65,7 @@ export function PaymentModal({ applicationId, eventId, amountCents, onClose, onC
 
   return <div className="modal-overlay" role="dialog" aria-modal="true">
     <div className="modal payment-modal">
-      <div className="modal-head"><h2>{free ? "Confirmer ma place" : "Paiement sécurisé"}</h2><button type="button" className="link-button" onClick={onClose} aria-label="Fermer">×</button></div>
+      <div className="modal-head"><h2>{free ? "Confirmer ma place" : "Paiement sécurisé"}</h2><button type="button" className="link-button" onClick={onClose} aria-label="Fermer"><X size={22} aria-hidden="true"/></button></div>
       <p className="payment-amount">{free ? <>Soirée <b>gratuite</b></> : <>Montant à régler : <b>{money(amountCents)}</b> TTC, frais inclus</>}</p>
       {error && <Notice kind="error">{error}</Notice>}
       {phase === "terms" && <div className="stack">
@@ -83,7 +84,7 @@ export function PaymentModal({ applicationId, eventId, amountCents, onClose, onC
       {phase === "confirming" && <div className="calendar-state"><div className="spinner small"/><span>Confirmation du paiement…</span></div>}
       {phase === "success" && <Notice kind="success">{free ? "Place confirmée ! Votre billet est prêt." : "Paiement confirmé ! Votre billet est prêt."}</Notice>}
       {phase === "timeout" && <><Notice kind="error">Le paiement est en cours de confirmation. Actualisez la page dans un instant.</Notice><button className="button full" onClick={onClose}>Fermer</button></>}
-      {phase === "ready" && clientSecret && <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: "night", variables: { colorPrimary: "#cba969" } } }}>
+      {phase === "ready" && clientSecret && <Elements stripe={getStripe()} options={{ clientSecret, appearance: { theme: "stripe", variables: { colorPrimary: "#1c2653", colorText: "#15171c", colorDanger: "#b3261e", borderRadius: "8px", fontSizeBase: "16px" } } }}>
         <PaymentForm amountCents={amountCents} onSuccess={handleSuccess} onCancel={onClose}/>
       </Elements>}
     </div>
@@ -119,7 +120,7 @@ export function PayStandalone(){
   if (done) return <div className="state-page"><h2>C’est terminé ici.</h2><p>Vous pouvez fermer cette fenêtre et retourner dans l’application Nūr Meet.</p></div>;
   const eventId = searchParams.get("eventId") ?? "";
   const amountCents = Number(searchParams.get("amount") ?? "0");
-  return <div style={{ minHeight: "100vh", background: "#0b0b0c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+  return <div style={{ minHeight: "100dvh", background: "var(--canvas)", display: "flex", alignItems: "center", justifyContent: "center" }}>
     <PaymentModal applicationId={applicationId!} eventId={eventId} amountCents={amountCents} onClose={() => setDone(true)} onConfirmed={() => setDone(true)} onWaitlisted={() => setDone(true)}/>
   </div>;
 }

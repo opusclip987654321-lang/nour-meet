@@ -1,3 +1,4 @@
+import { Inbox } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../api";
@@ -37,8 +38,8 @@ export function AdminBlog() {
     finally{setBusy(false)}
   };
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Blog</h1><p className="fine left">Aucun article — écrit à la main ou généré par IA — n’est jamais publié sans validation humaine explicite.</p>
-    {queue&&queue.count>0&&<Notice kind="info">{queue.count} article{queue.count>1?"s":""} en réserve, proposé{queue.count>1?"s":""} ici à raison d’un par jour une fois en production. Prochain : « {queue.next[0]?.title} » ({queue.next[0]?.category}).</Notice>}
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Blog</h1><p className="fine left">Aucun article — écrit à la main ou généré par IA — n’est jamais publié sans validation humaine explicite.</p>
+    
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="admin-grid">
       <form className="panel form-grid" onSubmit={createManual}>
@@ -55,11 +56,11 @@ export function AdminBlog() {
       </form>
     </div>
     <div className="filters"><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tous les statuts</option>{Object.entries(ARTICLE_STATUS_LABEL).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
-    {items.length===0?<div className="empty"><span>◇</span><h2>Aucun article</h2></div>:<div className="panel table">
+    {items.length===0?<div className="empty"><Inbox size={24} aria-hidden="true"/><h2>Aucun article</h2></div>:<div className="panel table">
       <div className="table-row head"><span>Titre</span><span>Thème</span><span>Statut</span></div>
       {items.map(a=><Link key={a.id} to={`/admin/blog/${a.id}`} className="table-row"><span><b>{a.title}</b>{a.aiGenerated&&<small>Généré par IA</small>}</span><span>{a.category}</span><span>{ARTICLE_STATUS_LABEL[a.status]}</span></Link>)}
     </div>}
-  </div></section></Layout>;
+  {queue&&queue.count>0&&<Notice kind="info">{queue.count} article{queue.count>1?"s":""} en réserve, proposé{queue.count>1?"s":""} ici à raison d’un par jour une fois en production. Prochain : « {queue.next[0]?.title} » ({queue.next[0]?.category}).</Notice>}</div></section></Layout>;
 }
 
 export function AdminArticleEditor() {
@@ -104,10 +105,10 @@ export function AdminArticleEditor() {
 
   if(!article)return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><Loading/></div></section></Layout>;
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main">
-    <div className="admin-heading"><div><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>{article.title}</h1><p className="fine left">Statut : <b>{ARTICLE_STATUS_LABEL[article.status]}</b>{article.aiGenerated&&" · généré par IA"}</p></div><button type="button" className="button small secondary" onClick={()=>setPreview(!preview)}>{preview?"Modifier":"Aperçu"}</button></div>
+    <div className="admin-heading"><div><h1>{article.title}</h1><p className="fine left">Statut : <b>{ARTICLE_STATUS_LABEL[article.status]}</b>{article.aiGenerated&&" · généré par IA"}</p></div><button type="button" className="button small secondary" onClick={()=>setPreview(!preview)}>{preview?"Modifier":"Aperçu"}</button></div>
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     {preview?<div className="panel" style={{maxWidth:760}}>
-      <span className="eyebrow">{form.category.toUpperCase()}</span><h2 style={{fontFamily:"'Playfair Display',serif"}}>{form.title}</h2>
+      <span className="eyebrow">{form.category}</span><h2 style={{fontFamily:"'Playfair Display',serif"}}>{form.title}</h2>
       {article.imageUrl&&<img src={imgUrl(article.imageUrl)} alt="" style={{width:"100%",borderRadius:14,margin:"20px 0"}}/>}
       <div className="article-body">{form.content.split("\n\n").map((p,i)=><p key={i}>{renderArticleParagraph(p)}</p>)}</div>
     </div>:<form className="panel form-grid" onSubmit={save}>

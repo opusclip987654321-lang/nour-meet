@@ -34,7 +34,16 @@ Monorepo npm : `apps/api` (Fastify + Prisma + Postgres), `apps/web` (React + Vit
 - `apps/api/src/routes/*.ts` — une famille de routes par fichier ; `services/*.ts` — logique partagée
   (auth, réservations, remboursements, présentation des événements, textes juridiques).
 - `apps/web/src` — `lib/` (formatage, libellés, Stripe), `auth.tsx`, `components/`, `pages/`,
-  `pages/admin/` ; `App.tsx` ne contient que le routage.
+  `pages/admin/` ; `App.tsx` ne contient que le routage (routes secondaires chargées à la demande).
+- **Design du site : `apps/web/DESIGN.md` fait foi** (palette bleu nuit / safran, Bricolage Grotesque +
+  Hanken Grotesk auto-hébergées, tokens dans `src/styles/tokens.css`). Toujours un token, jamais une
+  couleur ou une taille en dur ; icônes Lucide uniquement (jamais d'emoji ni de caractère Unicode
+  comme icône) ; photos via `<Picture>` (`components/brand.tsx`) ; pas de sur-titre au-dessus des
+  titres. Toute colonne de grille/flex contenant du texte a `min-width:0` / `minmax(0,1fr)`, et un
+  contenu qui se charge a un squelette de même taille (pas d'état vide affiché avant les données).
+- **Images** : personnes représentatives des musulmans français (majoritairement d'origine
+  maghrébine et subsaharienne), aucun alcool à l'image, jamais présentées comme des photos
+  d'événements réels ; crédits dans `apps/web/public/images/CREDITS.md`.
 - `apps/mobile` — `App.tsx` (navigation racine), `src/screens/`, `src/components/ui.tsx`,
   `src/theme.ts`. Le paiement mobile ouvre la page web `/pay/:id` (pas de SDK Stripe natif).
 - Nouveau code : dans le module de son domaine, jamais de retour à un fichier fourre-tout.

@@ -7,8 +7,10 @@ import { RESTAURANT_STATUS_LABEL } from "../../lib/labels";
 import { AdminNav } from "./AdminNav";
 
 export function AdminRestaurants() {
-  const [items,setItems]=useState<any[]>([]);
-  const [plans,setPlans]=useState<any[]>([]);
+  // null = en cours de chargement (squelette), [] = réellement vide : jamais d'état vide affiché
+  // avant l'arrivée des données.
+  const [items,setItems]=useState<any[]|null>(null);
+  const [plans,setPlans]=useState<any[]|null>(null);
   const [filter,setFilter]=useState("PENDING");
   const [actingOn,setActingOn]=useState<string|null>(null);
   const [reasonFor,setReasonFor]=useState<string|null>(null);
@@ -57,10 +59,10 @@ export function AdminRestaurants() {
     finally{setActingOn(null)}
   };
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Demandes restaurateurs</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Demandes restaurateurs</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="panel" style={{marginBottom:20}}>
       <div className="panel-title"><h2>Formules d’abonnement</h2><span>Prix mensuel HT · quota vide = illimité · tarif annuel = mensuel × 12 × 0,8</span></div>
-      <div className="stack">{plans.map(p=><div key={p.id} className="time-row" style={{alignItems:"center"}}>
+      <div className="stack">{plans===null&&[0,1].map(i=><div key={i} className="skeleton" style={{height:76}}/>)}{(plans??[]).map(p=><div key={p.id} className="time-row" style={{alignItems:"center"}}>
         <span>{p.name}{!p.active&&" (désactivée)"}</span>
         <label>€/mois<input type="number" min={0} step="1" value={planEdits[p.id]?.monthlyPriceCents??""} onChange={e=>setPlanEdits({...planEdits,[p.id]:{...planEdits[p.id],monthlyPriceCents:e.target.value}})}/></label>
         <label>Quota mensuel (vide=illimité)<input type="number" min={1} placeholder="illimité" value={planEdits[p.id]?.monthlyEventQuota??""} onChange={e=>setPlanEdits({...planEdits,[p.id]:{...planEdits[p.id],monthlyEventQuota:e.target.value}})}/></label>
@@ -76,7 +78,7 @@ export function AdminRestaurants() {
       </form>
     </div>
     <div className="filters"><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="PENDING">En attente</option><option value="APPROVED">Approuvés</option><option value="REJECTED">Refusés</option><option value="SUSPENDED">Suspendus</option></select></div>
-    {items.length===0?<div className="empty"><span>◇</span><h2>Aucune demande</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request">
+    {items===null?<div className="stack" aria-busy="true">{[0,1,2].map(i=><div key={i} className="skeleton" style={{height:64}}/>)}</div>:items.length===0?<div className="empty"><h2>Aucune demande</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request">
       <div>
         <h3>{r.name}</h3>
         <p>{r.owner.displayName} · <a href={`tel:${r.phone||r.owner.phone}`}>{r.phone||r.owner.phone}</a>{r.owner.email?<> · <a href={`mailto:${r.owner.email}`}>Contacter par e-mail</a></>:null}</p>
@@ -88,8 +90,8 @@ export function AdminRestaurants() {
         {r.specialConditions&&<p className="fine left">Conditions particulières : {r.specialConditions}</p>}
         {r.photos?.length>0&&<div className="event-photo-grid">{r.photos.map((p:any)=><img key={p.id} src={imgUrl(p.url)} alt="" style={{height:100,borderRadius:8,objectFit:"cover"}}/>)}</div>}
         <small>{RESTAURANT_STATUS_LABEL[r.status]}</small>
-        {r.status==="APPROVED"&&<p className="fine left">Abonnement : {r.subscription?`${r.subscription.plan.name} (${(r.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois) — ${r.subscription.status}`:"aucun"} <button type="button" className="link-button" onClick={()=>{setSubFor(r.id);setSubForm({planId:r.subscription?.planId??plans[0]?.id??"",status:r.subscription?.status??"ACTIVE"})}}>modifier</button></p>}
-        {subFor===r.id&&<div className="time-row"><select value={subForm.planId} onChange={e=>setSubForm({...subForm,planId:e.target.value})}>{plans.map(p=><option key={p.id} value={p.id}>{p.name} ({(p.monthlyPriceCents/100).toFixed(0)} €/mois, {p.monthlyEventQuota==null?"illimité":`${p.monthlyEventQuota} évt.`})</option>)}</select><select value={subForm.status} onChange={e=>setSubForm({...subForm,status:e.target.value})}><option value="TRIALING">Essai</option><option value="ACTIVE">Actif</option><option value="PAST_DUE">Impayé</option><option value="CANCELLED">Résilié</option><option value="INCOMPLETE">Incomplet</option></select><button className="button small" disabled={actingOn===r.id} onClick={()=>saveSubscription(r.id)}>Enregistrer</button></div>}
+        {r.status==="APPROVED"&&<p className="fine left">Abonnement : {r.subscription?`${r.subscription.plan.name} (${(r.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois) — ${r.subscription.status}`:"aucun"} <button type="button" className="link-button" onClick={()=>{setSubFor(r.id);setSubForm({planId:r.subscription?.planId??plans?.[0]?.id??"",status:r.subscription?.status??"ACTIVE"})}}>modifier</button></p>}
+        {subFor===r.id&&<div className="time-row"><select value={subForm.planId} onChange={e=>setSubForm({...subForm,planId:e.target.value})}>{(plans??[]).map(p=><option key={p.id} value={p.id}>{p.name} ({(p.monthlyPriceCents/100).toFixed(0)} €/mois, {p.monthlyEventQuota==null?"illimité":`${p.monthlyEventQuota} évt.`})</option>)}</select><select value={subForm.status} onChange={e=>setSubForm({...subForm,status:e.target.value})}><option value="TRIALING">Essai</option><option value="ACTIVE">Actif</option><option value="PAST_DUE">Impayé</option><option value="CANCELLED">Résilié</option><option value="INCOMPLETE">Incomplet</option></select><button className="button small" disabled={actingOn===r.id} onClick={()=>saveSubscription(r.id)}>Enregistrer</button></div>}
         <p className="fine left">Notes internes : {r.adminNotes||"—"} <button type="button" className="link-button" onClick={()=>{setNotesFor(r.id);setNotes(r.adminNotes??"")}}>modifier</button></p>
         {notesFor===r.id&&<div className="time-row"><textarea value={notes} onChange={e=>setNotes(e.target.value)}/><button className="button small" disabled={actingOn===r.id} onClick={()=>saveNotes(r.id)}>Enregistrer</button></div>}
       </div>

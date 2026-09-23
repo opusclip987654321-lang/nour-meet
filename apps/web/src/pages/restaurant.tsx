@@ -108,11 +108,11 @@ export function RestaurantSpace() {
   useEffect(()=>{if(restaurant)api<{count:number}>("/notifications/unread-count").then(r=>setUnread(r.count)).catch(()=>{})},[restaurant,tab]);
   if(restaurant===undefined)return <Layout><Loading/></Layout>;
   const hasTabs=restaurant&&(restaurant.status==="PENDING"||restaurant.status==="APPROVED");
-  return <Layout><section className="page"><span className="eyebrow">ESPACE RESTAURATEUR</span><h1>Mon établissement</h1>
-    {hasTabs&&<div className="filters">
-      <button type="button" className={tab==="establishment"?"button small":"button small secondary"} onClick={()=>setTab("establishment")}>Mon établissement</button>
-      <button type="button" className={tab==="subscription"?"button small":"button small secondary"} onClick={()=>setTab("subscription")}>Abonnement</button>
-      <button type="button" className={tab==="notifications"?"button small":"button small secondary"} onClick={()=>setTab("notifications")}>🔔 Notifications{unread>0?` (${unread})`:""}</button>
+  return <Layout><section className="page"><h1>Mon établissement</h1>
+    {hasTabs&&<div className="tabs" role="tablist" aria-label="Sections de l’espace restaurateur">
+      <button type="button" role="tab" aria-selected={tab==="establishment"} className={tab==="establishment"?"active":undefined} onClick={()=>setTab("establishment")}>Mon établissement</button>
+      <button type="button" role="tab" aria-selected={tab==="subscription"} className={tab==="subscription"?"active":undefined} onClick={()=>setTab("subscription")}>Abonnement</button>
+      <button type="button" role="tab" aria-selected={tab==="notifications"} className={tab==="notifications"?"active":undefined} onClick={()=>setTab("notifications")}>Notifications{unread>0&&<span className="nav-count" aria-label={`${unread} non lues`}>{unread}</span>}</button>
     </div>}
     {(!hasTabs||tab==="establishment")&&<RestaurantApplication/>}
     {hasTabs&&tab==="subscription"&&<RestaurantSubscriptionPanel restaurant={restaurant} onChanged={loadRestaurant}/>}

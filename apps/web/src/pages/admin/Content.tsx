@@ -1,3 +1,4 @@
+import { Inbox } from "lucide-react";
 import { EVENT_CATEGORIES } from "@nour/shared";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../api";
@@ -10,8 +11,8 @@ export function AdminOutbox() {
   const [loading,setLoading]=useState(true);
   useEffect(()=>{api<any[]>("/admin/outbox").then(setItems).finally(()=>setLoading(false))},[]);
   const STATUS_LABEL:Record<string,string>={QUEUED:"En file d’attente",SENT:"Envoyé",FAILED:"Échec d’envoi"};
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Notifications SMS / e-mail</h1><p className="fine left">« Envoyé » signifie accepté par le fournisseur réel (Resend pour l’e-mail). Le SMS hors connexion reste simulé pour l’instant : il n’est jamais présenté comme envoyé.</p>
-    {loading?<Loading/>:items.length===0?<div className="empty"><span>◇</span><h2>Aucun message pour le moment</h2></div>:<div className="panel table">
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Notifications SMS / e-mail</h1><p className="fine left">« Envoyé » signifie accepté par le fournisseur réel (Resend pour l’e-mail). Le SMS hors connexion reste simulé pour l’instant : il n’est jamais présenté comme envoyé.</p>
+    {loading?<Loading/>:items.length===0?<div className="empty"><Inbox size={24} aria-hidden="true"/><h2>Aucun message pour le moment</h2></div>:<div className="panel table">
       <div className="table-row head"><span>Destinataire</span><span>Message</span><span>Statut</span></div>
       {items.map(m=><div key={m.id} className="table-row"><span><b>{m.channel}</b><small>{m.recipient}</small></span><span>{m.subject&&<b>{m.subject} — </b>}{m.body}</span><span>{STATUS_LABEL[m.status]??m.status}{m.error&&<small className="fine left">{m.error}</small>}</span></div>)}
     </div>}
@@ -37,7 +38,7 @@ export function AdminSettings() {
     finally{setBusy(null)}
   };
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Paramètres applicatifs</h1><p className="fine left">Valeurs provisoires du cahier des charges (verrou de paiement, quotas, drapeaux de fonction, contenu de la page « Le concept »…), modifiables ici sans redéploiement. Chaque modification est journalisée.</p>
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Paramètres applicatifs</h1><p className="fine left">Valeurs provisoires du cahier des charges (verrou de paiement, quotas, drapeaux de fonction, contenu de la page « Le concept »…), modifiables ici sans redéploiement. Chaque modification est journalisée.</p>
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="panel table">
       <div className="table-row head"><span>Paramètre</span><span>Valeur</span><span>Par défaut</span></div>
@@ -73,7 +74,7 @@ export function AdminTestimonials() {
     finally{setBusy(null)}
   };
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Témoignages</h1><p className="fine left">Jamais publié automatiquement, même soumis par un participant : chaque témoignage reste en brouillon tant qu’il n’est pas explicitement publié ici.</p>
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Témoignages</h1><p className="fine left">Jamais publié automatiquement, même soumis par un participant : chaque témoignage reste en brouillon tant qu’il n’est pas explicitement publié ici.</p>
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <form className="panel form-grid" onSubmit={create}>
       <div className="panel-title"><h2>Nouveau témoignage</h2></div>

@@ -17,7 +17,7 @@ test("parcours networking : accès direct sans validation ni questionnaire, puis
 
   await page.goto(`/events/${EVENT_SLUG}`);
   await expect(page.locator(".category-badge", { hasText: "NETWORKING" })).toBeVisible();
-  await expect(page.getByText("● Accès direct")).toBeVisible();
+  await expect(page.locator(".flow-badge", { hasText: "Accès direct" })).toBeVisible();
 
   // Arbitrage 12/E3 : aucun questionnaire à l'inscription networking — il n'est proposé, facultatif,
   // qu'une fois la place confirmée ; « S’inscrire » mène donc directement au paiement.

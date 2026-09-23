@@ -37,7 +37,7 @@ export function AdminStats() {
     const a=document.createElement("a");a.href=url;a.download=`statistiques-${range.since}-${range.until}.${ext}`;a.click();URL.revokeObjectURL(url);
   };
   if(!stats)return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><Loading/></div></section></Layout>;
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><span className="eyebrow">SUPER-ADMINISTRATION</span><h1>Statistiques</h1>
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Statistiques</h1>
     <div className="filters">{STATS_PRESETS.map(([label,fn])=><button key={label} type="button" className="button small secondary" onClick={()=>setRange(fn())}>{label}</button>)}</div>
     <div className="filters"><label>Depuis<input type="date" value={range.since} onChange={e=>setRange({...range,since:e.target.value})}/></label><label>Jusqu’au<input type="date" value={range.until} onChange={e=>setRange({...range,until:e.target.value})}/></label>
       <select value={scope} onChange={e=>setScope(e.target.value as any)}><option value="all">Participants + restaurateurs</option><option value="participants">Participants</option><option value="restaurants">Restaurateurs</option></select>

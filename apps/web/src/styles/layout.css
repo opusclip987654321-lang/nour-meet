@@ -1,0 +1,306 @@
+/* Structure commune : conteneurs, en-tête (avec menu mobile), pied de page, sections.
+   Règle anti-débordement : toute colonne de grille ou de flex qui contient du texte ou des
+   médias a min-width:0 (ou minmax(0,1fr)) — sans quoi la colonne s'élargit à la taille de son
+   contenu et provoque un défilement horizontal sur mobile. */
+
+.container {
+  width: min(100% - 2 * var(--gutter), var(--container));
+  margin-inline: auto;
+}
+
+.section,
+.page {
+  width: min(100% - 2 * var(--gutter), var(--container));
+  margin-inline: auto;
+  padding-block: clamp(var(--s-7), 7vw, var(--s-9));
+  min-width: 0;
+}
+
+.page {
+  padding-block: clamp(var(--s-6), 5vw, var(--s-8));
+}
+
+.page > h1 {
+  margin-bottom: var(--s-3);
+}
+
+.page-lead {
+  max-width: 62ch;
+  color: var(--ink-2);
+  font-size: var(--fs-lg);
+  margin: 0 0 var(--s-6);
+}
+
+.section-title {
+  display: grid;
+  gap: var(--s-3);
+  max-width: 720px;
+  margin-bottom: clamp(var(--s-5), 4vw, var(--s-7));
+}
+
+.section-title p {
+  color: var(--ink-2);
+  font-size: var(--fs-lg);
+  margin: 0;
+}
+
+.section-title.row {
+  max-width: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--s-3) var(--s-5);
+}
+
+.section-title.row > div {
+  display: grid;
+  gap: var(--s-3);
+  max-width: 720px;
+}
+
+/* ---------- En-tête ---------- */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: var(--header-h);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+
+.site-header-inner {
+  height: 100%;
+  width: min(100% - 2 * var(--gutter), var(--container));
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s-6);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 44px;
+  color: var(--night);
+}
+
+.logo svg {
+  height: 26px;
+  width: auto;
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.site-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--s-3);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
+}
+
+.site-nav a:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+.site-nav a.active {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 0 0 auto;
+}
+
+.member-name {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.menu-toggle {
+  display: none;
+}
+
+.mobile-menu {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .site-nav,
+  .header-actions .member-name,
+  .header-actions .desktop-only {
+    display: none;
+  }
+
+  .site-header-inner {
+    justify-content: space-between;
+  }
+
+  .menu-toggle {
+    display: inline-grid;
+  }
+
+  .mobile-menu {
+    position: fixed;
+    inset: var(--header-h) 0 0 0;
+    z-index: 49;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-1);
+    padding: var(--s-4) var(--gutter) calc(var(--s-6) + env(safe-area-inset-bottom));
+    background: var(--surface);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .mobile-menu[hidden] {
+    display: none;
+  }
+
+  .mobile-menu a:not(.button),
+  .mobile-menu .menu-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 56px;
+    padding: 0 var(--s-2);
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    background: transparent;
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-size: 1.375rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .mobile-menu a.active {
+    color: var(--night-2);
+  }
+
+  .mobile-menu .button {
+    margin-top: var(--s-5);
+    min-height: 52px;
+  }
+
+  .mobile-menu .menu-meta {
+    margin-top: var(--s-4);
+    color: var(--ink-3);
+    font-size: var(--fs-sm);
+  }
+
+  body.menu-open {
+    overflow: hidden;
+  }
+}
+
+/* ---------- Pied de page ---------- */
+.site-footer {
+  background: var(--night-3);
+  color: var(--on-night-2);
+  margin-top: auto;
+}
+
+.site-footer-inner {
+  width: min(100% - 2 * var(--gutter), var(--container));
+  margin-inline: auto;
+  padding-block: var(--s-8) var(--s-6);
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
+  gap: var(--s-6);
+}
+
+.site-footer .logo {
+  color: var(--on-night);
+}
+
+.site-footer p {
+  max-width: 36ch;
+  margin: var(--s-4) 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.site-footer h2 {
+  margin: 0 0 var(--s-3);
+  color: var(--on-night);
+  font-family: var(--font-text);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.site-footer ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.site-footer li a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  color: var(--on-night-2);
+  font-size: var(--fs-sm);
+}
+
+.site-footer li a:hover {
+  color: var(--on-night);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.site-footer-bottom {
+  width: min(100% - 2 * var(--gutter), var(--container));
+  margin-inline: auto;
+  padding-block: var(--s-5);
+  border-top: 1px solid var(--on-night-line);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--s-2) var(--s-5);
+  font-size: var(--fs-xs);
+}
+
+.site-footer :focus-visible {
+  outline-color: var(--saffron);
+}
+
+@media (max-width: 900px) {
+  .site-footer-inner {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .site-footer-inner > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 340px) {
+  .site-footer-inner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
