@@ -8,7 +8,9 @@ import { readFileSync } from "node:fs";
 import { createHmac } from "node:crypto";
 import path from "node:path";
 
+// Variable d'environnement d'abord (CI : secrets GitHub), sinon le fichier .env local.
 function readEnvValue(key: string): string {
+  if (process.env[key]) return process.env[key]!;
   const envPath = path.resolve(process.cwd(), "..", "..", ".env");
   const raw = readFileSync(envPath, "utf8");
   const match = raw.match(new RegExp(`^${key}=(.+)$`, "m"));
