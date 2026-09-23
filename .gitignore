@@ -36,3 +36,7 @@ apps/api/public/uploads/*
 # Fichiers sensibles
 *recovery_code*
 *recovery_codes*
+
+# Marqueurs écrits par scripts/deploy.sh sur le serveur (version précédente / dernière version saine)
+.last_deployed_*
+.last_good_*
