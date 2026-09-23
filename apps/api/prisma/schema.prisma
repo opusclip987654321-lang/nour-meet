@@ -129,6 +129,7 @@ model User {
   alternativeOffers AlternativeOffer[]
   shareLinks       ShareLink[]
   articles         Article[]
+  legalAcceptances LegalAcceptance[]
 }
 
 model Profile {
@@ -856,4 +857,26 @@ model ArticleReviewLog {
   toStatus   ArticleStatus
   note       String?
   createdAt  DateTime      @default(now())
+}
+
+// Preuve d'acceptation des CGU/CGV (quoi, quelle version, quand, depuis où). Jamais modifiée ni
+// supprimée, y compris lors d'une suppression de compte : c'est une preuve contractuelle, au même
+// titre que Payment. "context" précise l'occasion (ex. "profile", "application:<id>").
+model LegalAcceptance {
+  id         String        @id @default(cuid())
+  userId     String
+  user       User          @relation(fields: [userId], references: [id])
+  document   LegalDocument
+  version    String
+  context    String
+  ip         String?
+  userAgent  String?
+  acceptedAt DateTime      @default(now())
+
+  @@index([userId, document, version])
+}
+
+enum LegalDocument {
+  CGU
+  CGV
 }

@@ -7,13 +7,13 @@ import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import ExcelJS from "exceljs";
 import Stripe from "stripe";
-import { PrismaClient, Prisma, UserRole, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, EventStatus, QuotaCategory, AlternativeOfferStatus, SubscriptionStatus } from "@prisma/client";
+import { PrismaClient, Prisma, UserRole, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, EventStatus, QuotaCategory, AlternativeOfferStatus, SubscriptionStatus, LegalDocument } from "@prisma/client";
 import { z, ZodError } from "zod";
 import { randomUUID } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES, EVENT_ZONES, regionOfZone, eventRequiresScreening, suggestedFlowForCategory } from "@nour/shared";
+import { EVENT_CATEGORIES, EVENT_CATEGORY_NAMES, EVENT_ZONES, regionOfZone, eventRequiresScreening, suggestedFlowForCategory, LEGAL_VERSIONS, MINIMUM_AGE, isAdult } from "@nour/shared";
 import { env } from "./env.js";
 import { paymentDeadline, paymentLockExpiry, interviewRetryDate, refundEligibility, currentYearMonth, resolvePriceCents, eventsOverlap } from "./domain.js";
 import { normalizePhoneNumber } from "./phone.js";
@@ -60,7 +60,11 @@ function withConnectionLimit(databaseUrl: string, limit: number): string {
 }
 const perWorkerConnectionLimit = Math.max(2, Math.floor(env.DATABASE_CONNECTION_LIMIT_TOTAL / workerCount));
 const prisma = new PrismaClient({ datasourceUrl: withConnectionLimit(env.DATABASE_URL, perWorkerConnectionLimit) });
-const app = Fastify({ logger: true });
+// En production l'API n'est joignable que via Caddy (port publié sur 127.0.0.1 uniquement) : faire
+// confiance à exactement un saut de proxy donne la vraie IP du client (dernière entrée de
+// X-Forwarded-For, ajoutée par Caddy) sans permettre de l'usurper. Sans cela, request.ip vaut l'IP
+// du conteneur Caddy pour tout le monde — et le rate-limit (OTP compris) devient partagé par tous.
+const app = Fastify({ logger: true, trustProxy: (_address: string, hop: number) => hop < 1 });
 // Under node:cluster every worker runs this whole file independently (see
 // cluster-entry.ts) — without this guard, each of the setInterval(...) background
 // jobs below would fire once per worker every minute instead of once total.
@@ -350,6 +354,17 @@ const assertEventAccess = async (request: FastifyRequest, eventId: string) => {
 };
 const ownRestaurant = (token: TokenUser) => token.role === UserRole.ORGANIZER ? prisma.restaurant.findUniqueOrThrow({ where: { ownerId: token.sub } }) : Promise.resolve(null);
 const profileAge = (birthDate?: Date | null) => birthDate ? Math.floor((Date.now() - birthDate.getTime()) / 31_557_600_000) : null;
+
+// Acceptation des textes juridiques (CGU à la complétion du profil, CGV avant chaque paiement) :
+// enregistrée avec la version en vigueur (LEGAL_VERSIONS), l'horodatage, l'IP et le navigateur,
+// pour pouvoir prouver quelle version exacte a été acceptée, par qui et quand.
+const hasAcceptedCurrent = async (userId: string, document: LegalDocument, context?: string) =>
+  !!(await prisma.legalAcceptance.findFirst({ where: { userId, document, version: LEGAL_VERSIONS[document], ...(context ? { context } : {}) }, select: { id: true } }));
+const recordAcceptance = async (request: FastifyRequest, userId: string, document: LegalDocument, context: string) => {
+  if (await hasAcceptedCurrent(userId, document, context)) return;
+  await prisma.legalAcceptance.create({ data: { userId, document, version: LEGAL_VERSIONS[document], context, ip: request.ip, userAgent: request.headers["user-agent"]?.slice(0, 500) } });
+};
+const ADULT_ONLY_ERROR = `Nūr Meet est réservé aux personnes de ${MINIMUM_AGE} ans et plus : renseignez votre date de naissance dans votre profil.`;
 const defaultCategoryImage = (category: string) => EVENT_CATEGORIES.find(c => c.name === category)?.defaultImage ?? EVENT_CATEGORIES[0].defaultImage;
 // Fenêtre d'offre de liste d'attente (voir AppSetting WAITLIST_OFFER_WINDOW_HOURS) : la durée
 // exacte est configurable, jamais supposée fixe dans le message envoyé au participant.
@@ -502,13 +517,19 @@ app.get("/me", { preHandler: auth }, async (request) => {
   // APPROVED, REJECTED, SUSPENDED) : c'est ce champ, jamais le rôle, qui bloque la participation aux
   // événements (le rôle ne devient ORGANIZER qu'à l'approbation, bien après la simple candidature).
   const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: user.id }, select: { id: true } });
-  return { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profile: user.profile, age: profileAge(user.profile?.birthDate), hasRestaurant: !!restaurant };
+  const cguAccepted = await hasAcceptedCurrent(user.id, LegalDocument.CGU);
+  return { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profile: user.profile, age: profileAge(user.profile?.birthDate), hasRestaurant: !!restaurant, cguAccepted };
 });
 
-app.patch("/me/profile", { preHandler: auth }, async (request) => {
-  const input = z.object({ displayName: z.string().min(2), email: z.string().email().nullable().optional(), birthDate: z.string().optional(), city: z.string().min(2), profession: z.string().optional(), interests: z.array(z.string()).max(12), bio: z.string().max(600).optional(), quotaCategory: z.enum(["HOMME", "FEMME"]).nullable().optional() }).parse(request.body);
+// CGU §2 : la date de naissance est obligatoire et doit correspondre à une personne majeure ; les
+// CGU en vigueur doivent avoir été acceptées (une fois par version, pas à chaque modification).
+app.patch("/me/profile", { preHandler: auth }, async (request, reply) => {
+  const input = z.object({ displayName: z.string().min(2), email: z.string().email().nullable().optional(), birthDate: z.string().refine(v => !Number.isNaN(new Date(v).getTime()) && new Date(v).getUTCFullYear() >= 1900, "Date de naissance invalide"), city: z.string().min(2), profession: z.string().optional(), interests: z.array(z.string()).max(12), bio: z.string().max(600).optional(), quotaCategory: z.enum(["HOMME", "FEMME"]).nullable().optional(), acceptCgu: z.boolean().optional() }).parse(request.body);
   const userId = currentId(request);
-  const profileData = { birthDate: input.birthDate ? new Date(input.birthDate) : null, city: input.city, profession: input.profession, interests: input.interests, bio: input.bio, quotaCategory: input.quotaCategory, profileCompleted: true };
+  if (!isAdult(input.birthDate)) return reply.code(422).send({ error: `Nūr Meet est réservé aux personnes de ${MINIMUM_AGE} ans et plus.` });
+  if (!input.acceptCgu && !(await hasAcceptedCurrent(userId, LegalDocument.CGU))) return reply.code(422).send({ error: "Vous devez accepter les conditions générales d’utilisation pour continuer." });
+  if (input.acceptCgu) await recordAcceptance(request, userId, LegalDocument.CGU, "profile");
+  const profileData = { birthDate: new Date(input.birthDate), city: input.city, profession: input.profession, interests: input.interests, bio: input.bio, quotaCategory: input.quotaCategory, profileCompleted: true };
   const user = await prisma.user.update({ where: { id: userId }, data: { displayName: input.displayName, email: input.email, profile: { upsert: { create: profileData, update: profileData } } }, include: { profile: true } });
   await audit(userId, "UPDATE_PROFILE", "User", userId);
   return user;
@@ -675,6 +696,8 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   const requiresScreening = eventRequiresScreening(event);
   const profile = await prisma.profile.findUnique({ where: { userId } });
   if (!profile?.profileCompleted) return reply.code(409).send({ error: "Complétez votre profil avant de vous inscrire" });
+  // Profils complétés avant l'obligation de date de naissance : bloqués ici jusqu'à mise à jour.
+  if (!isAdult(profile.birthDate)) return reply.code(409).send({ error: ADULT_ONLY_ERROR });
   if (requiresScreening && !profile.validatedAt) return reply.code(409).send({ error: "Votre profil doit d’abord être validé lors d’un entretien avant de vous inscrire à un événement de ce type" });
   const existing = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
   if (existing) return reply.code(409).send({ error: "Vous êtes déjà inscrit(e) à cet événement", application: existing });
@@ -866,6 +889,13 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
   const userId = currentId(request);
   const application = await prisma.application.findFirstOrThrow({ where: { id, userId }, include: { event: { include: { priceTiers: true } }, reservation: true } });
   if (application.status !== ApplicationStatus.PAYMENT_PENDING) return reply.code(409).send({ error: "Cette candidature n’est pas en attente de paiement" });
+  // CGV A3 : la réservation ne devient ferme qu'après acceptation des CGV. Exigée avant de poser le
+  // moindre verrou ou PaymentIntent, y compris pour une soirée gratuite.
+  const { acceptCgv } = z.object({ acceptCgv: z.boolean().optional() }).parse(request.body ?? {});
+  if (!acceptCgv && !(await hasAcceptedCurrent(userId, LegalDocument.CGV, `application:${id}`))) return reply.code(422).send({ error: "Vous devez accepter les conditions générales de vente avant de réserver.", cgvRequired: true });
+  const payerProfile = await prisma.profile.findUnique({ where: { userId }, select: { birthDate: true } });
+  if (!isAdult(payerProfile?.birthDate)) return reply.code(409).send({ error: ADULT_ONLY_ERROR });
+  if (acceptCgv) await recordAcceptance(request, userId, LegalDocument.CGV, `application:${id}`);
   if (!application.eventId || !application.event) return reply.code(409).send({ error: "Cette candidature n’est liée à aucun événement" });
   const event = application.event;
 

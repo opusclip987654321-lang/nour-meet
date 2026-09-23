@@ -89,7 +89,7 @@ export const applyToEvent = (eventId: string, token: string, body: Record<string
 // faute de paiement réellement capturé), puis envoie un vrai webhook signé — jamais un raccourci
 // qui écrirait directement Payment.status en base.
 export async function payAndConfirm(applicationId: string, token: string) {
-  const intent = await api<{ clientSecret: string }>(`/applications/${applicationId}/payment-intent`, { method: "POST" }, token);
+  const intent = await api<{ clientSecret: string }>(`/applications/${applicationId}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, token);
   const paymentIntentId = intent.body.clientSecret.split("_secret_")[0];
   await stripe.paymentIntents.confirm(paymentIntentId, { payment_method: "pm_card_visa" });
   const reservation = await prisma.reservation.findUniqueOrThrow({ where: { applicationId } });
@@ -105,7 +105,7 @@ export async function payAndConfirm(applicationId: string, token: string) {
 export async function makeValidatedParticipant(displayName = "TestUser", quotaCategory?: "HOMME" | "FEMME") {
   const phone = testPhone();
   const token = await loginOrRegister(phone, displayName);
-  await api("/me/profile", { method: "PATCH", body: JSON.stringify({ displayName, city: "Paris", interests: [], quotaCategory: quotaCategory ?? null }) }, token);
+  await api("/me/profile", { method: "PATCH", body: JSON.stringify({ birthDate: "1995-01-01", acceptCgu: true, displayName, city: "Paris", interests: [], quotaCategory: quotaCategory ?? null }) }, token);
   const { body: interview } = await api<{ id: string }>("/me/global-interview", { method: "POST", body: JSON.stringify({ motivation: "Motivation suffisamment longue pour passer la validation du formulaire soumis." }) }, token);
   const admin = await adminToken();
   await api(`/admin/global-interviews/${interview.id}/decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
@@ -117,6 +117,8 @@ export async function makeValidatedParticipant(displayName = "TestUser", quotaCa
 // données), jamais les comptes de démonstration réels (Walid, Maison Amana, Sofia, Karim).
 export async function deleteTestUsers(userIds: string[]) {
   for (const id of userIds) {
+    // LegalAcceptance n'est volontairement pas en cascade (preuve contractuelle) : à retirer d'abord.
+    await prisma.legalAcceptance.deleteMany({ where: { userId: id } });
     await prisma.user.delete({ where: { id } }).catch(() => {});
   }
 }

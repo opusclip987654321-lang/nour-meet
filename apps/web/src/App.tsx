@@ -3,7 +3,7 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, usePa
 import jsQR from "jsqr";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
-import { EVENT_CATEGORIES, EVENT_ZONES, SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening } from "@nour/shared";
+import { EVENT_CATEGORIES, EVENT_ZONES, SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening, MINIMUM_AGE, isAdult } from "@nour/shared";
 import type { PublicEvent, SessionUser, ScreeningAnswers, NetworkingAnswers, Paginated } from "@nour/shared";
 import { API_URL, api, getToken, setToken } from "./api";
 import { MentionsLegales, CGU, CGV, Confidentialite, Cookies } from "./legal";
@@ -301,16 +301,24 @@ function PaymentForm({ amountCents, onSuccess, onCancel }: { amountCents: number
 function PaymentModal({ applicationId, eventId, amountCents, onClose, onConfirmed, onWaitlisted }: { applicationId: string; eventId: string; amountCents: number; onClose: () => void; onConfirmed: () => void; onWaitlisted: () => void }) {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [phase, setPhase] = useState<"loading" | "ready" | "confirming" | "success" | "timeout">("loading");
+  const [phase, setPhase] = useState<"terms" | "loading" | "ready" | "confirming" | "success" | "timeout">("terms");
+  const [acceptCgv, setAcceptCgv] = useState(false);
+  const free = amountCents === 0;
 
-  useEffect(() => {
-    // Ne garantit jamais une place avant cet appel précis (§5) : c'est ici, et seulement ici, qu'un
-    // verrou technique court est posé — si la place vient d'être prise entre l'inscription et cet
-    // instant, la personne rejoint automatiquement la liste d'attente plutôt que d'échouer sans suite.
-    api<{ clientSecret: string }>(`/applications/${applicationId}/payment-intent`, { method: "POST" })
-      .then(r => { setClientSecret(r.clientSecret); setPhase("ready"); })
-      .catch((err: any) => { if (err?.waitlisted) { onWaitlisted(); onClose(); } else setError((err as Error).message); });
-  }, [applicationId]);
+  // CGV A3 : la réservation n'est ferme qu'après acceptation des CGV — étape obligatoire avant tout
+  // appel à l'API, y compris pour une soirée gratuite (qui passe donc aussi par cette fenêtre).
+  // Ne garantit jamais une place avant cet appel précis (§5) : c'est ici, et seulement ici, qu'un
+  // verrou technique court est posé — si la place vient d'être prise entre l'inscription et cet
+  // instant, la personne rejoint automatiquement la liste d'attente plutôt que d'échouer sans suite.
+  const acceptAndContinue = () => {
+    setError(""); setPhase("loading");
+    api<{ clientSecret?: string; free?: boolean; confirmed?: boolean }>(`/applications/${applicationId}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) })
+      .then(r => {
+        if (r.free) { setPhase("success"); setTimeout(onConfirmed, 1200); return; }
+        setClientSecret(r.clientSecret!); setPhase("ready");
+      })
+      .catch((err: any) => { if (err?.waitlisted) { onWaitlisted(); onClose(); } else { setError((err as Error).message); setPhase("terms"); } });
+  };
 
   const handleSuccess = async () => {
     setPhase("confirming");
@@ -326,12 +334,24 @@ function PaymentModal({ applicationId, eventId, amountCents, onClose, onConfirme
 
   return <div className="modal-overlay" role="dialog" aria-modal="true">
     <div className="modal payment-modal">
-      <div className="modal-head"><h2>Paiement sécurisé</h2><button type="button" className="link-button" onClick={onClose} aria-label="Fermer">×</button></div>
-      <p className="payment-amount">Montant à régler : <b>{money(amountCents)}</b></p>
+      <div className="modal-head"><h2>{free ? "Confirmer ma place" : "Paiement sécurisé"}</h2><button type="button" className="link-button" onClick={onClose} aria-label="Fermer">×</button></div>
+      <p className="payment-amount">{free ? <>Soirée <b>gratuite</b></> : <>Montant à régler : <b>{money(amountCents)}</b> TTC, frais inclus</>}</p>
       {error && <Notice kind="error">{error}</Notice>}
-      {phase === "loading" && <div className="calendar-state"><div className="spinner small"/><span>Chargement du module de paiement…</span></div>}
+      {phase === "terms" && <div className="stack">
+        <ul className="fine left" style={{ margin: 0, paddingLeft: 18 }}>
+          <li>Annulation gratuite jusqu’à 24 heures avant le début de l’événement{free ? "" : ", avec remboursement intégral"}.</li>
+          <li>{free ? "Passé ce délai, merci de prévenir si vous ne pouvez pas venir." : "À 24 heures ou moins, ou en cas d’absence, aucun remboursement."}</li>
+          {!free && <li>Billet pour une date déterminée : pas de délai légal de rétractation (art. L.221-28 du Code de la consommation).</li>}
+        </ul>
+        <label className="consent-check"><input type="checkbox" checked={acceptCgv} onChange={e => setAcceptCgv(e.target.checked)}/> <span>J’ai lu et j’accepte les <Link to="/legal/cgv" target="_blank">conditions générales de vente</Link>, notamment la politique d’annulation.</span></label>
+        <div className="decision-buttons">
+          <button type="button" className="button secondary" onClick={onClose}>Annuler</button>
+          <button type="button" className="button" disabled={!acceptCgv} onClick={acceptAndContinue}>{free ? "Confirmer ma place" : "Continuer vers le paiement"}</button>
+        </div>
+      </div>}
+      {phase === "loading" && <div className="calendar-state"><div className="spinner small"/><span>{free ? "Confirmation de votre place…" : "Chargement du module de paiement…"}</span></div>}
       {phase === "confirming" && <div className="calendar-state"><div className="spinner small"/><span>Confirmation du paiement…</span></div>}
-      {phase === "success" && <Notice kind="success">Paiement confirmé ! Votre billet est prêt.</Notice>}
+      {phase === "success" && <Notice kind="success">{free ? "Place confirmée ! Votre billet est prêt." : "Paiement confirmé ! Votre billet est prêt."}</Notice>}
       {phase === "timeout" && <><Notice kind="error">Le paiement est en cours de confirmation. Actualisez la page dans un instant.</Notice><button className="button full" onClick={onClose}>Fermer</button></>}
       {phase === "ready" && clientSecret && <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: "night", variables: { colorPrimary: "#cba969" } } }}>
         <PaymentForm amountCents={amountCents} onSuccess={handleSuccess} onCancel={onClose}/>
@@ -411,7 +431,7 @@ function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { 
   // (§5) : le clic sur "Payer" est ce qui pose réellement le verrou, via PaymentModal.
   if (application.status === "PAYMENT_PENDING") return <div className="payment-block">
     <Notice kind="success">{application.reservation ? `Votre place est retenue quelques minutes (jusqu’au ${dateTime(application.reservation.expiresAt)}) : finalisez votre paiement.` : "Vous pouvez régler votre billet dès maintenant."}</Notice>
-    <button className="button full" onClick={() => setShowPayment(true)}>Payer par carte · {money(event.priceCents)}</button>
+    <button className="button full" onClick={() => setShowPayment(true)}>{event.priceCents === 0 ? "Confirmer ma place (gratuit)" : `Payer par carte · ${money(event.priceCents)}`}</button>
     {showPayment && <PaymentModal applicationId={application.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }} onWaitlisted={onWaitlisted}/>}
   </div>;
   if (application.call) return <div className="call-scheduled"><span className="eyebrow">ENTRETIEN PROGRAMMÉ</span><strong>{dateTime(application.call.startsAt)}</strong><p>L’organisateur vous appellera à cette heure, puis vous serez informé(e) de sa décision.</p></div>;
@@ -602,9 +622,19 @@ function Login() {
 }
 
 function ProfileEditor({onSaved}:{onSaved:()=>void}) {
-  const {user}=useAuth(); const [form,setForm]=useState({displayName:user?.displayName??"",email:user?.email??"",birthDate:user?.profile?.birthDate?String(user.profile.birthDate).slice(0,10):"",city:user?.profile?.city??"",profession:user?.profile?.profession??"",interests:(user?.profile?.interests??[]).join(", "),bio:user?.profile?.bio??"",quotaCategory:user?.profile?.quotaCategory??""});const [message,setMessage]=useState("");
+  const {user}=useAuth(); const [form,setForm]=useState({displayName:user?.displayName??"",email:user?.email??"",birthDate:user?.profile?.birthDate?String(user.profile.birthDate).slice(0,10):"",city:user?.profile?.city??"",profession:user?.profile?.profession??"",interests:(user?.profile?.interests??[]).join(", "),bio:user?.profile?.bio??"",quotaCategory:user?.profile?.quotaCategory??""});const [message,setMessage]=useState("");const [error,setError]=useState("");
   const [photoBusy,setPhotoBusy]=useState(false);
-  const save=async(e:FormEvent)=>{e.preventDefault();await api("/me/profile",{method:"PATCH",body:JSON.stringify({...form,email:form.email||null,quotaCategory:form.quotaCategory||null,interests:form.interests.split(",").map((x:string)=>x.trim()).filter(Boolean)})});setMessage("Profil enregistré.");onSaved()};
+  // CGU §2 : date de naissance obligatoire (personne majeure) et acceptation des CGU en vigueur, une
+  // seule fois par version — la case disparaît dès que l'API confirme l'acceptation (user.cguAccepted).
+  const [acceptCgu,setAcceptCgu]=useState(false);
+  const maxBirthDate=useMemo(()=>{const d=new Date();d.setFullYear(d.getFullYear()-MINIMUM_AGE);return d.toISOString().slice(0,10)},[]);
+  const save=async(e:FormEvent)=>{
+    e.preventDefault();setMessage("");setError("");
+    if(!isAdult(form.birthDate)){setError(`Nūr Meet est réservé aux personnes de ${MINIMUM_AGE} ans et plus.`);return}
+    if(!user?.cguAccepted&&!acceptCgu){setError("Vous devez accepter les conditions générales d’utilisation pour continuer.");return}
+    try{await api("/me/profile",{method:"PATCH",body:JSON.stringify({...form,email:form.email||null,quotaCategory:form.quotaCategory||null,interests:form.interests.split(",").map((x:string)=>x.trim()).filter(Boolean),...(acceptCgu?{acceptCgu:true}:{})})});setMessage("Profil enregistré.");onSaved()}
+    catch(err){setError((err as Error).message)}
+  };
   const uploadPhoto=async(file:File)=>{
     setPhotoBusy(true);setMessage("");
     try{const body=new FormData();body.append("file",file);await api("/me/profile-photo",{method:"POST",body});onSaved()}
@@ -617,13 +647,13 @@ function ProfileEditor({onSaved}:{onSaved:()=>void}) {
     catch(err){setMessage((err as Error).message)}
     finally{setPhotoBusy(false)}
   };
-  return <form className="panel form-grid" onSubmit={save}><div className="panel-title"><h2>Mon profil</h2><span>Informations privées</span></div>{message&&<Notice kind="success">{message}</Notice>}
+  return <form className="panel form-grid" onSubmit={save}><div className="panel-title"><h2>Mon profil</h2><span>Informations privées</span></div>{message&&<Notice kind="success">{message}</Notice>}{error&&<Notice kind="error">{error}</Notice>}
     <div className="wide profile-photo-editor"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><div>
       <label className="button small secondary">{photoBusy?"Envoi…":user?.profile?.photoUrl?"Changer la photo":"Ajouter une photo"}<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={photoBusy} onChange={e=>{const f=e.target.files?.[0];if(f)uploadPhoto(f);e.target.value=""}}/></label>
       {user?.profile?.photoUrl&&<button type="button" className="link-button" disabled={photoBusy} onClick={removePhoto}>Retirer</button>}
       <p className="fine left">JPEG, PNG ou WEBP · 5 Mo maximum. Visible par les personnes avec qui vous échangez.</p>
     </div></div>
-    <label>Prénom ou pseudonyme<input value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})}/></label><label>E-mail<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Date de naissance<input type="date" value={form.birthDate} onChange={e=>setForm({...form,birthDate:e.target.value})}/></label><label>Ville<input value={form.city} onChange={e=>setForm({...form,city:e.target.value})}/></label><label>Profession<input value={form.profession} onChange={e=>setForm({...form,profession:e.target.value})}/></label><label>Centres d’intérêt<input value={form.interests} onChange={e=>setForm({...form,interests:e.target.value})}/></label><label>Sexe<div className="chip-toggle">{([["","Non renseigné"],["HOMME","Homme"],["FEMME","Femme"]] as const).map(([value,label])=><button key={value} type="button" className={"chip"+(form.quotaCategory===value?" active":"")} onClick={()=>setForm({...form,quotaCategory:value})}>{label}</button>)}</div></label><label className="wide">Biographie<textarea value={form.bio} onChange={e=>setForm({...form,bio:e.target.value})}/></label><button className="button">Enregistrer</button></form>;
+    <label>Prénom ou pseudonyme<input value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})}/></label><label>E-mail<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Date de naissance<input type="date" required max={maxBirthDate} value={form.birthDate} onChange={e=>setForm({...form,birthDate:e.target.value})}/></label><label>Ville<input value={form.city} onChange={e=>setForm({...form,city:e.target.value})}/></label><label>Profession<input value={form.profession} onChange={e=>setForm({...form,profession:e.target.value})}/></label><label>Centres d’intérêt<input value={form.interests} onChange={e=>setForm({...form,interests:e.target.value})}/></label><label>Sexe<div className="chip-toggle">{([["","Non renseigné"],["HOMME","Homme"],["FEMME","Femme"]] as const).map(([value,label])=><button key={value} type="button" className={"chip"+(form.quotaCategory===value?" active":"")} onClick={()=>setForm({...form,quotaCategory:value})}>{label}</button>)}</div></label><label className="wide">Biographie<textarea value={form.bio} onChange={e=>setForm({...form,bio:e.target.value})}/></label>{!user?.cguAccepted&&<label className="wide consent-check"><input type="checkbox" checked={acceptCgu} onChange={e=>setAcceptCgu(e.target.checked)}/> <span>Je certifie avoir {MINIMUM_AGE} ans ou plus et j’accepte les <Link to="/legal/cgu" target="_blank">conditions générales d’utilisation</Link>. Mes données sont traitées conformément à la <Link to="/legal/confidentialite" target="_blank">politique de confidentialité</Link>.</span></label>}<button className="button">Enregistrer</button></form>;
 }
 
 // Droits RGPD (§20) : export en un clic, et suppression en deux étapes (jamais un seul clic pour
@@ -930,17 +960,6 @@ function Dashboard() {
     catch(err){setMessage({kind:"error",text:(err as Error).message})}
     finally{setBusyId(null)}
   };
-  // Cahier des charges consolidé final (2026-09-20, section 3) : une soirée gratuite ne passe jamais
-  // par Stripe (aucun PaymentIntent à 0 €) — confirmation directe, billet immédiat si une place est
-  // réellement disponible, sinon liste d'attente comme pour un événement payant.
-  const confirmFree=async(appId:string)=>{
-    setBusyId(appId);setMessage(null);
-    try{
-      const result=await api<{free:boolean;confirmed:boolean}>(`/applications/${appId}/payment-intent`,{method:"POST"});
-      setMessage({kind:"success",text:result.confirmed?"Votre billet gratuit est confirmé.":"Votre place a déjà été confirmée."});await load();
-    }catch(err){setMessage({kind:"error",text:(err as Error).message});await load()}
-    finally{setBusyId(null)}
-  };
   const respondOffer=async(offerId:string, accept:boolean)=>{
     setBusyId(offerId);setMessage(null);
     try{await api(`/alternative-offers/${offerId}/respond`,{method:"POST",body:JSON.stringify({accept})});setMessage({kind:"success",text:accept?"Place réservée : réglez votre billet avant expiration.":"Proposition refusée."});await load()}
@@ -951,7 +970,7 @@ function Dashboard() {
   const ticketsLabel=tickets.length===1?"Mon billet":"Mes billets";
   const tabs=[["interview",user?.profile?.validatedAt?"Entretien ✓":"Entretien"],["reservations","Réservations"],["tickets",ticketsLabel],["profile","Profil"],["notifications","Notifications"]];
   const titles:Record<string,string>={interview:"Entretien de validation",reservations:"Mes événements",tickets:ticketsLabel,profile:"Mon profil",notifications:"Notifications"};
-  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><span>◇</span><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=>{const offersForEvent=pendingOffers.filter(o=>o.originalEventId===a.eventId);return <article className="reservation" key={a.id}><img className="reservation-photo" src={imgUrl(a.event.imageUrl)} alt=""/><div><div className="admin-event-meta"><CategoryBadge category={a.event.category} className="inline"/><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small></div><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}{offersForEvent.map(offer=><article className="alt-offer nested" key={offer.id}><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{offer.alternativeEvent.title}</h3><p>{dateTime(offer.alternativeEvent.startsAt)} · {offer.alternativeEvent.district}</p><p><b>{money(offer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,false)}>Pas intéressé</button></div></article>)}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&(a.event.priceCents===0?<button className="button" disabled={busyId===a.id} onClick={()=>confirmFree(a.id)}>{busyId===a.id?"…":"Confirmer ma place (gratuit)"}</button>:<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>)}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler ma participation</button>}</div></article>;})}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{t.reservation.event.controllerRestaurant&&<p>{t.reservation.event.controllerRestaurant.name}</p>}<p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/><PrivacyPanel/></div>}{tab==="notifications"&&<NotificationList items={notifications} onRead={id=>setNotifications(notifications.map(n=>n.id===id?{...n,readAt:new Date().toISOString()}:n))}/>}</div></section>
+  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{user?.profile?.validatedAt?"Profil validé":"Profil à compléter"}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{label}<span>›</span></button>)}</aside><div className="dashboard-content"><span className="eyebrow">ESPACE PARTICIPANT</span><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><span>◇</span><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=>{const offersForEvent=pendingOffers.filter(o=>o.originalEventId===a.eventId);return <article className="reservation" key={a.id}><img className="reservation-photo" src={imgUrl(a.event.imageUrl)} alt=""/><div><div className="admin-event-meta"><CategoryBadge category={a.event.category} className="inline"/><small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small></div><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}{offersForEvent.map(offer=><article className="alt-offer nested" key={offer.id}><span className="eyebrow">ÉVÉNEMENT ALTERNATIF PROPOSÉ</span><h3>{offer.alternativeEvent.title}</h3><p>{dateTime(offer.alternativeEvent.startsAt)} · {offer.alternativeEvent.district}</p><p><b>{money(offer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,false)}>Pas intéressé</button></div></article>)}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&(a.event.priceCents===0?<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:0})}>Confirmer ma place (gratuit)</button>:<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>)}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler ma participation</button>}</div></article>;})}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.map(t=><article className="ticket" key={t.id}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{t.reservation.event.controllerRestaurant&&<p>{t.reservation.event.controllerRestaurant.name}</p>}<p>{t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>)}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/><PrivacyPanel/></div>}{tab==="notifications"&&<NotificationList items={notifications} onRead={id=>setNotifications(notifications.map(n=>n.id===id?{...n,readAt:new Date().toISOString()}:n))}/>}</div></section>
   {payingFor&&<PaymentModal applicationId={payingFor.applicationId} eventId={payingFor.eventId} amountCents={payingFor.amountCents} onClose={()=>setPayingFor(null)} onConfirmed={()=>{setPayingFor(null);load()}} onWaitlisted={()=>{setPayingFor(null);load()}}/>}
   </Layout>;
 }

@@ -131,3 +131,6 @@ button,.button,.link-button,.event-card,.feature-grid>div,.testimonial-card,.sta
 img.avatar{object-fit:cover}
 .profile-photo-editor{display:flex;align-items:center;gap:18px;padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:6px}
 .profile-photo-editor .link-button{margin-left:10px;font-size:13px}
+.consent-check{display:flex!important;flex-direction:row!important;align-items:flex-start;gap:10px;font-size:14px;line-height:1.5;color:#ccc;text-align:left}
+.consent-check input[type=checkbox]{width:18px!important;height:18px;min-height:0;flex:0 0 auto;margin:2px 0 0;padding:0;accent-color:#cba969}
+.consent-check a{color:#cba969;text-decoration:underline}

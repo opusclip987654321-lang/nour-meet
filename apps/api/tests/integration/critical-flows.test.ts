@@ -77,7 +77,7 @@ describe("entretien global : porte d’entrée obligatoire avant toute inscripti
     await api("/auth/request-otp", { method: "POST", body: JSON.stringify({ phone }) });
     const { body: verify } = await api<{ token: string }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456", displayName: "GateTest" }) });
     const token = verify.token;
-    await api("/me/profile", { method: "PATCH", body: JSON.stringify({ displayName: "GateTest", city: "Paris", interests: [], quotaCategory: "HOMME" }) }, token);
+    await api("/me/profile", { method: "PATCH", body: JSON.stringify({ birthDate: "1995-01-01", acceptCgu: true, displayName: "GateTest", city: "Paris", interests: [], quotaCategory: "HOMME" }) }, token);
     const { body: me } = await api<{ id: string }>("/me", {}, token);
     createdUserIds.push(me.id);
 
@@ -101,7 +101,7 @@ describe("entretien global : porte d’entrée obligatoire avant toute inscripti
     await api("/auth/request-otp", { method: "POST", body: JSON.stringify({ phone }) });
     const { body: verify } = await api<{ token: string }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456", displayName: "DirectTest" }) });
     const token = verify.token;
-    await api("/me/profile", { method: "PATCH", body: JSON.stringify({ displayName: "DirectTest", city: "Paris", interests: [] }) }, token);
+    await api("/me/profile", { method: "PATCH", body: JSON.stringify({ birthDate: "1995-01-01", acceptCgu: true, displayName: "DirectTest", city: "Paris", interests: [] }) }, token);
     const { body: me } = await api<{ id: string }>("/me", {}, token);
     createdUserIds.push(me.id);
 
@@ -122,7 +122,7 @@ describe("entretien global : porte d’entrée obligatoire avant toute inscripti
     await api("/auth/request-otp", { method: "POST", body: JSON.stringify({ phone }) });
     const { body: verify } = await api<{ token: string }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456", displayName: "RefusTest" }) });
     const token = verify.token;
-    await api("/me/profile", { method: "PATCH", body: JSON.stringify({ displayName: "RefusTest", city: "Paris", interests: [] }) }, token);
+    await api("/me/profile", { method: "PATCH", body: JSON.stringify({ birthDate: "1995-01-01", acceptCgu: true, displayName: "RefusTest", city: "Paris", interests: [] }) }, token);
     const { body: me } = await api<{ id: string }>("/me", {}, token);
     createdUserIds.push(me.id);
 
@@ -216,8 +216,8 @@ describe("atomicité des quotas sous concurrence réelle", () => {
       expect([appA.status, appB.status]).toEqual([201, 201]);
 
       const [payA, payB] = await Promise.all([
-        api(`/applications/${appA.body.application.id}/payment-intent`, { method: "POST" }, a.token),
-        api(`/applications/${appB.body.application.id}/payment-intent`, { method: "POST" }, b.token)
+        api(`/applications/${appA.body.application.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, a.token),
+        api(`/applications/${appB.body.application.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, b.token)
       ]);
       const statuses = [payA.status, payB.status].sort();
       expect(statuses).toEqual([200, 409]);
@@ -250,7 +250,7 @@ describe("tarification différenciée homme/femme protégée par ENABLE_GENDER_P
 
     const femme = await tracked("PrixFemmeOff", "FEMME");
     const applyRes = await applyToEvent(event.id, femme.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
-    const intent = await api<{ amountCents: number }>(`/applications/${applyRes.body.application.id}/payment-intent`, { method: "POST" }, femme.token);
+    const intent = await api<{ amountCents: number }>(`/applications/${applyRes.body.application.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, femme.token);
     expect(intent.body.amountCents).toBe(2500);
   });
 
@@ -273,7 +273,7 @@ describe("tarification différenciée homme/femme protégée par ENABLE_GENDER_P
 
       const femme = await tracked("PrixFemmeOn", "FEMME");
       const applyRes = await applyToEvent(event.id, femme.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
-      const intent = await api<{ amountCents: number }>(`/applications/${applyRes.body.application.id}/payment-intent`, { method: "POST" }, femme.token);
+      const intent = await api<{ amountCents: number }>(`/applications/${applyRes.body.application.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, femme.token);
       expect(intent.body.amountCents).toBe(2000);
     } finally {
       // Restaure la valeur par défaut : ne doit jamais rester activé au-delà de ce test.
@@ -290,7 +290,7 @@ describe("aucune survente si un paiement Stripe arrive après libération de la 
     const applyRes = await applyToEvent(event.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
     const application = applyRes.body.application;
 
-    const intent = await api<{ clientSecret: string }>(`/applications/${application.id}/payment-intent`, { method: "POST" }, participant.token);
+    const intent = await api<{ clientSecret: string }>(`/applications/${application.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, participant.token);
     const paymentIntentId = intent.body.clientSecret.split("_secret_")[0];
     const reservationId = (await prisma.reservation.findUniqueOrThrow({ where: { applicationId: application.id } })).id;
 
@@ -345,17 +345,17 @@ describe("chevauchement horaire interdit entre deux réservations actives (§11)
     createdUserIds.push(participant.userId);
 
     const firstApply = await applyToEvent(overlapping.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
-    const firstPay = await api(`/applications/${firstApply.body.application.id}/payment-intent`, { method: "POST" }, participant.token);
+    const firstPay = await api(`/applications/${firstApply.body.application.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, participant.token);
     expect(firstPay.status).toBe(200);
 
     const conflictingApply = await applyToEvent(conflicting.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
-    const conflictingPay = await api(`/applications/${conflictingApply.body.application.id}/payment-intent`, { method: "POST" }, participant.token);
+    const conflictingPay = await api(`/applications/${conflictingApply.body.application.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, participant.token);
     expect(conflictingPay.status).toBe(409);
     expect((conflictingPay.body as any).error).toMatch(/chevauche/i);
     expect((conflictingPay.body as any).waitlisted).toBeFalsy();
 
     const contiguousApply = await applyToEvent(contiguous.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
-    const contiguousPay = await api(`/applications/${contiguousApply.body.application.id}/payment-intent`, { method: "POST" }, participant.token);
+    const contiguousPay = await api(`/applications/${contiguousApply.body.application.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, participant.token);
     expect(contiguousPay.status).toBe(200);
   });
 });
@@ -644,7 +644,7 @@ async function directParticipant(displayName: string) {
   const phone = testPhone();
   await api("/auth/request-otp", { method: "POST", body: JSON.stringify({ phone }) });
   const { body } = await api<{ token: string }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456", displayName }) });
-  await api("/me/profile", { method: "PATCH", body: JSON.stringify({ displayName, city: "Paris", interests: [] }) }, body.token);
+  await api("/me/profile", { method: "PATCH", body: JSON.stringify({ birthDate: "1995-01-01", acceptCgu: true, displayName, city: "Paris", interests: [] }) }, body.token);
   const { body: me } = await api<{ id: string }>("/me", {}, body.token);
   return { token: body.token, userId: me.id };
 }
@@ -893,5 +893,71 @@ describe("blog éditorial : validation humaine obligatoire, jamais de publicatio
     createdArticleIds.push(generated.body.id);
     expect(generated.body.status).toBe("DRAFT");
     expect(generated.body.aiGenerated).toBe(true);
+  });
+});
+
+describe("majorité et acceptation des CGU/CGV", () => {
+  it("refuse un profil sans date de naissance, mineur ou sans acceptation des CGU", async () => {
+    const phone = testPhone();
+    await api("/auth/request-otp", { method: "POST", body: JSON.stringify({ phone }) });
+    const { body } = await api<{ token: string }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456", displayName: "MajoriteTest" }) });
+    const token = body.token;
+    const { body: me } = await api<{ id: string }>("/me", {}, token);
+    createdUserIds.push(me.id);
+    const base = { displayName: "MajoriteTest", city: "Paris", interests: [] };
+
+    expect((await api("/me/profile", { method: "PATCH", body: JSON.stringify({ ...base, acceptCgu: true }) }, token)).status).toBe(400);
+    const minor = new Date(); minor.setUTCFullYear(minor.getUTCFullYear() - 18); minor.setUTCDate(minor.getUTCDate() + 1);
+    expect((await api("/me/profile", { method: "PATCH", body: JSON.stringify({ ...base, birthDate: minor.toISOString().slice(0, 10), acceptCgu: true }) }, token)).status).toBe(422);
+    expect((await api("/me/profile", { method: "PATCH", body: JSON.stringify({ ...base, birthDate: "1995-01-01" }) }, token)).status).toBe(422);
+
+    expect((await api("/me/profile", { method: "PATCH", body: JSON.stringify({ ...base, birthDate: "1995-01-01", acceptCgu: true }) }, token)).status).toBe(200);
+    expect((await api("/me", {}, token)).body.cguAccepted).toBe(true);
+    // Une fois la version en vigueur acceptée, les modifications suivantes ne la redemandent pas.
+    expect((await api("/me/profile", { method: "PATCH", body: JSON.stringify({ ...base, birthDate: "1995-01-01", city: "Lyon" }) }, token)).status).toBe(200);
+    const acceptances = await prisma.legalAcceptance.findMany({ where: { userId: me.id } });
+    expect(acceptances).toHaveLength(1);
+    expect(acceptances[0]).toMatchObject({ document: "CGU", context: "profile" });
+  });
+
+  it("refuse de réserver sans acceptation des CGV, puis l’enregistre pour cette candidature", async () => {
+    const event = await prisma.event.create({ data: {
+      slug: `test-cgv-${Date.now()}`, title: "Test acceptation CGV", category: "Networking", flow: "DIRECT",
+      description: "Événement de test pour l’acceptation des CGV.",
+      startsAt: new Date(Date.now() + 72 * 60 * 60_000), endsAt: new Date(Date.now() + 74 * 60 * 60_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 0, status: "PUBLISHED"
+    } });
+    createdEventIds.push(event.id);
+    const participant = await directParticipant("CgvTest");
+    createdUserIds.push(participant.userId);
+    const applied = await applyToEvent(event.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    expect(applied.status).toBe(201);
+    const applicationId = applied.body.application.id;
+
+    const refused = await api(`/applications/${applicationId}/payment-intent`, { method: "POST" }, participant.token);
+    expect(refused.status).toBe(422);
+    expect(refused.body.cgvRequired).toBe(true);
+    expect(await prisma.reservation.findUnique({ where: { applicationId } })).toBeNull();
+
+    const accepted = await api(`/applications/${applicationId}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, participant.token);
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.confirmed).toBe(true);
+    const proof = await prisma.legalAcceptance.findFirst({ where: { userId: participant.userId, document: "CGV" } });
+    expect(proof?.context).toBe(`application:${applicationId}`);
+  });
+
+  it("bloque l’inscription d’un profil complété avant l’obligation de date de naissance", async () => {
+    const participant = await directParticipant("AncienProfilTest");
+    createdUserIds.push(participant.userId);
+    await prisma.profile.update({ where: { userId: participant.userId }, data: { birthDate: null } });
+    const event = await prisma.event.create({ data: {
+      slug: `test-ancien-profil-${Date.now()}`, title: "Test profil sans date de naissance", category: "Networking", flow: "DIRECT",
+      description: "Événement de test pour la majorité.",
+      startsAt: new Date(Date.now() + 96 * 60 * 60_000), endsAt: new Date(Date.now() + 98 * 60 * 60_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 0, status: "PUBLISHED"
+    } });
+    createdEventIds.push(event.id);
+    const res = await applyToEvent(event.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    expect(res.status).toBe(409);
   });
 });

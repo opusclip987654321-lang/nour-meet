@@ -10,7 +10,7 @@ import { ActivityIndicator, Alert, FlatList, Image, ImageBackground, KeyboardAvo
 import * as WebBrowser from "expo-web-browser";
 import { WEB_URL, api, getToken, setToken } from "./src/api";
 import { categoryColor, money, when, dayLabel, timeLabel, imgUrl } from "./src/format";
-import { SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening, EVENT_CATEGORIES } from "@nour/shared";
+import { SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening, EVENT_CATEGORIES, MINIMUM_AGE, isAdult } from "@nour/shared";
 
 const APPLICATION_STATUS_LABEL: Record<string,string> = { PENDING_CALL: "En attente de choix d’un créneau", CALL_SCHEDULED: "Entretien programmé", CALL_COMPLETED: "Entretien réalisé", ACCEPTED: "Candidature acceptée", REFUSED: "Candidature refusée", PAYMENT_PENDING: "Acceptée · paiement à finaliser", CONFIRMED: "Place confirmée", CANCELLED: "Annulée", NO_SHOW: "Absence à l’entretien" };
 
@@ -142,6 +142,7 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
   // Arbitrage 12/E3 (cahier des charges consolidé 2026-09-20) : formulaire professionnel facultatif
   // proposé une fois la place confirmée, jamais avant/pendant le paiement.
   const [netAnswers,setNetAnswers]=useState<Record<string,string>>({}),[netDone,setNetDone]=useState(false),[netDismissed,setNetDismissed]=useState(false);
+  const [acceptCgv,setAcceptCgv]=useState(false);
   const [waitlistEntry,setWaitlistEntry]=useState<any>(null),[altOffer,setAltOffer]=useState<any>(null);
   // §5 (cahier des charges 2026-09) : un lien depuis le blog (ex. « nos soirées speed dating »)
   // arrive ici déjà filtré sur la bonne catégorie, voir App() et Blog() plus bas.
@@ -150,7 +151,7 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
   const loadApplication=(eventId:string)=>api<any>(`/events/${eventId}/my-application`).then(setApplication).catch(()=>setApplication(null));
   const loadWaitlist=(eventId:string)=>api<any>(`/events/${eventId}/waitlist/me`).then(setWaitlistEntry).catch(()=>setWaitlistEntry(null));
   const openEvent=(e:any)=>{
-    setSelected(e);setMessage("");setShowForm(false);setAnswers({});setNetAnswers({});setNetDone(false);setNetDismissed(false);
+    setSelected(e);setMessage("");setShowForm(false);setAcceptCgv(false);setAnswers({});setNetAnswers({});setNetDone(false);setNetDismissed(false);
     loadApplication(e.id);loadWaitlist(e.id);
     api<any[]>("/me/alternative-offers").then(list=>setAltOffer(list.find(o=>o.originalEventId===e.id&&o.status==="PENDING")??null)).catch(()=>{});
   };
@@ -173,10 +174,13 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
     }catch(e){setMessage((e as Error).message)}
     finally{setSubmitting(false)}
   };
+  // CGV A3 : acceptation obligatoire avant de confirmer une place gratuite (le paiement par carte
+  // la demande lui-même, dans la page web ouverte par payByCard).
   const confirmFree=async()=>{
+    if(!acceptCgv){setMessage("Vous devez accepter les conditions générales de vente avant de réserver.");return}
     setSubmitting(true);
     try{
-      const result=await api<{free:boolean;confirmed:boolean}>(`/applications/${application.id}/payment-intent`,{method:"POST"});
+      const result=await api<{free:boolean;confirmed:boolean}>(`/applications/${application.id}/payment-intent`,{method:"POST",body:JSON.stringify({acceptCgv:true})});
       setMessage(result.confirmed?"Votre billet gratuit est confirmé.":"Votre place a déjà été confirmée.");
       await loadApplication(selected.id);
     }catch(e){setMessage((e as Error).message)}
@@ -240,7 +244,7 @@ function Events({user,initialCategory}:{user:any,initialCategory?:string}){
     <GoldButton title="Inviter un ami" secondary onPress={share}/>{message?<Notice text={message} error={!message.includes("envoyée")&&!message.includes("annulée")&&!message.includes("attente")}/>:null}
     {altOffer&&<View style={s.altOffer}><Text style={s.eyebrow}>ÉVÉNEMENT ALTERNATIF PROPOSÉ</Text><Text style={s.sectionTitle}>{altOffer.alternativeEvent.title}</Text><Text style={s.meta}>{when(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</Text><Text style={s.bodyStrong}>{money(altOffer.alternativeEvent.priceCents)}</Text><View style={{flexDirection:"row",gap:10,marginTop:10}}><View style={{flex:1}}><GoldButton title={submitting?"…":"Accepter"} onPress={()=>respondAltOffer(true)} disabled={submitting}/></View><View style={{flex:1}}><GoldButton title={submitting?"…":"Refuser"} secondary onPress={()=>respondAltOffer(false)} disabled={submitting}/></View></View></View>}
     {application?<View>
-      {application.status==="PAYMENT_PENDING"&&<View style={s.reservationCard}><Text style={s.meta}>{application.reservation?`Votre place est retenue quelques minutes (jusqu’au ${when(application.reservation.expiresAt)}) : finalisez votre paiement.`:"Vous pouvez régler votre billet dès maintenant."}</Text>{selected.priceCents===0?<GoldButton title={submitting?"…":"Confirmer ma place (gratuit)"} onPress={confirmFree} disabled={submitting}/>:<GoldButton title={`Payer par carte · ${money(selected.priceCents)}`} onPress={async()=>{await payByCard(application.id,selected.id,selected.priceCents);await loadApplication(selected.id)}}/>}</View>}
+      {application.status==="PAYMENT_PENDING"&&<View style={s.reservationCard}><Text style={s.meta}>{application.reservation?`Votre place est retenue quelques minutes (jusqu’au ${when(application.reservation.expiresAt)}) : finalisez votre paiement.`:"Vous pouvez régler votre billet dès maintenant."}</Text>{selected.priceCents===0?<><ConsentCheck checked={acceptCgv} onChange={setAcceptCgv}>J’ai lu et j’accepte les {legalLink("conditions générales de vente","cgv")}, notamment la politique d’annulation.</ConsentCheck><GoldButton title={submitting?"…":"Confirmer ma place (gratuit)"} onPress={confirmFree} disabled={submitting||!acceptCgv}/></>:<GoldButton title={`Payer par carte · ${money(selected.priceCents)}`} onPress={async()=>{await payByCard(application.id,selected.id,selected.priceCents);await loadApplication(selected.id)}}/>}</View>}
       {application.status==="CONFIRMED"&&!requiresScreening&&!application.networkingAnswer&&!netDismissed&&!netDone&&<View style={s.reservationCard}>
         <Text style={s.meta}>Facultatif : quelques informations professionnelles pour mieux organiser la soirée.</Text>
         {NETWORKING_QUESTIONS.map(q=><View key={q.key}><Text style={s.label}>{q.label.toUpperCase()}</Text><TextInput style={[s.input,{height:60}]} multiline value={netAnswers[q.key]??""} onChangeText={v=>setNetAnswers({...netAnswers,[q.key]:v})}/></View>)}
@@ -421,6 +425,17 @@ function EspaceNotifications({notifications}:{notifications:any[]}){
   </ScrollView>;
 }
 
+// Case d'acceptation d'un texte juridique : le lien ouvre la page web correspondante (source unique
+// des textes, apps/web/src/legal/*.md) dans le navigateur intégré.
+const openLegal=(slug:string)=>WebBrowser.openBrowserAsync(`${WEB_URL}/legal/${slug}`);
+function ConsentCheck({checked,onChange,children}:{checked:boolean,onChange:(v:boolean)=>void,children:React.ReactNode}){
+  return <Pressable onPress={()=>onChange(!checked)} style={{flexDirection:"row",alignItems:"flex-start",gap:10,marginVertical:10}} accessibilityRole="checkbox" accessibilityState={{checked}}>
+    <View style={{width:22,height:22,borderRadius:4,borderWidth:1.5,borderColor:C.gold,backgroundColor:checked?C.gold:"transparent",alignItems:"center",justifyContent:"center",marginTop:1}}>{checked&&<Text style={{color:"#111",fontWeight:"700"}}>✓</Text>}</View>
+    <Text style={{flex:1,color:C.cream,fontSize:14,lineHeight:20}}>{children}</Text>
+  </Pressable>;
+}
+const legalLink=(label:string,slug:string)=><Text style={{color:C.gold,textDecorationLine:"underline"}} onPress={()=>openLegal(slug)}>{label}</Text>;
+
 function EspaceProfile({user,onSaved,onLogout}:{user:any,onSaved:()=>void,onLogout:()=>void}){
   const [form,setForm]=useState({displayName:user.displayName??"",email:user.email??"",birthDate:user.profile?.birthDate?String(user.profile.birthDate).slice(0,10):"",city:user.profile?.city??"",profession:user.profile?.profession??"",interests:(user.profile?.interests??[]).join(", "),bio:user.profile?.bio??"",quotaCategory:user.profile?.quotaCategory??""});
   const [message,setMessage]=useState(""),[busy,setBusy]=useState(false),[photoBusy,setPhotoBusy]=useState(false);
@@ -428,9 +443,14 @@ function EspaceProfile({user,onSaved,onLogout}:{user:any,onSaved:()=>void,onLogo
   const [showDatePicker,setShowDatePicker]=useState(false);
   const [qr,setQr]=useState<any>(null),[loyalty,setLoyalty]=useState<any>(null);
   useEffect(()=>{api("/me/share-qr").then(setQr);api("/loyalty").then(setLoyalty)},[]);
+  // CGU §2 : date de naissance obligatoire (majeur) et CGU en vigueur acceptées une fois par version.
+  const [acceptCgu,setAcceptCgu]=useState(false);
   const save=async()=>{
-    setBusy(true);setMessage("");
-    try{await api("/me/profile",{method:"PATCH",body:JSON.stringify({...form,email:form.email||null,quotaCategory:form.quotaCategory||null,interests:form.interests.split(",").map((x:string)=>x.trim()).filter(Boolean)})});setMessage("Profil enregistré.");onSaved()}
+    setMessage("");
+    if(!isAdult(form.birthDate)){setMessage(`Nūr Meet est réservé aux personnes de ${MINIMUM_AGE} ans et plus : renseignez votre date de naissance.`);return}
+    if(!user.cguAccepted&&!acceptCgu){setMessage("Vous devez accepter les conditions générales d’utilisation pour continuer.");return}
+    setBusy(true);
+    try{await api("/me/profile",{method:"PATCH",body:JSON.stringify({...form,email:form.email||null,quotaCategory:form.quotaCategory||null,interests:form.interests.split(",").map((x:string)=>x.trim()).filter(Boolean),...(acceptCgu?{acceptCgu:true}:{})})});setMessage("Profil enregistré.");onSaved()}
     catch(e){setMessage((e as Error).message)}
     finally{setBusy(false)}
   };
@@ -481,7 +501,7 @@ function EspaceProfile({user,onSaved,onLogout}:{user:any,onSaved:()=>void,onLogo
     <Text style={s.label}>PRÉNOM OU PSEUDONYME</Text><TextInput style={s.input} value={form.displayName} onChangeText={v=>setForm({...form,displayName:v})}/>
     <Text style={s.label}>E-MAIL</Text><TextInput style={s.input} value={form.email} onChangeText={v=>setForm({...form,email:v})} keyboardType="email-address" autoCapitalize="none"/>
     <Text style={s.label}>DATE DE NAISSANCE</Text>
-    <Pressable onPress={()=>setShowDatePicker(true)} style={[s.input,{justifyContent:"center"}]}><Text style={{color:form.birthDate?C.cream:"#666"}}>{form.birthDate?new Date(form.birthDate).toLocaleDateString("fr-FR"):"Non renseignée"}</Text></Pressable>
+    <Pressable onPress={()=>setShowDatePicker(true)} style={[s.input,{justifyContent:"center"}]}><Text style={{color:form.birthDate?C.cream:"#666"}}>{form.birthDate?new Date(form.birthDate).toLocaleDateString("fr-FR"):"Obligatoire"}</Text></Pressable>
     {showDatePicker&&<View>
       <DateTimePicker value={form.birthDate?new Date(form.birthDate):new Date(2000,0,1)} mode="date" display={Platform.OS==="ios"?"spinner":"default"} maximumDate={new Date()} onChange={(_,date)=>{if(Platform.OS==="android")setShowDatePicker(false);if(date)setForm({...form,birthDate:date.toISOString().slice(0,10)})}}/>
       {Platform.OS==="ios"&&<GoldButton title="Terminé" secondary onPress={()=>setShowDatePicker(false)}/>}
@@ -492,6 +512,7 @@ function EspaceProfile({user,onSaved,onLogout}:{user:any,onSaved:()=>void,onLogo
     <Text style={s.label}>CATÉGORIE (ÉVÉNEMENTS AVEC QUOTAS)</Text>
     <View style={{flexDirection:"row",gap:10,marginBottom:8}}>{[["","Non renseignée"],["HOMME","Homme"],["FEMME","Femme"]].map(([value,label])=><Pressable key={value} onPress={()=>setForm({...form,quotaCategory:value})} style={[s.choiceChip,form.quotaCategory===value&&s.choiceChipActive]}><Text style={[s.choiceChipText,form.quotaCategory===value&&{color:"#111"}]}>{label}</Text></Pressable>)}</View>
     <Text style={s.label}>BIOGRAPHIE</Text><TextInput style={[s.input,{height:90}]} multiline value={form.bio} onChangeText={v=>setForm({...form,bio:v})}/>
+    {!user.cguAccepted&&<ConsentCheck checked={acceptCgu} onChange={setAcceptCgu}>Je certifie avoir {MINIMUM_AGE} ans ou plus et j’accepte les {legalLink("conditions générales d’utilisation","cgu")}. Mes données sont traitées conformément à la {legalLink("politique de confidentialité","confidentialite")}.</ConsentCheck>}
     <GoldButton title={busy?"Enregistrement…":"Enregistrer"} onPress={save} disabled={busy}/>
     {qr&&<View style={s.personalQr}><Text style={s.eyebrow}>MON CODE PERSONNEL</Text><Image source={{uri:qr.qrDataUrl}} style={s.qr}/><Text style={s.qrCode}>{qr.code}</Text><Text style={[s.meta,{textAlign:"center"}]}>Le chat s’ouvre uniquement après votre acceptation.</Text></View>}
     {loyalty&&<Text style={[s.meta,{textAlign:"center",marginTop:10}]}>{loyalty.balance} points de fidélité</Text>}
