@@ -5,7 +5,6 @@ import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import QRCode from "qrcode";
 import ExcelJS from "exceljs";
 import Stripe from "stripe";
 import { PrismaClient, Prisma, UserRole, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, EventStatus, QuotaCategory, AlternativeOfferStatus, SubscriptionStatus } from "@prisma/client";
@@ -23,6 +22,10 @@ import { createEmailProvider } from "./email-provider.js";
 import { createAIProvider } from "./ai-provider.js";
 import { loadSettings, updateSetting, getSetting, listSettingsForAdmin, SETTINGS_SCHEMA } from "./settings.js";
 import { initSentry, Sentry } from "./sentry.js";
+import { workerCount } from "./cluster-config.js";
+import cluster from "node:cluster";
+import { cachedQrDataUrl } from "./qr-cache.js";
+import { paginationQuery, paginated, toSkipTake } from "./pagination.js";
 
 initSentry();
 
@@ -45,8 +48,23 @@ const deleteUploadedFile = async (url: string | null | undefined, prefix: string
 const ALLOWED_IMAGE_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-const prisma = new PrismaClient();
+// Prisma's own per-client default (num CPUs * 2 + 1) is sized for a single process.
+// Under node:cluster, every worker opens its own pool of that size, and with enough
+// workers the combined total can exceed Postgres's max_connections and lock everyone
+// out. This is a budget for ALL workers combined, divided by worker count, so the
+// total stays under it regardless of how many cores the host has.
+function withConnectionLimit(databaseUrl: string, limit: number): string {
+  const url = new URL(databaseUrl);
+  url.searchParams.set("connection_limit", String(limit));
+  return url.toString();
+}
+const perWorkerConnectionLimit = Math.max(2, Math.floor(env.DATABASE_CONNECTION_LIMIT_TOTAL / workerCount));
+const prisma = new PrismaClient({ datasourceUrl: withConnectionLimit(env.DATABASE_URL, perWorkerConnectionLimit) });
 const app = Fastify({ logger: true });
+// Under node:cluster every worker runs this whole file independently (see
+// cluster-entry.ts) — without this guard, each of the setInterval(...) background
+// jobs below would fire once per worker every minute instead of once total.
+const ownsBackgroundJobs = !cluster.isWorker || cluster.worker?.id === 1;
 const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
 // méthodes explicitement listées : par défaut, ce plugin n'autorise que GET/HEAD/POST en CORS, ce qui
 // bloquait silencieusement depuis un vrai navigateur tous les appels PATCH/PUT/DELETE (annulation de
@@ -61,7 +79,11 @@ await app.register(cors, { origin: env.WEB_ORIGIN === "*" ? true : env.WEB_ORIGI
 // production) puisse continuer à afficher les images téléversées.
 await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" } });
 await app.register(jwt, { secret: env.JWT_SECRET });
-await app.register(rateLimit, { global: false });
+// Sane default so every route is protected against abuse even without an explicit
+// per-route limit (below); routes that need a stricter one keep their own override.
+// Tunable via env because the right ceiling depends on deployment shape (behind a
+// CDN/LB, per-IP traffic looks different than hitting the origin directly).
+await app.register(rateLimit, { global: true, max: env.RATE_LIMIT_MAX, timeWindow: env.RATE_LIMIT_WINDOW });
 await app.register(multipart, { limits: { fileSize: MAX_IMAGE_BYTES, files: 1 } });
 await app.register(fastifyStatic, { root: publicDir, prefix: "/static/" });
 const smsVerification = createSmsVerificationProvider({
@@ -564,10 +586,14 @@ app.post("/me/request-deletion", { preHandler: auth }, async (request, reply) =>
 });
 
 app.get("/events", { preHandler: optionalAuth }, async (request) => {
-  const query = z.object({ category: z.string().optional(), q: z.string().optional() }).parse(request.query);
-  const events = await prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" } }, { description: { contains: query.q, mode: "insensitive" } }] : undefined }, include: { controllerRestaurant: { include: { subscription: { include: { plan: true } } } }, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" } });
+  const query = z.object({ category: z.string().optional(), q: z.string().optional() }).merge(paginationQuery).parse(request.query);
+  const where = { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" as const } }, { description: { contains: query.q, mode: "insensitive" as const } }] : undefined };
   const viewerCategory = request.user ? (await prisma.profile.findUnique({ where: { userId: currentId(request) } }))?.quotaCategory ?? null : null;
-  return events.map(e => publicEvent(e, false, viewerCategory));
+  const [events, total] = await Promise.all([
+    prisma.event.findMany({ where, include: { controllerRestaurant: { include: { subscription: { include: { plan: true } } } }, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" }, ...toSkipTake(query) }),
+    prisma.event.count({ where })
+  ]);
+  return paginated(events.map(e => publicEvent(e, false, viewerCategory)), total, query);
 });
 
 app.get("/events/:id", { preHandler: optionalAuth }, async (request) => {
@@ -1056,12 +1082,12 @@ await app.register(async (webhooks) => {
 
 app.get("/me/tickets", { preHandler: auth }, async (request) => {
   const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: true } } } } }, orderBy: { createdAt: "desc" } });
-  return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await QRCode.toDataURL(t.code) })));
+  return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await cachedQrDataUrl(t.code) })));
 });
 
 app.get("/me/share-qr", { preHandler: auth }, async (request) => {
   const profile = await prisma.profile.findUniqueOrThrow({ where: { userId: currentId(request) } });
-  return { code: profile.shareCode, qrDataUrl: await QRCode.toDataURL(profile.shareCode) };
+  return { code: profile.shareCode, qrDataUrl: await cachedQrDataUrl(profile.shareCode) };
 });
 
 app.get("/profiles/code/:code", { preHandler: auth }, async (request, reply) => {
@@ -2516,7 +2542,7 @@ const releaseExpiredReservations = async () => {
   }
   await prisma.alternativeOffer.updateMany({ where: { status: AlternativeOfferStatus.PENDING, respondsBy: { lt: new Date() } }, data: { status: AlternativeOfferStatus.EXPIRED } });
 };
-setInterval(() => { releaseExpiredReservations().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { releaseExpiredReservations().catch(err => app.log.error(err)); }, 60_000);
 
 // Le frais Stripe réel n'est pas toujours disponible au moment exact du webhook de paiement réussi
 // (la transaction de solde peut être calculée quelques secondes après) : on le complète ici en
@@ -2536,7 +2562,7 @@ const backfillStripeFees = async () => {
     } catch (err) { app.log.warn({ err }, "Nouvelle tentative de récupération des frais Stripe échouée"); }
   }
 };
-setInterval(() => { backfillStripeFees().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { backfillStripeFees().catch(err => app.log.error(err)); }, 60_000);
 
 // Minimum de participants (§10) : à la date limite, si le seuil n'est pas atteint, notifie le
 // restaurateur et ouvre une fenêtre de réponse courte (AppSetting MIN_PARTICIPANTS_DECISION_WINDOW_HOURS) ;
@@ -2569,7 +2595,7 @@ const checkMinParticipantsThresholds = async () => {
     }
   }
 };
-setInterval(() => { checkMinParticipantsThresholds().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { checkMinParticipantsThresholds().catch(err => app.log.error(err)); }, 60_000);
 
 // Rappel d'événement en deux temps (§13, complété §3 du cahier des charges 2026-09) : un rappel J-1
 // (AppSetting EVENT_REMINDER_HOURS_BEFORE) puis un second rappel plus proche H-2 (AppSetting
@@ -2608,7 +2634,7 @@ const checkSubscriptionExpirySoon = async () => {
     await notify(sub.restaurant.ownerId, "Abonnement bientôt renouvelé", `Formule ${sub.plan.name} : ${label} le ${sub.currentPeriodEnd.toLocaleDateString("fr-FR")}.`, "/restaurant?tab=subscription");
   }
 };
-setInterval(() => { checkSubscriptionExpirySoon().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { checkSubscriptionExpirySoon().catch(err => app.log.error(err)); }, 60_000);
 // §7 (cahier des charges 2026-09) : « on enclenche le paiement au bout de 7 jours s'il n'annule pas ».
 // Ne concerne QUE les abonnements sans objet Stripe réel (assignation manuelle admin historique,
 // voir /admin/restaurants/:id/subscription) : un abonnement souscrit via Checkout est piloté par
@@ -2622,12 +2648,12 @@ const checkTrialSubscriptionsDue = async () => {
     await audit(undefined, "TRIAL_SUBSCRIPTION_ACTIVATED", "RestaurantSubscription", sub.id);
   }
 };
-setInterval(() => { checkTrialSubscriptionsDue().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { checkTrialSubscriptionsDue().catch(err => app.log.error(err)); }, 60_000);
 // Arbitrage tranché (point 1.3 des instructions définitives 2026-09-20, confirmé le 20/09) : le
 // prélèvement a lieu normalement à l'échéance de l'essai même si la candidature reste PENDING —
 // choix commercial de la formule et autorisation de publier restent deux choses distinctes. Stripe
 // gère seul cette échéance (trial_period_days) ; aucune intervention serveur n'est donc nécessaire.
-setInterval(() => { sendEventReminders().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { sendEventReminders().catch(err => app.log.error(err)); }, 60_000);
 
 // Programmation d'articles (§18) : ne publie jamais depuis DRAFT ou IN_REVIEW, uniquement un
 // article déjà explicitement validé (APPROVED) dont la date programmée est atteinte.
@@ -2638,7 +2664,7 @@ const publishScheduledArticles = async () => {
     await logArticleTransition(article.id, undefined, article.status, "PUBLISHED", "Publication automatique programmée");
   }
 };
-setInterval(() => { publishScheduledArticles().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { publishScheduledArticles().catch(err => app.log.error(err)); }, 60_000);
 
 // C32-C34 : purge automatique des visites au-delà de la rétention configurée (ANALYTICS_RETENTION_DAYS,
 // 13 mois par défaut — plafond habituel de l'exemption CNIL « mesure d'audience »).
@@ -2646,7 +2672,7 @@ const purgeOldPageViews = async () => {
   const retentionDays = getSetting("ANALYTICS_RETENTION_DAYS");
   await prisma.pageView.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - retentionDays * 24 * 60 * 60_000) } } });
 };
-setInterval(() => { purgeOldPageViews().catch(err => app.log.error(err)); }, 24 * 60 * 60_000);
+if (ownsBackgroundJobs) setInterval(() => { purgeOldPageViews().catch(err => app.log.error(err)); }, 24 * 60 * 60_000);
 // C37 : hausse inhabituelle des annulations sur 24h glissantes, seuil configurable
 // (CANCELLATION_ALERT_THRESHOLD_PERCENT) ; une seule alerte par fenêtre pour éviter les doublons.
 let lastCancellationAlertAt: Date | null = null;
@@ -2666,7 +2692,7 @@ const checkCancellationSpike = async () => {
   await Promise.all(admins.map(a => notify(a.id, "Hausse inhabituelle des annulations", `Taux d’annulation sur 24h : ${rate.toFixed(0)}% (seuil ${threshold}%).`, "/admin/stats")));
   await audit(undefined, "CANCELLATION_SPIKE_ALERT", "Reservation", "n/a", { rate, threshold, confirmed, cancelled });
 };
-setInterval(() => { checkCancellationSpike().catch(err => app.log.error(err)); }, 60 * 60_000);
+if (ownsBackgroundJobs) setInterval(() => { checkCancellationSpike().catch(err => app.log.error(err)); }, 60 * 60_000);
 
 // §5 (cahier des charges 2026-09) : fait sortir un article de qualité éditoriale de la réserve
 // (ArticleQueueEntry, jamais un brouillon générique) vers Article au statut DRAFT, un par jour et
@@ -2688,7 +2714,7 @@ const releaseQueuedArticle = async () => {
   const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
   await Promise.all(admins.map(a => notify(a.id, "Nouvel article proposé", `« ${next.title} » attend votre relecture dans le blog.`, "/admin/blog")));
 };
-setInterval(() => { releaseQueuedArticle().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { releaseQueuedArticle().catch(err => app.log.error(err)); }, 60_000);
 app.get("/admin/articles/queue", { preHandler: roles(UserRole.ADMIN) }, async () => {
   const [count, next] = await Promise.all([
     prisma.articleQueueEntry.count(),

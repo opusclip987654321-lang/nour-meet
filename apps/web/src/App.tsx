@@ -4,7 +4,7 @@ import jsQR from "jsqr";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { EVENT_CATEGORIES, EVENT_ZONES, SCREENING_QUESTIONS, NETWORKING_QUESTIONS, eventRequiresScreening } from "@nour/shared";
-import type { PublicEvent, SessionUser, ScreeningAnswers, NetworkingAnswers } from "@nour/shared";
+import type { PublicEvent, SessionUser, ScreeningAnswers, NetworkingAnswers, Paginated } from "@nour/shared";
 import { API_URL, api, getToken, setToken } from "./api";
 import { MentionsLegales, CGU, CGV, Confidentialite, Cookies } from "./legal";
 
@@ -158,7 +158,7 @@ function TestimonialsSection({ eventType }: { eventType?: string }) {
 }
 
 function Home() {
-  const [events,setEvents]=useState<PublicEvent[]>([]); useEffect(()=>{api<PublicEvent[]>("/events").then(setEvents).catch(()=>{})},[]);
+  const [events,setEvents]=useState<PublicEvent[]>([]); useEffect(()=>{api<Paginated<PublicEvent>>("/events").then(r=>setEvents(r.items)).catch(()=>{})},[]);
   return <Layout><section className="hero"><div><span className="eyebrow">PARIS · ÎLE-DE-FRANCE</span><h1>Des rencontres<br/><em>qui comptent.</em></h1><p>Des événements élégants et confidentiels, pensés pour créer de vraies connexions dans un cadre respectueux.</p><div className="hero-actions"><Link className="button" to="/events">Voir les événements</Link><Link className="button secondary" to="/concept">Découvrir le concept</Link></div><div className="trust"><span>✓ Profils sélectionnés</span><span>✓ Lieux premium</span><span>✓ Cadre confidentiel</span></div></div><div className="hero-art"><div className="arch"><span>ن</span></div>{
 /* G2 (cahier des charges consolidé 2026-09-20) : jamais de soirée fictive affichée comme réelle —
    si aucun événement n'est publié, un message neutre remplace la carte plutôt qu'un exemple inventé. */
@@ -254,7 +254,7 @@ function Events() {
   // §5 (cahier des charges 2026-09) : permet au blog (et à tout autre lien externe) de renvoyer
   // directement vers les événements d'une catégorie précise, ex. /events?category=Speed%20dating.
   const [events,setEvents]=useState<PublicEvent[]>([]),[q,setQ]=useState(""),[category,setCategory]=useState(searchParams.get("category")??"");
-  useEffect(()=>{api<PublicEvent[]>(`/events?${new URLSearchParams({...(q?{q}:{}),...(category?{category}:{})})}`).then(setEvents)},[q,category]);
+  useEffect(()=>{api<Paginated<PublicEvent>>(`/events?${new URLSearchParams({...(q?{q}:{}),...(category?{category}:{})})}`).then(r=>setEvents(r.items))},[q,category]);
   return <Layout><section className="page"><span className="eyebrow">CALENDRIER</span><h1>Trouvez la rencontre qui vous ressemble.</h1><div className="filters"><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Rechercher un événement"/><select value={category} onChange={e=>setCategory(e.target.value)}><option value="">Toutes les catégories</option>{EVENT_CATEGORIES.map(c=><option key={c.name}>{c.name}</option>)}</select></div>{events.length?<div className="event-grid">{events.map(e=><EventCard key={e.id} event={e}/>)}</div>:<div className="empty"><span>◇</span><h2>Aucun événement disponible</h2><p>Modifiez vos filtres ou revenez prochainement.</p></div>}</section></Layout>;
 }
 
