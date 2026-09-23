@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MockSmsVerificationProvider, TwilioVerifyProvider } from "./sms-verification.js";
+import { MockSmsVerificationProvider, TwilioVerifyProvider, describeTwilioFailure } from "./sms-verification.js";
 
 describe("vérification SMS", () => {
   it("utilise le code local uniquement avec le fournisseur simulé", async () => {
@@ -52,5 +52,19 @@ describe("vérification SMS", () => {
   it("refuse de démarrer en mode twilio sans les trois identifiants", async () => {
     const { createSmsVerificationProvider } = await import("./sms-verification.js");
     expect(() => createSmsVerificationProvider({ mode: "twilio", devCode: "123456", accountSid: "AC_test" })).toThrow("Configuration Twilio incomplète");
+  });
+  it("traduit les refus Twilio et traite une erreur de configuration comme une panne", () => {
+    expect(describeTwilioFailure(401, 20003).statusCode).toBe(503);
+    expect(describeTwilioFailure(404, 20404).statusCode).toBe(503);
+    expect(describeTwilioFailure(403, 60410)).toMatchObject({ statusCode: 400, message: expect.stringContaining("pays") });
+    expect(describeTwilioFailure(400, 60200)).toMatchObject({ statusCode: 400, message: expect.stringContaining("pas valide") });
+    expect(describeTwilioFailure(400, 21608).statusCode).toBe(503);
+    expect(describeTwilioFailure(429).statusCode).toBe(429);
+  });
+
+  it("considère un code expiré (404 Twilio) comme un code refusé, pas comme une panne", async () => {
+    const expired = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({ code: 20404, message: "not found" }), { status: 404, headers: { "Content-Type": "application/json" } }));
+    const provider = new TwilioVerifyProvider({ accountSid: "AC_test", authToken: "token", serviceSid: "VA_test" }, expired);
+    await expect(provider.checkCode("+33612345678", "123456")).resolves.toBe(false);
   });
 });

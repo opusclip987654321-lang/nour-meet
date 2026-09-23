@@ -39,6 +39,10 @@ app.setErrorHandler((error, _request, reply) => {
   // correcte, jamais journalisée comme une erreur serveur.
   if ((error as { code?: string }).code === "P2025") return reply.code(404).send({ error: "Ressource introuvable" });
   const status = (error as any).statusCode ?? 500;
+  // Refus du fournisseur SMS : toujours journalisé avec le code Twilio (jamais le numéro ni les
+  // identifiants), y compris en 4xx — sans cela, une erreur de configuration restait invisible.
+  const provider = error as { providerStatus?: number; providerCode?: number; providerMessage?: string };
+  if (provider.providerStatus) app.log.warn({ providerStatus: provider.providerStatus, providerCode: provider.providerCode, providerMessage: provider.providerMessage }, "refus du fournisseur SMS");
   if (status >= 500) {
     app.log.error(error);
     // Seules les vraies pannes serveur (5xx) partent vers Sentry — jamais une simple erreur de
