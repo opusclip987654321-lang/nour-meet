@@ -95,6 +95,8 @@ export interface SessionUser {
   role: UserRole;
   profileCompleted: boolean;
   hasRestaurant: boolean;
+  // true si la version en vigueur des CGU (LEGAL_VERSIONS.CGU) a été acceptée par ce compte.
+  cguAccepted?: boolean;
 }
 
 export interface PublicEvent {
@@ -135,3 +137,20 @@ export interface Paginated<T> {
   total: number;
   totalPages: number;
 }
+
+// Versions en vigueur des textes juridiques (apps/web/src/legal/*.md) : à changer ici à chaque
+// modification substantielle d'un texte. L'API refuse alors toute action couverte par ce texte tant
+// qu'une nouvelle acceptation n'a pas été enregistrée (voir le modèle LegalAcceptance).
+export const LEGAL_VERSIONS = { CGU: "2026-09-23", CGV: "2026-09-23" } as const;
+
+// Service réservé aux personnes majeures (CGU §2) : l'âge est calculé en années révolues, à la
+// date du jour, jamais approximé en divisant une durée par 365,25 jours.
+export const MINIMUM_AGE = 18;
+export const ageInYears = (birthDate: Date | string, now: Date = new Date()): number => {
+  const birth = new Date(birthDate);
+  let age = now.getUTCFullYear() - birth.getUTCFullYear();
+  const beforeBirthday = now.getUTCMonth() < birth.getUTCMonth() || (now.getUTCMonth() === birth.getUTCMonth() && now.getUTCDate() < birth.getUTCDate());
+  return beforeBirthday ? age - 1 : age;
+};
+export const isAdult = (birthDate: Date | string | null | undefined, now: Date = new Date()): boolean =>
+  !!birthDate && !Number.isNaN(new Date(birthDate).getTime()) && ageInYears(birthDate, now) >= MINIMUM_AGE;
