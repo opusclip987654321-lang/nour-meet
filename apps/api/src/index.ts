@@ -20,6 +20,8 @@ import { createSmsVerificationProvider } from "./sms-verification.js";
 import { createEmailProvider } from "./email-provider.js";
 import { createAIProvider } from "./ai-provider.js";
 import { loadSettings, updateSetting, getSetting, listSettingsForAdmin, SETTINGS_SCHEMA } from "./settings.js";
+import { workerCount } from "./cluster-config.js";
+import cluster from "node:cluster";
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const uploadsDir = path.join(publicDir, "uploads", "events");
@@ -40,8 +42,23 @@ const deleteUploadedFile = async (url: string | null | undefined, prefix: string
 const ALLOWED_IMAGE_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-const prisma = new PrismaClient();
+// Prisma's own per-client default (num CPUs * 2 + 1) is sized for a single process.
+// Under node:cluster, every worker opens its own pool of that size, and with enough
+// workers the combined total can exceed Postgres's max_connections and lock everyone
+// out. This is a budget for ALL workers combined, divided by worker count, so the
+// total stays under it regardless of how many cores the host has.
+function withConnectionLimit(databaseUrl: string, limit: number): string {
+  const url = new URL(databaseUrl);
+  url.searchParams.set("connection_limit", String(limit));
+  return url.toString();
+}
+const perWorkerConnectionLimit = Math.max(2, Math.floor(env.DATABASE_CONNECTION_LIMIT_TOTAL / workerCount));
+const prisma = new PrismaClient({ datasourceUrl: withConnectionLimit(env.DATABASE_URL, perWorkerConnectionLimit) });
 const app = Fastify({ logger: true });
+// Under node:cluster every worker runs this whole file independently (see
+// cluster-entry.ts) — without this guard, each of the setInterval(...) background
+// jobs below would fire once per worker every minute instead of once total.
+const ownsBackgroundJobs = !cluster.isWorker || cluster.worker?.id === 1;
 const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
 // méthodes explicitement listées : par défaut, ce plugin n'autorise que GET/HEAD/POST en CORS, ce qui
 // bloquait silencieusement depuis un vrai navigateur tous les appels PATCH/PUT/DELETE (annulation de
@@ -2125,7 +2142,7 @@ const releaseExpiredReservations = async () => {
   }
   await prisma.alternativeOffer.updateMany({ where: { status: AlternativeOfferStatus.PENDING, respondsBy: { lt: new Date() } }, data: { status: AlternativeOfferStatus.EXPIRED } });
 };
-setInterval(() => { releaseExpiredReservations().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { releaseExpiredReservations().catch(err => app.log.error(err)); }, 60_000);
 
 // Le frais Stripe réel n'est pas toujours disponible au moment exact du webhook de paiement réussi
 // (la transaction de solde peut être calculée quelques secondes après) : on le complète ici en
@@ -2145,7 +2162,7 @@ const backfillStripeFees = async () => {
     } catch (err) { app.log.warn({ err }, "Nouvelle tentative de récupération des frais Stripe échouée"); }
   }
 };
-setInterval(() => { backfillStripeFees().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { backfillStripeFees().catch(err => app.log.error(err)); }, 60_000);
 
 // Minimum de participants (§10) : à la date limite, si le seuil n'est pas atteint, notifie le
 // restaurateur et ouvre une fenêtre de réponse courte (AppSetting MIN_PARTICIPANTS_DECISION_WINDOW_HOURS) ;
@@ -2178,7 +2195,7 @@ const checkMinParticipantsThresholds = async () => {
     }
   }
 };
-setInterval(() => { checkMinParticipantsThresholds().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { checkMinParticipantsThresholds().catch(err => app.log.error(err)); }, 60_000);
 
 // Rappel d'événement en deux temps (§13, complété §3 du cahier des charges 2026-09) : un rappel J-1
 // (AppSetting EVENT_REMINDER_HOURS_BEFORE) puis un second rappel plus proche H-2 (AppSetting
@@ -2217,7 +2234,7 @@ const checkSubscriptionExpirySoon = async () => {
     await notify(sub.restaurant.ownerId, "Abonnement bientôt renouvelé", `Formule ${sub.plan.name} : ${label} le ${sub.currentPeriodEnd.toLocaleDateString("fr-FR")}.`);
   }
 };
-setInterval(() => { checkSubscriptionExpirySoon().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { checkSubscriptionExpirySoon().catch(err => app.log.error(err)); }, 60_000);
 // §7 (cahier des charges 2026-09) : « on enclenche le paiement au bout de 7 jours s'il n'annule pas ».
 // Ne déclenche aucun prélèvement réel (Stripe Billing n'est pas câblé) : fait uniquement passer le
 // statut de TRIALING à ACTIVE à l'échéance de l'essai, comme le ferait la confirmation d'un premier
@@ -2231,8 +2248,8 @@ const checkTrialSubscriptionsDue = async () => {
     await audit(undefined, "TRIAL_SUBSCRIPTION_ACTIVATED", "RestaurantSubscription", sub.id);
   }
 };
-setInterval(() => { checkTrialSubscriptionsDue().catch(err => app.log.error(err)); }, 60_000);
-setInterval(() => { sendEventReminders().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { checkTrialSubscriptionsDue().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { sendEventReminders().catch(err => app.log.error(err)); }, 60_000);
 
 // Programmation d'articles (§18) : ne publie jamais depuis DRAFT ou IN_REVIEW, uniquement un
 // article déjà explicitement validé (APPROVED) dont la date programmée est atteinte.
@@ -2243,7 +2260,7 @@ const publishScheduledArticles = async () => {
     await logArticleTransition(article.id, undefined, article.status, "PUBLISHED", "Publication automatique programmée");
   }
 };
-setInterval(() => { publishScheduledArticles().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { publishScheduledArticles().catch(err => app.log.error(err)); }, 60_000);
 
 // §5 (cahier des charges 2026-09) : fait sortir un article de qualité éditoriale de la réserve
 // (ArticleQueueEntry, jamais un brouillon générique) vers Article au statut DRAFT, un par jour et
@@ -2265,7 +2282,7 @@ const releaseQueuedArticle = async () => {
   const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
   await Promise.all(admins.map(a => notify(a.id, "Nouvel article proposé", `« ${next.title} » attend votre relecture dans le blog.`)));
 };
-setInterval(() => { releaseQueuedArticle().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) setInterval(() => { releaseQueuedArticle().catch(err => app.log.error(err)); }, 60_000);
 app.get("/admin/articles/queue", { preHandler: roles(UserRole.ADMIN) }, async () => {
   const [count, next] = await Promise.all([
     prisma.articleQueueEntry.count(),

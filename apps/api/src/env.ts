@@ -19,7 +19,12 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: optionalEnvironmentSecret,
   STRIPE_WEBHOOK_SECRET: optionalEnvironmentSecret,
   RESEND_API_KEY: optionalEnvironmentSecret,
-  RESEND_FROM_EMAIL: z.string().email().optional()
+  RESEND_FROM_EMAIL: z.string().email().optional(),
+  // See the comment beside its only use in index.ts (perWorkerConnectionLimit) for why
+  // this is a total budget across all cluster workers, not a per-worker value. Keep it
+  // comfortably under Postgres's max_connections (default 100) to leave headroom for
+  // migrations, psql, and any other service sharing the database.
+  DATABASE_CONNECTION_LIMIT_TOTAL: z.coerce.number().default(40)
 }).superRefine((value, ctx) => {
   if (value.RESEND_API_KEY && !value.RESEND_FROM_EMAIL) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["RESEND_FROM_EMAIL"], message: "RESEND_FROM_EMAIL est requis avec RESEND_API_KEY" });
