@@ -1,0 +1,90 @@
+# Vérifications automatiques à chaque push et pull request : types, tests unitaires, build, puis
+# tests d'intégration contre une vraie API + Postgres (jamais la base de production).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Types, tests unitaires, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run typecheck
+      - run: npm run typecheck:integration -w @nour/api
+      - run: npm test
+      - run: npm run build
+
+  integration:
+    name: Tests d'intégration (API + Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: checks
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: nour
+          POSTGRES_PASSWORD: nour_dev_password
+          POSTGRES_DB: nour_meet
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nour -d nour_meet"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://nour:nour_dev_password@localhost:5432/nour_meet?schema=public
+      NODE_ENV: development
+      SMS_MODE: mock
+      RATE_LIMIT_MAX: "100000"
+      # Clés Stripe de TEST uniquement (Settings > Secrets and variables > Actions).
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_TEST_WEBHOOK_SECRET }}
+    steps:
+      - name: Secrets Stripe de test présents ?
+        id: stripe
+        run: |
+          if [ -z "$STRIPE_SECRET_KEY" ] || [ -z "$STRIPE_WEBHOOK_SECRET" ]; then
+            echo "::warning::STRIPE_TEST_SECRET_KEY / STRIPE_TEST_WEBHOOK_SECRET absents : tests d'intégration ignorés."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$STRIPE_SECRET_KEY" != sk_test_* ]]; then
+            echo "::error::STRIPE_TEST_SECRET_KEY doit être une clé de TEST (sk_test_…)."; exit 1
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.stripe.outputs.ok == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.stripe.outputs.ok == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.stripe.outputs.ok == 'true'
+        run: npm ci && npm run build -w @nour/shared && npm run db:generate
+      - if: steps.stripe.outputs.ok == 'true'
+        run: npm run db:migrate:deploy && npm run db:seed
+      - name: Démarrage de l'API
+        if: steps.stripe.outputs.ok == 'true'
+        working-directory: apps/api
+        run: |
+          nohup npx tsx src/index.ts > api.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:4000/health && exit 0; sleep 1; done
+          cat api.log; exit 1
+      - if: steps.stripe.outputs.ok == 'true'
+        run: npm run test:integration -w @nour/api
+      - name: Journal de l'API en cas d'échec
+        if: failure() && steps.stripe.outputs.ok == 'true'
+        run: cat apps/api/api.log

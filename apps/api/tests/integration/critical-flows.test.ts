@@ -81,7 +81,7 @@ describe("entretien global : porte d’entrée obligatoire avant toute inscripti
     const { body: me } = await api<{ id: string }>("/me", {}, token);
     createdUserIds.push(me.id);
 
-    const { body: events } = await api<any[]>("/events");
+    const { body: { items: events } } = await api<{ items: any[] }>("/events");
     const screeningEvent = events.find(e => e.flow === "SCREENING");
     expect(screeningEvent).toBeTruthy();
     const blocked = await applyToEvent(screeningEvent.id, token, { screeningAnswers: SCREENING_ANSWERS_FIXTURE });
@@ -105,14 +105,12 @@ describe("entretien global : porte d’entrée obligatoire avant toute inscripti
     const { body: me } = await api<{ id: string }>("/me", {}, token);
     createdUserIds.push(me.id);
 
-    const { body: events } = await api<any[]>("/events");
+    const { body: { items: events } } = await api<{ items: any[] }>("/events");
     const directEvent = events.find(e => e.flow === "DIRECT");
     expect(directEvent).toBeTruthy();
-    // Sans questionnaire : refusé (400), jamais pour défaut de validation de profil (409).
-    const withoutQuestionnaire = await api(`/events/${directEvent.id}/apply`, { method: "POST", body: JSON.stringify({}) }, token);
-    expect(withoutQuestionnaire.status).toBe(400);
-
-    const allowed = await applyToEvent(directEvent.id, token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
+    // Arbitrage 12/E3 : aucun questionnaire à l'inscription networking (il n'est proposé qu'une fois
+    // la place confirmée) — un corps vide suffit, et jamais un refus pour défaut de validation.
+    const allowed = await api(`/events/${directEvent.id}/apply`, { method: "POST", body: JSON.stringify({}) }, token);
     expect(allowed.status).toBe(201);
     expect(allowed.body.application.status).toBe("PAYMENT_PENDING");
   });
@@ -440,6 +438,11 @@ describe("restaurateur limité à son quota mensuel d'événements publiables", 
     const organizer = await newOrganizer("QuotaTest");
     createdUserIds.push(organizer.userId);
     const admin = await adminToken();
+    // L'abonnement réel naît d'un checkout Stripe Billing (webhook) : simulé ici directement en base,
+    // seul l'état ACTIVE compte pour la publication. Le quota est lu sur le plan, jamais codé en dur.
+    const plan = await prisma.plan.findFirstOrThrow({ where: { active: true, monthlyEventQuota: { not: null } } });
+    const quota = plan.monthlyEventQuota!;
+    await prisma.restaurantSubscription.create({ data: { restaurantId: organizer.restaurantId, planId: plan.id, status: "ACTIVE", currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) } });
 
     const publishOne = async (n: number) => {
       const { body: event } = await api<{ id: string }>("/admin/events", { method: "POST", body: JSON.stringify({
@@ -452,16 +455,13 @@ describe("restaurateur limité à son quota mensuel d'événements publiables", 
       return api(`/admin/events/${event.id}/review-decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
     };
 
-    const first = await publishOne(1);
-    const second = await publishOne(2);
-    const third = await publishOne(3);
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(200);
-    expect(third.status).toBe(409);
-    expect((third.body as any).error).toMatch(/quota/i);
+    for (let n = 1; n <= quota; n++) expect((await publishOne(n)).status).toBe(200);
+    const overQuota = await publishOne(quota + 1);
+    expect(overQuota.status).toBe(409);
+    expect((overQuota.body as any).error).toMatch(/quota/i);
 
     const usage = await prisma.restaurantMonthlyUsage.findFirstOrThrow({ where: { restaurantId: organizer.restaurantId } });
-    expect(usage.eventsPublished).toBe(2);
+    expect(usage.eventsPublished).toBe(quota);
   });
 });
 
@@ -712,6 +712,8 @@ describe("droits RGPD : export, et suppression par anonymisation sans toucher au
     createdUserIds.push(participant.userId);
     const applyRes = await applyToEvent(event.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
     await payAndConfirm(applyRes.body.application.id, participant.token);
+    // Arbitrage 12/E3 : questionnaire professionnel envoyé après confirmation de la place.
+    expect((await api(`/applications/${applyRes.body.application.id}/networking-answers`, { method: "POST", body: JSON.stringify(NETWORKING_ANSWERS_FIXTURE) }, participant.token)).status).toBeLessThan(300);
 
     const exportRes = await api<any>("/me/export", {}, participant.token);
     expect(exportRes.status).toBe(200);
@@ -755,6 +757,7 @@ describe("droits RGPD : export, et suppression par anonymisation sans toucher au
     createdUserIds.push(participant.userId);
     const applyRes = await applyToEvent(event.id, participant.token, { networkingAnswers: NETWORKING_ANSWERS_FIXTURE });
     await payAndConfirm(applyRes.body.application.id, participant.token);
+    expect((await api(`/applications/${applyRes.body.application.id}/networking-answers`, { method: "POST", body: JSON.stringify(NETWORKING_ANSWERS_FIXTURE) }, participant.token)).status).toBeLessThan(300);
     // Libère la réservation (remboursable, > 24h de l'événement) pour ne plus bloquer la suppression.
     const cancelRes = await api<{ refunded: boolean }>(`/me/applications/${applyRes.body.application.id}/cancel`, { method: "POST" }, participant.token);
     expect(cancelRes.body.refunded).toBe(true);

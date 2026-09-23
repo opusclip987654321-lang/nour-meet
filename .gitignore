@@ -40,3 +40,6 @@ apps/api/public/uploads/*
 # Marqueurs écrits par scripts/deploy.sh sur le serveur (version précédente / dernière version saine)
 .last_deployed_*
 .last_good_*
+
+# Réglages Claude personnels (non partagés)
+.claude/settings.local.json
