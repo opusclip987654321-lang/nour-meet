@@ -1,4 +1,3 @@
-import rateLimit from "@fastify/rate-limit";
 import { UserRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -52,7 +51,7 @@ app.get("/admin/restaurants", { preHandler: roles(UserRole.ADMIN) }, async (requ
   // un champ de la fiche elle-même, jamais exposées au restaurateur (voir /restaurants/me).
   return prisma.restaurant.findMany({ where: query.status ? { status: query.status } : undefined, include: { owner: true, photos: { orderBy: { position: "asc" } }, subscription: { include: { plan: true } }, connectedAccount: true }, orderBy: { submittedAt: "desc" } });
 });
-app.patch("/admin/restaurants/:id/notes", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+app.patch("/admin/restaurants/:id/notes", { preHandler: roles(UserRole.ADMIN) }, async (request, _reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const { adminNotes } = z.object({ adminNotes: z.string().max(2000).nullable() }).parse(request.body);
   const updated = await prisma.restaurant.update({ where: { id }, data: { adminNotes } });
@@ -200,14 +199,14 @@ app.post("/admin/plans", { preHandler: roles(UserRole.ADMIN) }, async (request, 
 // quels (contrainte ON DELETE RESTRICT sur RestaurantSubscription.planId). Modifier le prix ou le
 // quota d'une formule active n'affecte que les nouveaux abonnements ; un abonnement déjà en cours
 // change de conditions au prochain renouvellement, jamais rétroactivement.
-app.patch("/admin/plans/:id", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+app.patch("/admin/plans/:id", { preHandler: roles(UserRole.ADMIN) }, async (request, _reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const input = z.object({ name: z.string().min(2).max(80).optional(), monthlyPriceCents: z.number().int().min(0).optional(), annualPriceCents: z.number().int().min(0).nullable().optional(), monthlyEventQuota: z.number().int().min(1).nullable().optional(), highlightTier: z.enum(["simple", "priority"]).nullable().optional(), active: z.boolean().optional() }).parse(request.body);
   const plan = await prisma.plan.update({ where: { id }, data: input });
   await audit(currentId(request), "UPDATE_PLAN", "Plan", id, input);
   return plan;
 });
-app.post("/admin/restaurants/:id/subscription", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+app.post("/admin/restaurants/:id/subscription", { preHandler: roles(UserRole.ADMIN) }, async (request, _reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const input = z.object({ planId: z.string(), status: z.enum(["TRIALING", "ACTIVE", "PAST_DUE", "CANCELLED", "INCOMPLETE"]).optional(), currentPeriodEnd: z.string().optional() }).parse(request.body);
   const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id } });

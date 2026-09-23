@@ -1,5 +1,3 @@
-import jwt from "@fastify/jwt";
-import rateLimit from "@fastify/rate-limit";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { app, prisma, smsVerification } from "../context.js";

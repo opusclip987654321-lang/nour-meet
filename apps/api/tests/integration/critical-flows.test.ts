@@ -984,3 +984,29 @@ describe("mise en relation fondée sur le consentement", () => {
     expect(await prisma.conversationMember.count({ where: { userId: b.userId } })).toBe(0);
   });
 });
+
+describe("signalement et confidentialité entre participants", () => {
+  it("valide la personne signalée, bloque les deux côtés et empêche toute nouvelle demande", async () => {
+    const a = await tracked("SignalA");
+    const b = await tracked("SignalB");
+    expect((await api("/reports", { method: "POST", body: JSON.stringify({ reportedId: a.userId, reason: "Test" }) }, a.token)).status).toBe(400);
+    expect((await api("/reports", { method: "POST", body: JSON.stringify({ reportedId: "inexistant", reason: "Test" }) }, a.token)).status).toBe(404);
+
+    const req = await api<{ id: string }>("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: a.userId }) }, b.token);
+    const accepted = await api<{ conversation: { id: string } }>(`/contacts/${req.body.id}/respond`, { method: "POST", body: JSON.stringify({ accept: true }) }, a.token);
+    const conversationId = accepted.body.conversation.id;
+
+    // Aucune donnée privée de l'autre personne dans les réponses de mise en relation.
+    const convos = await api<any[]>("/conversations", {}, a.token);
+    const requests = await api<any[]>("/me/contact-requests", {}, a.token);
+    const dump = JSON.stringify([convos.body, requests.body]);
+    expect(dump).not.toContain(b.phone);
+    expect(dump).not.toMatch(/"(phone|email|birthDate)"/);
+
+    expect((await api("/reports", { method: "POST", body: JSON.stringify({ reportedId: b.userId, reason: "Harcèlement", block: true }) }, a.token)).status).toBe(200);
+    // Bloqué dans les deux sens : la personne signalée ne peut plus écrire non plus.
+    expect((await api(`/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ body: "Bonjour" }) }, b.token)).status).toBe(403);
+    expect((await api(`/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ body: "Bonjour" }) }, a.token)).status).toBe(403);
+    expect((await api("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: a.userId }) }, b.token)).status).toBe(409);
+  });
+});

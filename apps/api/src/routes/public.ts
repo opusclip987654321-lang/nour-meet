@@ -1,6 +1,4 @@
-import rateLimit from "@fastify/rate-limit";
 import { EventStatus } from "@prisma/client";
-import path from "node:path";
 import { z } from "zod";
 import { app, prisma, smsVerification } from "../context.js";
 import { env } from "../env.js";

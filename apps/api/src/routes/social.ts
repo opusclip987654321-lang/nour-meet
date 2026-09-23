@@ -15,6 +15,11 @@ app.get("/me/tickets", { preHandler: auth }, async (request) => {
   return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await cachedQrDataUrl(t.code) })));
 });
 
+// Ce qu'un participant peut voir d'un autre (demande de contact, conversation, message) : son
+// prénom et sa photo, rien d'autre — jamais le téléphone, l'e-mail ni la date de naissance, que ces
+// routes renvoyaient auparavant avec l'objet utilisateur complet.
+const publicPerson = { id: true, displayName: true, profile: { select: { photoUrl: true, validatedAt: true } } } as const;
+
 app.get("/me/share-qr", { preHandler: auth }, async (request) => {
   const profile = await prisma.profile.findUniqueOrThrow({ where: { userId: currentId(request) } });
   return { code: profile.shareCode, qrDataUrl: await cachedQrDataUrl(profile.shareCode) };
@@ -38,16 +43,18 @@ app.post("/contacts/request", { preHandler: auth }, async (request, reply) => {
   if (existing?.status === ContactRequestStatus.REFUSED) return reply.code(409).send({ error: "Cette personne a décliné votre demande : elle ne peut pas être renouvelée." });
   if (existing?.status === ContactRequestStatus.ACCEPTED) return reply.code(409).send({ error: "Vous êtes déjà en contact avec cette personne." });
   if (existing?.status === ContactRequestStatus.PENDING) return existing;
+  // Une personne signalée par le destinataire ne peut plus lui envoyer de demande.
+  if (await prisma.report.findFirst({ where: { reporterId: recipientId, reportedId: requesterId }, select: { id: true } })) return reply.code(409).send({ error: "Cette personne n’accepte pas de demande de votre part." });
   const requestRow = existing
     ? await prisma.contactRequest.update({ where: { id: existing.id }, data: { status: ContactRequestStatus.PENDING } })
     : await prisma.contactRequest.create({ data: { requesterId, recipientId } });
-  await notify(recipientId, "Nouvelle demande de contact", "Un participant souhaite entrer en contact avec vous.");
+  await notify(recipientId, "Nouvelle demande de contact", "Un participant souhaite entrer en contact avec vous.", "/dashboard?tab=contacts");
   return requestRow;
 });
 
 app.get("/me/contact-requests", { preHandler: auth }, async (request) => {
   const userId = currentId(request);
-  return prisma.contactRequest.findMany({ where: { OR: [{ requesterId: userId }, { recipientId: userId }] }, include: { requester: { include: { profile: true } }, recipient: { include: { profile: true } } }, orderBy: { createdAt: "desc" } });
+  return prisma.contactRequest.findMany({ where: { OR: [{ requesterId: userId }, { recipientId: userId }] }, include: { requester: { select: publicPerson }, recipient: { select: publicPerson } }, orderBy: { createdAt: "desc" } });
 });
 
 app.post("/contacts/:id/respond", { preHandler: auth }, async (request, reply) => {
@@ -58,29 +65,38 @@ app.post("/contacts/:id/respond", { preHandler: auth }, async (request, reply) =
   const updated = await prisma.contactRequest.update({ where: { id }, data: { status: accept ? ContactRequestStatus.ACCEPTED : ContactRequestStatus.REFUSED } });
   if (accept) {
     const conversation = await prisma.conversation.create({ data: { members: { create: [{ userId: contact.requesterId }, { userId: contact.recipientId }] } } });
-    await notify(contact.requesterId, "Demande acceptée", "Vous pouvez maintenant échanger des messages.");
+    await notify(contact.requesterId, "Demande acceptée", "Vous pouvez maintenant échanger des messages.", "/dashboard?tab=contacts");
     return { contact: updated, conversation };
   }
   return reply.send({ contact: updated });
 });
 
-app.get("/conversations", { preHandler: auth }, async (request) => prisma.conversation.findMany({ where: { members: { some: { userId: currentId(request) } } }, include: { members: { include: { user: { include: { profile: true } } } }, messages: { orderBy: { createdAt: "desc" }, take: 1 } }, orderBy: { createdAt: "desc" } }));
+app.get("/conversations", { preHandler: auth }, async (request) => prisma.conversation.findMany({ where: { members: { some: { userId: currentId(request) } } }, include: { members: { select: { userId: true, blockedAt: true, user: { select: publicPerson } } }, messages: { orderBy: { createdAt: "desc" }, take: 1 } }, orderBy: { createdAt: "desc" } }));
 app.get("/conversations/:id/messages", { preHandler: auth }, async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params); const userId = currentId(request);
   await prisma.conversationMember.findUniqueOrThrow({ where: { conversationId_userId: { conversationId: id, userId } } });
-  return prisma.message.findMany({ where: { conversationId: id }, include: { sender: true }, orderBy: { createdAt: "asc" } });
+  return prisma.message.findMany({ where: { conversationId: id }, include: { sender: { select: publicPerson } }, orderBy: { createdAt: "asc" } });
 });
 app.post("/conversations/:id/messages", { preHandler: auth }, async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params); const userId = currentId(request); const { body, imageUrl } = z.object({ body: z.string().max(2000).optional(), imageUrl: z.string().url().optional() }).refine(v => v.body || v.imageUrl).parse(request.body);
   const member = await prisma.conversationMember.findUniqueOrThrow({ where: { conversationId_userId: { conversationId: id, userId } } });
   if (member.blockedAt) throw httpError(403, "Conversation bloquée");
-  return prisma.message.create({ data: { conversationId: id, senderId: userId, body, imageUrl }, include: { sender: true } });
+  return prisma.message.create({ data: { conversationId: id, senderId: userId, body, imageUrl }, include: { sender: { select: publicPerson } } });
 });
 
-app.post("/reports", { preHandler: auth }, async (request) => {
-  const input = z.object({ reportedId: z.string(), reason: z.string().min(3), details: z.string().max(1000).optional(), block: z.boolean().default(true) }).parse(request.body); const reporterId = currentId(request);
+// Signalement : la personne signalée doit exister et ne pas être soi-même. Le blocage s'applique
+// aux DEUX côtés des conversations partagées — auparavant seule la personne qui signalait était
+// bloquée, et la personne signalée pouvait continuer à lui écrire.
+app.post("/reports", { preHandler: auth }, async (request, reply) => {
+  const input = z.object({ reportedId: z.string(), reason: z.string().min(3).max(120), details: z.string().max(1000).optional(), block: z.boolean().default(true) }).parse(request.body); const reporterId = currentId(request);
+  if (input.reportedId === reporterId) return reply.code(400).send({ error: "Vous ne pouvez pas vous signaler vous-même." });
+  const reported = await prisma.user.findUnique({ where: { id: input.reportedId }, select: { id: true } });
+  if (!reported) return reply.code(404).send({ error: "Cette personne est introuvable." });
   const report = await prisma.report.create({ data: { reporterId, reportedId: input.reportedId, reason: input.reason, details: input.details } });
-  if (input.block) await prisma.conversationMember.updateMany({ where: { userId: reporterId, conversation: { members: { some: { userId: input.reportedId } } } }, data: { blockedAt: new Date() } });
+  if (input.block) {
+    const shared = await prisma.conversation.findMany({ where: { AND: [{ members: { some: { userId: reporterId } } }, { members: { some: { userId: input.reportedId } } }] }, select: { id: true } });
+    await prisma.conversationMember.updateMany({ where: { conversationId: { in: shared.map(c => c.id) }, userId: { in: [reporterId, input.reportedId] } }, data: { blockedAt: new Date() } });
+  }
   await audit(reporterId, "CREATE_REPORT", "Report", report.id);
   return report;
 });

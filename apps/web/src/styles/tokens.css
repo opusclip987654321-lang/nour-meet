@@ -33,6 +33,9 @@
   --info: var(--night-2);
   --info-bg: #eaedf7;
 
+  /* Données (graphiques) : bleu validé par le script dataviz (luminosité et contraste). */
+  --chart-1: #4a5bb0;
+
   /* Catégories d'événements */
   --rencontre: #b0406a;
   --rencontre-bg: #fbeaf0;

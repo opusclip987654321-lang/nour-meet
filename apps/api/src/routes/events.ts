@@ -1,4 +1,3 @@
-import rateLimit from "@fastify/rate-limit";
 import { EventStatus } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";

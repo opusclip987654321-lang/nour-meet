@@ -1,6 +1,5 @@
 import { EVENT_ZONES, regionOfZone } from "@nour/shared";
 import { AlternativeOfferStatus, ApplicationStatus, EventStatus, Prisma, QuotaCategory } from "@prisma/client";
-import { z } from "zod";
 import { prisma } from "../context.js";
 import { paymentDeadline } from "../domain.js";
 import { getSetting } from "../settings.js";

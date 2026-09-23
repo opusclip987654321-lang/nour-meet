@@ -2,7 +2,10 @@
   "name": "nour-meet-platform",
   "version": "1.0.0",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "concurrently -n API,WEB -c yellow,cyan \"npm run dev -w @nour/api\" \"npm run dev -w @nour/web\"",
     "dev:api": "npm run dev -w @nour/api",
@@ -15,15 +18,23 @@
     "db:migrate": "npm run prisma:migrate -w @nour/api",
     "db:migrate:deploy": "npm run prisma:migrate:deploy -w @nour/api",
     "db:seed": "npm run prisma:seed -w @nour/api",
-    "db:studio": "npm run prisma:studio -w @nour/api"
+    "db:studio": "npm run prisma:studio -w @nour/api",
+    "lint": "eslint apps/api/src apps/api/tests apps/api/prisma/seed.ts apps/web/src apps/web/tests packages/shared/src eslint.config.js"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "concurrently": "^9.2.1",
+    "eslint": "^10.11.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.12.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1"
   },
-  "engines": {"node": ">=20"},
+  "engines": {
+    "node": ">=20"
+  },
   "overrides": {
     "react-native": "0.86.2"
   }
