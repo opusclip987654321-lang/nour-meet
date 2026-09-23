@@ -1,0 +1,12 @@
+import { useEffect, useState } from "react";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { api } from "../api";
+import { Avatar, ScreenTitle } from "../components/ui";
+import { s } from "../theme";
+
+export function Messages({user}:{user:any}){
+  const [convos,setConvos]=useState<any[]>([]),[active,setActive]=useState<any>(null),[messages,setMessages]=useState<any[]>([]),[body,setBody]=useState("");useEffect(()=>{api<any[]>("/conversations").then(setConvos)},[]);
+  const other=(c:any)=>c.members.find((m:any)=>m.userId!==user.id)?.user;const open=async(c:any)=>{setActive(c);setMessages(await api(`/conversations/${c.id}/messages`))};const send=async()=>{if(!body.trim())return;const m=await api<any>(`/conversations/${active.id}/messages`,{method:"POST",body:JSON.stringify({body})});setMessages([...messages,m]);setBody("")};
+  if(active)return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==="ios"?"padding":undefined}><View style={s.chatHead}><Pressable onPress={()=>setActive(null)}><Text style={s.back}>‹</Text></Pressable><Avatar name={other(active)?.displayName} photoUrl={other(active)?.profile?.photoUrl}/><View><Text style={s.bodyStrong}>{other(active)?.displayName}</Text><Text style={s.validated}>CONTACT ACCEPTÉ</Text></View></View><ScrollView contentContainerStyle={s.chatBody}>{messages.map(m=><View key={m.id} style={[s.bubble,m.senderId===user.id&&s.bubbleMine]}><Text style={s.bubbleText}>{m.body}</Text><Text style={s.bubbleTime}>{new Date(m.createdAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</Text></View>)}</ScrollView><View style={s.chatInput}><TextInput style={s.chatText} value={body} onChangeText={setBody} placeholder="Votre message…" placeholderTextColor="#777"/><Pressable onPress={send}><Text style={s.send}>Envoyer</Text></Pressable></View></KeyboardAvoidingView>;
+  return <ScrollView contentContainerStyle={s.content}><ScreenTitle title="Messages"/><View style={s.tabs}><Text style={s.tabActive}>Tous</Text><Text style={s.tabText}>Non lus</Text></View>{convos.map(c=><Pressable style={s.conversation} onPress={()=>open(c)} key={c.id}><Avatar name={other(c)?.displayName??"?"} photoUrl={other(c)?.profile?.photoUrl}/><View style={{flex:1}}><Text style={s.bodyStrong}>{other(c)?.displayName}</Text><Text style={s.meta}>{c.messages[0]?.body??"Nouvelle conversation"}</Text></View><Text style={s.link}>›</Text></Pressable>)}</ScrollView>
+}
