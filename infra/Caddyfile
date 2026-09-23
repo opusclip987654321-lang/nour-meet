@@ -21,3 +21,8 @@ www.{$DOMAIN_WEB} {
 	reverse_proxy api:4000
 	encode gzip
 }
+
+n8n.nourmeet.com {
+	reverse_proxy n8n:5678
+	encode gzip
+}
