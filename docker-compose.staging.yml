@@ -72,6 +72,8 @@ services:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:4001}
         VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:-}
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        # Adresse publique du site : liens canoniques et Open Graph absolus (référencement).
+        VITE_SITE_URL: ${VITE_SITE_URL:-}
     restart: unless-stopped
     ports:
       - "127.0.0.1:8081:80"

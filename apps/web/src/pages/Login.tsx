@@ -4,6 +4,7 @@ import { api, setToken } from "../api";
 import { STAFF_ROLES, useAuth } from "../auth";
 import { Layout } from "../components/Layout";
 import { Notice } from "../components/ui";
+import { useSeo } from "../lib/seo";
 
 // Comptes de test créés par prisma/seed.ts (voir ce fichier pour le détail de chaque état) : ces
 // boutons ne sont affichés que lorsque le serveur tourne en mode SMS simulé (jamais en production,
@@ -39,6 +40,7 @@ const QUICK_LOGIN_GROUPS: {title:string; items:{label:string; phone:string}[]}[]
 ];
 
 export function Login() {
+  useSeo({title:"Connexion",description:"Connectez-vous à Nūr Meet avec votre numéro de téléphone.",path:"/login",noindex:true});
   const [phone,setPhone]=useState(""),[code,setCode]=useState(""),[step,setStep]=useState<1|2|3>(1),[error,setError]=useState(""),[devCode,setDevCode]=useState<string|null>(null); const {refresh}=useAuth(); const navigate=useNavigate();
   const [smsMode,setSmsMode]=useState<string|null>(null); const [quickLoginBusy,setQuickLoginBusy]=useState<string|null>(null);
   useEffect(()=>{api<{smsMode:string}>("/health").then(r=>setSmsMode(r.smsMode)).catch(()=>{})},[]);

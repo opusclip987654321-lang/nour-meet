@@ -9,8 +9,20 @@
 }
 
 {$DOMAIN_WEB} {
-	reverse_proxy web:80
-	encode gzip
+	encode zstd gzip
+	# Fichiers de référencement générés par l'API à partir des données réelles (corrections web
+	# 2026-09-24, §19) : servis sur le domaine du site, comme les moteurs de recherche l'attendent.
+	@seo path /sitemap.xml /robots.txt /llms.txt
+	handle @seo {
+		reverse_proxy api:4000
+	}
+	handle {
+		reverse_proxy web:80
+	}
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		-Server
+	}
 }
 
 www.{$DOMAIN_WEB} {
@@ -19,7 +31,8 @@ www.{$DOMAIN_WEB} {
 
 {$DOMAIN_API} {
 	reverse_proxy api:4000
-	encode gzip
+	encode zstd gzip
+	header -Server
 }
 
 n8n.nourmeet.com {

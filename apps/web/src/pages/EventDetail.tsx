@@ -1,16 +1,20 @@
 import { NETWORKING_QUESTIONS, SCREENING_QUESTIONS, eventRequiresScreening } from "@nour/shared";
 import type { PublicEvent } from "@nour/shared";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Suspense, lazy, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CalendarDays, Clock, Info, MapPin, ShieldCheck, Store, Ticket, Users, UserCheck } from "lucide-react";
 import { ProgressiveBlur } from "../components/brand";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { Layout } from "../components/Layout";
-import { PaymentModal } from "../components/payment";
-import { CategoryBadge, Loading, Notice, ShareButton, availabilityLabel } from "../components/ui";
+import { CategoryBadge, Loading, Notice, ShareButton, ViewerStatusBadge, availabilityLabel } from "../components/ui";
+import { absoluteUrl, breadcrumbJsonLd, useSeo } from "../lib/seo";
+import { NotFound } from "./NotFound";
 import { dateTime, imgUrl, money } from "../lib/format";
 import { APPLICATION_STATUS_LABEL } from "../lib/labels";
+
+// Stripe (≈ 90 ko) ne se charge qu'à l'ouverture du paiement, jamais avec la page (corrections web 2026-09-24, §11).
+const PaymentModal = lazy(() => import("../components/payment").then(m => ({ default: m.PaymentModal })));
 
 // Arbitrage 12/E3 (cahier des charges consolidé 2026-09-20) : proposé uniquement une fois la place
 // confirmée, jamais avant ou pendant le paiement, et entièrement facultatif — "Plus tard" ne bloque
@@ -50,7 +54,7 @@ function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { 
   if (application.status === "PAYMENT_PENDING") return <div className="payment-block">
     {event.viewerStatus === "WAITLIST" ? <Notice kind="info">Vous êtes sur la liste d’attente. Dès qu’une place se libère, vous êtes prévenu(e) : elle revient à la première personne qui finalise son paiement.</Notice> : <Notice kind="success">{application.reservation ? `Votre place est retenue quelques minutes (jusqu’au ${dateTime(application.reservation.expiresAt)}) : finalisez votre paiement.` : "Vous pouvez régler votre billet dès maintenant."}</Notice>}
     <button className="button full" onClick={() => setShowPayment(true)}>{event.priceCents === 0 ? "Confirmer ma place (gratuit)" : `Payer par carte · ${money(event.priceCents)}`}</button>
-    {showPayment && <PaymentModal applicationId={application.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }} onWaitlisted={onWaitlisted}/>}
+    {showPayment && <Suspense fallback={null}><PaymentModal applicationId={application.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }} onWaitlisted={onWaitlisted}/></Suspense>}
   </div>;
   if (application.call) return <div className="call-scheduled"><span className="eyebrow">Entretien programmé</span><strong>{dateTime(application.call.startsAt)}</strong><p>L’organisateur vous appellera à cette heure, puis vous serez informé(e) de sa décision.</p></div>;
   return null;
@@ -106,7 +110,25 @@ export function EventDetail() {
     return ()=>{ignore=true};
   },[user,event?.id]);
 
-  if(notFound)return <Layout><div className="state-page"><h2>Cette soirée est introuvable</h2><p className="page-lead" style={{margin:0}}>Elle a peut-être été retirée ou le lien est incomplet.</p><Link className="button" to="/events">Voir les prochaines soirées</Link></div></Layout>;
+  // §19/§20 (corrections web 2026-09-24) : données structurées Event fidèles à la fiche affichée ; un
+  // événement non réservable (données de démonstration) n'est ni indexé ni déclaré aux moteurs.
+  useSeo(event?{
+    title:`${event.title} · ${event.category} à ${event.district}`,
+    description:event.description.slice(0,155),
+    path:`/events/${event.slug}`,
+    image:imgUrl(event.imageUrl),
+    noindex:!event.bookable,
+    jsonLd:event.bookable?[{
+      "@context":"https://schema.org","@type":"Event",name:event.title,description:event.description,
+      startDate:event.startsAt,endDate:event.endsAt,eventStatus:event.status==="CANCELLED"?"https://schema.org/EventCancelled":"https://schema.org/EventScheduled",
+      eventAttendanceMode:"https://schema.org/OfflineEventAttendanceMode",image:[imgUrl(event.imageUrl)],
+      location:{"@type":event.venue?"Restaurant":"Place",name:event.venue?.name??event.district,address:{"@type":"PostalAddress",addressLocality:event.district,addressRegion:"Île-de-France",addressCountry:"FR"}},
+      organizer:{"@type":"Organization",name:event.organizer.name},
+      offers:{"@type":"Offer",url:absoluteUrl(`/events/${event.slug}`),price:(event.priceCents/100).toFixed(2),priceCurrency:"EUR",availability:event.availability.kind!=="unknown"&&event.availability.full?"https://schema.org/SoldOut":"https://schema.org/InStock"},
+      ...(event.minAge?{typicalAgeRange:event.maxAge?`${event.minAge}-${event.maxAge}`:`${event.minAge}-`}:{})
+    },breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Soirées",path:"/events"},{name:event.title,path:`/events/${event.slug}`}])]:null
+  }:null);
+  if(notFound)return <NotFound title="Cette soirée est introuvable" message="Elle a peut-être été retirée, ou le lien est incomplet."/>;
   if(!event)return <Layout><Loading/></Layout>;
 
   const requiresScreening = eventRequiresScreening(event);
@@ -188,7 +210,7 @@ export function EventDetail() {
       <ProgressiveBlur position="bottom" height="70%"/>
       <div className="event-hero-shade" aria-hidden="true"/>
       <div className="event-hero-copy">
-        <div className="event-hero-badges"><CategoryBadge category={event.category} className="inline"/><span className={`flow-badge ${requiresScreening?"screening":"direct"}`}>{requiresScreening?<><UserCheck size={14} aria-hidden="true"/>Sur sélection</>:<><Ticket size={14} aria-hidden="true"/>Accès direct</>}</span></div>
+        <div className="event-hero-badges"><CategoryBadge category={event.category} className="inline"/><ViewerStatusBadge status={event.viewerStatus}/><span className={`flow-badge ${requiresScreening?"screening":"direct"}`}>{requiresScreening?<><UserCheck size={14} aria-hidden="true"/>Sur sélection</>:<><Ticket size={14} aria-hidden="true"/>Accès direct</>}</span></div>
         <h1>{event.title}</h1>
         <p className="event-hero-meta"><span><CalendarDays size={18} aria-hidden="true"/>{day} · {time}</span><span><MapPin size={18} aria-hidden="true"/>{event.district}</span></p>
       </div>

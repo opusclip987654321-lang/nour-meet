@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 import { ReactNode } from "react";
+import { useSeo } from "./lib/seo";
 import mentionsMd from "./legal/mentions-legales.md?raw";
 import cguMd from "./legal/cgu.md?raw";
 import cgvMd from "./legal/cgv.md?raw";
@@ -85,8 +86,9 @@ function LegalPage({ markdown }: { markdown: string }) {
   );
 }
 
-export const MentionsLegales = () => <LegalPage markdown={mentionsMd} />;
-export const CGU = () => <LegalPage markdown={cguMd} />;
-export const CGV = () => <LegalPage markdown={cgvMd} />;
-export const Confidentialite = () => <LegalPage markdown={confidentialiteMd} />;
-export const Cookies = () => <LegalPage markdown={cookiesMd} />;
+const Titled = ({ title, path, markdown }: { title: string; path: string; markdown: string }) => { useSeo({ title, path, description: `${title} du service Nūr Meet.` }); return <LegalPage markdown={markdown} />; };
+export const MentionsLegales = () => <Titled title="Mentions légales" path="/legal/mentions-legales" markdown={mentionsMd} />;
+export const CGU = () => <Titled title="Conditions générales d’utilisation" path="/legal/cgu" markdown={cguMd} />;
+export const CGV = () => <Titled title="Conditions générales de vente" path="/legal/cgv" markdown={cgvMd} />;
+export const Confidentialite = () => <Titled title="Politique de confidentialité" path="/legal/confidentialite" markdown={confidentialiteMd} />;
+export const Cookies = () => <Titled title="Politique cookies" path="/legal/cookies" markdown={cookiesMd} />;

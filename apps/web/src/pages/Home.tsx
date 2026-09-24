@@ -7,6 +7,7 @@ import { Picture } from "../components/brand";
 import { Layout } from "../components/Layout";
 import { EventCard, availabilityLabel } from "../components/ui";
 import { imgUrl, money } from "../lib/format";
+import { SITE_NAME, SITE_URL, absoluteUrl, useSeo } from "../lib/seo";
 
 // Témoignages : uniquement ceux saisis ou validés dans l'administration (API /testimonials). Aucun
 // avis de remplacement : si la liste est vide, la section n'existe pas.
@@ -48,7 +49,13 @@ const FAQ: { q: string; a: string }[] = [
 
 export function Home() {
   const [events,setEvents]=useState<PublicEvent[]|null>(null);
-  useEffect(()=>{api<Paginated<PublicEvent>>("/events").then(r=>setEvents(r.items)).catch(()=>setEvents([]))},[]);
+  useEffect(()=>{api<Paginated<PublicEvent>>("/events?pageSize=6").then(r=>setEvents(r.items)).catch(()=>setEvents([]))},[]);
+  // Organisation, site et FAQ : uniquement des informations visibles sur la page ou dans le pied de page.
+  useSeo({title:`${SITE_NAME} — rencontres et soirées en petit comité à Paris`,path:"/",jsonLd:[
+    {"@context":"https://schema.org","@type":"Organization",name:SITE_NAME,url:SITE_URL,logo:absoluteUrl("/icon-512.png"),email:"contact@nourmeet.com",areaServed:{"@type":"AdministrativeArea",name:"Île-de-France"}},
+    {"@context":"https://schema.org","@type":"WebSite",name:SITE_NAME,url:SITE_URL,inLanguage:"fr-FR"},
+    {"@context":"https://schema.org","@type":"FAQPage",mainEntity:FAQ.map(f=>({"@type":"Question",name:f.q,acceptedAnswer:{"@type":"Answer",text:f.a}}))}
+  ]});
   return <Layout>
     <section className="home-hero" aria-labelledby="hero-title">
       <div className="home-hero-inner">
