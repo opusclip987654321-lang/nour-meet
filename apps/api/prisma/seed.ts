@@ -282,6 +282,8 @@ async function main() {
   // naissance adulte. Les comptes de démonstration qui n'en ont pas en reçoivent une (y compris sur
   // une base déjà seedée, que les upserts ci-dessus ne modifient pas).
   await prisma.profile.updateMany({ where: { birthDate: null, user: { phone: { startsWith: "+336000000" } } }, data: { birthDate: new Date("1994-05-10") } });
+  // Comptes de test créés avec un numéro : considérés comme déjà vérifiés par SMS (connexion rapide).
+  await prisma.user.updateMany({ where: { phone: { not: null }, phoneVerifiedAt: null, isDemo: false }, data: { phoneVerifiedAt: new Date() } });
 }
 
 main().finally(() => prisma.$disconnect());

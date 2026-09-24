@@ -101,8 +101,13 @@ enum MinParticipantsOutcome {
 
 model User {
   id               String           @id @default(cuid())
-  phone            String           @unique
+  // Connexion par Google ou par e-mail depuis le 2026-09-24 : le numéro n'est plus obligatoire à la
+  // création du compte. Il est vérifié une seule fois par SMS (phoneVerifiedAt) avant la première
+  // inscription à une soirée — jamais redemandé à chaque connexion, pour limiter le coût des SMS.
+  phone            String?          @unique
+  phoneVerifiedAt  DateTime?
   email            String?          @unique
+  emailVerifiedAt  DateTime?
   displayName      String
   role             UserRole         @default(PARTICIPANT)
   suspendedAt      DateTime?
@@ -134,6 +139,34 @@ model User {
   shareLinks       ShareLink[]
   articles         Article[]
   legalAcceptances LegalAcceptance[]
+  authIdentities   AuthIdentity[]
+}
+
+// Compte externe relié (Google) : identifiant stable du fournisseur (« sub »), jamais l'adresse e-mail
+// seule, qui peut changer chez le fournisseur.
+model AuthIdentity {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider  String
+  subject   String
+  email     String?
+  createdAt DateTime @default(now())
+  @@unique([provider, subject])
+  @@index([userId])
+}
+
+// Code de connexion à usage unique envoyé par e-mail (10 minutes, 5 essais) : seule son empreinte est
+// conservée, jamais le code en clair.
+model EmailLoginCode {
+  id        String    @id @default(cuid())
+  email     String
+  codeHash  String
+  attempts  Int       @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  @@index([email, createdAt])
 }
 
 model Profile {

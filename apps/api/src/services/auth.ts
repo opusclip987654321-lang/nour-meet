@@ -2,7 +2,7 @@ import { UserRole } from "@prisma/client";
 import { FastifyRequest } from "fastify";
 import { httpError, prisma } from "../context.js";
 
-export type TokenUser = { sub: string; role: UserRole; phone: string };
+export type TokenUser = { sub: string; role: UserRole; iat?: number };
 
 // Le rôle et l'état du compte sont vérifiés en base à chaque requête (pas seulement via les
 // informations figées dans le jeton, valide 30 jours) : une promotion, une rétrogradation ou une

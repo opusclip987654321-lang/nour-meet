@@ -77,25 +77,34 @@ test("abonnement restaurateur : cartes de tarifs côte à côte, sans la mention
   await expect(page).not.toHaveURL(/\/admin\/finance/);
 });
 
-test("inscription par SMS (mode simulé), choix participant, puis déconnexion", async ({ page, isMobile }) => {
+test("inscription par e-mail sans SMS, numéro confirmé une seule fois avant la première réservation, puis déconnexion", async ({ page, isMobile }) => {
+  const email = `e2e-${Date.now()}@test.nourmeet.local`;
   const phone = `+3361${String(Date.now()).slice(-8)}`;
   try {
     await page.goto("/login");
-    await page.getByLabel("Numéro de téléphone").fill(phone);
-    await page.getByRole("button", { name: /Recevoir|Continuer|Envoyer/ }).click();
-    await page.getByLabel("Code à six chiffres").fill("123456");
+    await page.getByLabel("Adresse e-mail").fill(email);
+    await page.getByRole("button", { name: "Recevoir mon code par e-mail" }).click();
+    const emailCode = (await page.locator(".demo-box span").textContent())!.replace(/\D/g, "");
+    await page.getByLabel("Code à six chiffres").fill(emailCode);
     await page.getByRole("button", { name: "Vérifier le code" }).click();
     await page.getByRole("button", { name: /Participer aux événements/ }).click();
     await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.getByTestId("notification-bell")).toBeVisible();
+    // Première réservation : la vérification du numéro remplace le bouton d'inscription.
+    await page.goto("/events/brunch-networking-independants");
+    const verification = page.getByTestId("phone-verification").first();
+    await expect(verification).toBeVisible();
+    await verification.getByLabel("Numéro de téléphone").fill(phone);
+    await verification.getByRole("button", { name: "Recevoir le code" }).click();
+    await verification.getByLabel(/Code reçu par SMS/).fill("123456");
+    await verification.getByRole("button", { name: "Confirmer mon numéro" }).click();
+    await expect(page.getByRole("button", { name: "S’inscrire" }).first()).toBeVisible();
     if (isMobile) await page.getByRole("button", { name: "Ouvrir le menu" }).click();
     await page.getByRole("button", { name: "Se déconnecter" }).first().click();
     await expect(page.getByTestId("notification-bell")).toHaveCount(0);
-    if (isMobile) await page.getByRole("button", { name: /Ouvrir le menu|Fermer le menu/ }).click().catch(() => {});
-    await expect(page.getByRole("link", { name: /Se connecter/ }).first()).toBeAttached();
   } finally {
     const { prisma } = await import("./helpers.js");
-    const user = await prisma.user.findUnique({ where: { phone } });
+    const user = await prisma.user.findUnique({ where: { email } });
     if (user) { await prisma.legalAcceptance.deleteMany({ where: { userId: user.id } }); await prisma.user.delete({ where: { id: user.id } }).catch(() => {}); }
   }
 });

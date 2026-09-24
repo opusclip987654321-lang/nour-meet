@@ -17,13 +17,17 @@ import { deleteUploadedFile, prisma } from "../context.js";
 // donnée personnelle du compte).
 export const anonymizeUser = async (userId: string) => {
   const existingProfile = await prisma.profile.findUnique({ where: { userId } });
+  const existingEmail = (await prisma.user.findUnique({ where: { id: userId }, select: { email: true } }))?.email;
   const profileData = { birthDate: null, city: null, profession: null, interests: [] as string[], bio: null, photoUrl: null };
   await prisma.$transaction([
-    prisma.user.update({ where: { id: userId }, data: { phone: `deleted-${userId}`, email: null, displayName: "Compte supprimé", deletedAt: new Date() } }),
+    prisma.user.update({ where: { id: userId }, data: { phone: `deleted-${userId}`, phoneVerifiedAt: null, email: null, emailVerifiedAt: null, displayName: "Compte supprimé", deletedAt: new Date() } }),
     prisma.profile.updateMany({ where: { userId }, data: profileData }),
     prisma.screeningAnswer.updateMany({ where: { application: { userId } }, data: { motivation: "[supprimé]", relationshipGoal: "[supprimé]", personality: "[supprimé]", desiredQualities: "[supprimé]", ageRangeSought: "[supprimé]", valuesAndLifestyle: "[supprimé]", noteForOrganizer: null } }),
     prisma.networkingAnswer.updateMany({ where: { application: { userId } }, data: { sector: "[supprimé]", currentRole: "[supprimé]", experienceLevel: "[supprimé]", goal: "[supprimé]", soughtProfiles: "[supprimé]", contribution: "[supprimé]", topics: "[supprimé]" } }),
-    prisma.testimonial.updateMany({ where: { submittedByUserId: userId }, data: { displayName: "Ancien membre" } })
+    prisma.testimonial.updateMany({ where: { submittedByUserId: userId }, data: { displayName: "Ancien membre" } }),
+    // Comptes Google reliés : identifiant et e-mail du fournisseur, données personnelles à effacer.
+    prisma.authIdentity.deleteMany({ where: { userId } }),
+    prisma.emailLoginCode.deleteMany({ where: { email: existingEmail ?? "" } })
   ]);
   // La photo de profil est une vraie donnée personnelle (image de la personne) : nullifier la
   // colonne ne suffit pas, le fichier lui-même doit disparaître du disque.

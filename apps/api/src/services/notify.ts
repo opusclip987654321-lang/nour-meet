@@ -10,7 +10,7 @@ export const notify = async (userId: string, title: string, body: string, linkPa
   // rien à envoyer vers le numéro/e-mail de substitution posé par la suppression RGPD.
   if (user.deletedAt) return;
   await prisma.notification.create({ data: { userId, title, body, linkPath } });
-  await prisma.outboxMessage.create({ data: { channel: "SMS", recipient: user.phone, body: `${title} — ${body}` } });
+  if (user.phone) await prisma.outboxMessage.create({ data: { channel: "SMS", recipient: user.phone, body: `${title} — ${body}` } });
   if (user.email) {
     const outboxEmail = await prisma.outboxMessage.create({ data: { channel: "EMAIL", recipient: user.email, subject: title, body } });
     if (emailProvider.mode === "resend") {

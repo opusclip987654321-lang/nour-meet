@@ -4,6 +4,7 @@ import { FormEvent, Suspense, lazy, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CalendarDays, Clock, Info, MapPin, ShieldCheck, Store, Ticket, Users, UserCheck } from "lucide-react";
 import { ProgressiveBlur } from "../components/brand";
+import { PhoneVerification } from "../components/PhoneVerification";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { Layout } from "../components/Layout";
@@ -260,6 +261,7 @@ export function EventDetail() {
       {canCancel&&<button className="button danger full" disabled={busy} onClick={cancelApplication}>Annuler mon inscription</button>}
     </>
     :user.hasRestaurant?<Notice kind="info">Votre compte restaurateur vous permet de découvrir les événements proposés, mais ne permet pas d’y participer.</Notice>
+    :!user.phoneVerified?<PhoneVerification compact/>
     :requiresScreening&&!profileValidated?<Notice kind="error">Votre profil doit d’abord être validé lors d’un entretien avec Nūr Meet avant de vous inscrire à un speed dating. <Link to="/dashboard">Demander mon entretien →</Link></Notice>
     :categoryUnknown?<Notice kind="error">Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement.</Notice>
     :requiresScreening&&showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>

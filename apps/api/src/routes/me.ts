@@ -7,7 +7,8 @@ import { z } from "zod";
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, app, deleteUploadedFile, prisma, profileUploadsDir } from "../context.js";
 import { anonymizeUser, hasAcceptedCurrent, profileAge, recordAcceptance } from "../services/account.js";
 import { audit } from "../services/audit.js";
-import { auth, currentId } from "../services/auth.js";
+import { TokenUser, auth, currentId } from "../services/auth.js";
+import { SESSION_RENEW_AFTER_SECONDS, signSession } from "../services/session.js";
 
 app.get("/me", { preHandler: auth }, async (request) => {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: currentId(request) }, include: { profile: true } });
@@ -16,7 +17,12 @@ app.get("/me", { preHandler: auth }, async (request) => {
   // événements (le rôle ne devient ORGANIZER qu'à l'approbation, bien après la simple candidature).
   const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: user.id }, select: { id: true } });
   const cguAccepted = await hasAcceptedCurrent(user.id, LegalDocument.CGU);
-  return { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profile: user.profile, age: profileAge(user.profile?.birthDate), hasRestaurant: !!restaurant, cguAccepted };
+  // Session glissante (2026-09-24) : au plus une fois par jour, un jeton neuf de 90 jours remplace
+  // l'ancien — un utilisateur actif n'a jamais à se reconnecter (ni à redemander un code).
+  const token = request.user as TokenUser;
+  const refreshedToken = token.iat && Date.now() / 1000 - token.iat > SESSION_RENEW_AFTER_SECONDS ? signSession(user) : undefined;
+  const googleLinked = !!(await prisma.authIdentity.findFirst({ where: { userId: user.id, provider: "google" }, select: { id: true } }));
+  return { id: user.id, phone: user.phone, phoneVerified: !!user.phoneVerifiedAt, email: user.email, displayName: user.displayName, role: user.role, profile: user.profile, age: profileAge(user.profile?.birthDate), hasRestaurant: !!restaurant, cguAccepted, googleLinked, ...(refreshedToken ? { refreshedToken } : {}) };
 });
 
 // CGU §2 : la date de naissance est obligatoire et doit correspondre à une personne majeure ; les
@@ -28,7 +34,10 @@ app.patch("/me/profile", { preHandler: auth }, async (request, reply) => {
   if (!input.acceptCgu && !(await hasAcceptedCurrent(userId, LegalDocument.CGU))) return reply.code(422).send({ error: "Vous devez accepter les conditions générales d’utilisation pour continuer." });
   if (input.acceptCgu) await recordAcceptance(request, userId, LegalDocument.CGU, "profile");
   const profileData = { birthDate: new Date(input.birthDate), city: input.city, profession: input.profession, interests: input.interests, bio: input.bio, quotaCategory: input.quotaCategory, profileCompleted: true };
-  const user = await prisma.user.update({ where: { id: userId }, data: { displayName: input.displayName, email: input.email, profile: { upsert: { create: profileData, update: profileData } } }, include: { profile: true } });
+  // Une nouvelle adresse n'est plus « vérifiée » : elle le redeviendra à la prochaine connexion par code.
+  const previousEmail = (await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })).email;
+  const emailChanged = input.email !== undefined && (input.email?.toLowerCase() ?? null) !== previousEmail;
+  const user = await prisma.user.update({ where: { id: userId }, data: { displayName: input.displayName, email: input.email?.toLowerCase() ?? input.email, ...(emailChanged ? { emailVerifiedAt: null } : {}), profile: { upsert: { create: profileData, update: profileData } } }, include: { profile: true } });
   await audit(userId, "UPDATE_PROFILE", "User", userId);
   return user;
 });
@@ -68,7 +77,7 @@ app.delete("/me/profile-photo", { preHandler: auth }, async (request, reply) => 
 app.get("/me/export", { preHandler: auth }, async (request) => {
   const userId = currentId(request);
   const [user, applications, reservations, tickets, payments, waitlistEntries, alternativeOffers, notifications, loyaltyEntries, shareLinks, testimonials, contactRequestsSent, contactRequestsReceived] = await Promise.all([
-    prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { profile: true } }),
+    prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { profile: true, authIdentities: { select: { provider: true, email: true, createdAt: true } } } }),
     prisma.application.findMany({ where: { userId }, include: { screeningAnswer: true, networkingAnswer: true, event: { select: { title: true, slug: true } } } }),
     prisma.reservation.findMany({ where: { userId }, include: { event: { select: { title: true, slug: true } } } }),
     prisma.ticket.findMany({ where: { reservation: { userId } } }),
@@ -85,7 +94,7 @@ app.get("/me/export", { preHandler: auth }, async (request) => {
   await audit(userId, "EXPORT_PERSONAL_DATA", "User", userId);
   return {
     exportedAt: new Date().toISOString(),
-    account: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, createdAt: user.createdAt },
+    account: { id: user.id, phone: user.phone, phoneVerifiedAt: user.phoneVerifiedAt, email: user.email, displayName: user.displayName, role: user.role, createdAt: user.createdAt, linkedAccounts: user.authIdentities },
     profile: user.profile,
     applications, reservations, tickets, payments, waitlistEntries, alternativeOffers, notifications, loyaltyEntries, shareLinks, testimonials,
     contactRequests: { sent: contactRequestsSent, received: contactRequestsReceived }

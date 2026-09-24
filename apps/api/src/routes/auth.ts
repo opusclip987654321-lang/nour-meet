@@ -3,7 +3,10 @@ import { z } from "zod";
 import { app, prisma, smsVerification } from "../context.js";
 import { env } from "../env.js";
 import { normalizePhoneNumber } from "../phone.js";
+import { audit } from "../services/audit.js";
 import { auth, currentId } from "../services/auth.js";
+import { checkEmailLoginCode, normalizeEmail, sendEmailLoginCode, verifyGoogleCredential } from "../services/login.js";
+import { loginResponse } from "../services/session.js";
 
 app.post("/auth/request-otp", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 3, timeWindow: "10 minutes" } } }, async (request) => {
   const input = z.object({ phone: z.string().min(8).max(30) }).parse(request.body);
@@ -24,15 +27,76 @@ app.post("/auth/verify-otp", { config: { rateLimit: { max: smsVerification.mode 
   const input = z.object({ phone: z.string().min(8).max(30), code: z.string().regex(/^\d{6}$/), displayName: z.string().min(2).optional() }).parse(request.body);
   const phone = normalizePhoneNumber(input.phone);
   if (!await smsVerification.checkCode(phone, input.code)) return reply.code(401).send({ error: "Code incorrect ou expiré" });
-  let user = await prisma.user.findUnique({ where: { phone }, include: { profile: true } });
+  let user = await prisma.user.findUnique({ where: { phone } });
   // isNewUser sert au front à proposer, une seule fois, le choix « participant ou restaurateur »
   // juste après la création du compte — jamais recalculé ni stocké, seulement vrai sur cet appel-ci.
   let isNewUser = false;
-  if (!user) { user = await prisma.user.create({ data: { phone, displayName: input.displayName ?? "Nouveau membre", profile: { create: { interests: [] } } }, include: { profile: true } }); isNewUser = true; }
-  if (user.suspendedAt) return reply.code(403).send({ error: "Compte suspendu" });
-  if (user.deletedAt) return reply.code(403).send({ error: "Compte supprimé" });
-  const token = app.jwt.sign({ sub: user.id, role: user.role, phone: user.phone }, { expiresIn: "30d" });
-  return { token, isNewUser, user: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profileCompleted: user.profile?.profileCompleted ?? false } };
+  if (!user) { user = await prisma.user.create({ data: { phone, phoneVerifiedAt: new Date(), displayName: input.displayName ?? "Nouveau membre", profile: { create: { interests: [] } } } }); isNewUser = true; }
+  else if (!user.phoneVerifiedAt) await prisma.user.update({ where: { id: user.id }, data: { phoneVerifiedAt: new Date() } });
+  return loginResponse(user.id, isNewUser);
+});
+
+// Connexion par e-mail (2026-09-24) : code à usage unique de 6 chiffres, valable 10 minutes. Quasi
+// gratuit (Resend), contrairement au SMS. Crée le compte à la première connexion.
+app.post("/auth/email/request-code", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 5, timeWindow: "10 minutes" } } }, async (request) => {
+  const { email } = z.object({ email: z.string().email().max(200) }).parse(request.body);
+  const result = await sendEmailLoginCode(email);
+  return { sent: true, expiresInSeconds: 600, ...(result.devCode ? { devCode: result.devCode } : {}) };
+});
+app.post("/auth/email/verify", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const input = z.object({ email: z.string().email().max(200), code: z.string().regex(/^\d{6}$/), displayName: z.string().min(2).max(80).optional() }).parse(request.body);
+  if (!await checkEmailLoginCode(input.email, input.code)) return reply.code(401).send({ error: "Code incorrect ou expiré" });
+  const email = normalizeEmail(input.email);
+  let user = await prisma.user.findUnique({ where: { email } });
+  let isNewUser = false;
+  if (!user) { user = await prisma.user.create({ data: { email, emailVerifiedAt: new Date(), displayName: input.displayName ?? "Nouveau membre", profile: { create: { interests: [] } } } }); isNewUser = true; }
+  else if (!user.emailVerifiedAt) await prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
+  await audit(user.id, "LOGIN_EMAIL", "User", user.id);
+  return loginResponse(user.id, isNewUser);
+});
+
+// Connexion avec Google (2026-09-24). Un compte Nūr Meet existant avec la même adresse e-mail
+// (vérifiée par Google) est relié automatiquement plutôt que dupliqué.
+app.post("/auth/google", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 20, timeWindow: "10 minutes" } } }, async (request) => {
+  const { credential } = z.object({ credential: z.string().min(20).max(5000) }).parse(request.body);
+  const google = await verifyGoogleCredential(credential);
+  const identity = await prisma.authIdentity.findUnique({ where: { provider_subject: { provider: "google", subject: google.subject } } });
+  let userId = identity?.userId;
+  let isNewUser = false;
+  if (!userId) {
+    const existing = google.email && google.emailVerified ? await prisma.user.findUnique({ where: { email: google.email } }) : null;
+    if (existing) userId = existing.id;
+    else {
+      const created = await prisma.user.create({ data: { email: google.email && google.emailVerified ? google.email : null, emailVerifiedAt: google.emailVerified ? new Date() : null, displayName: google.name?.slice(0, 80) || "Nouveau membre", profile: { create: { interests: [] } } } });
+      userId = created.id; isNewUser = true;
+    }
+    await prisma.authIdentity.create({ data: { userId, provider: "google", subject: google.subject, email: google.email } });
+  }
+  await audit(userId, "LOGIN_GOOGLE", "User", userId);
+  return loginResponse(userId, isNewUser);
+});
+
+// Vérification du numéro, une seule fois (2026-09-24) : seul SMS encore envoyé, avant la première
+// inscription à une soirée. Un numéro ne peut appartenir qu'à un seul compte.
+app.post("/me/phone/request-code", { preHandler: auth, config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 3, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const phone = normalizePhoneNumber(z.object({ phone: z.string().min(8).max(30) }).parse(request.body).phone);
+  const owner = await prisma.user.findUnique({ where: { phone } });
+  if (owner && owner.id !== currentId(request)) return reply.code(409).send({ error: "Ce numéro est déjà utilisé par un autre compte. Connectez-vous avec ce numéro, ou écrivez-nous à contact@nourmeet.com." });
+  await smsVerification.sendCode(phone);
+  return { sent: true, expiresInSeconds: 600, ...(smsVerification.mode === "mock" ? { devCode: env.DEV_OTP_CODE } : {}) };
+});
+app.post("/me/phone/verify", { preHandler: auth, config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const input = z.object({ phone: z.string().min(8).max(30), code: z.string().regex(/^\d{6}$/) }).parse(request.body);
+  const phone = normalizePhoneNumber(input.phone);
+  if (!await smsVerification.checkCode(phone, input.code)) return reply.code(401).send({ error: "Code incorrect ou expiré" });
+  try {
+    await prisma.user.update({ where: { id: currentId(request) }, data: { phone, phoneVerifiedAt: new Date() } });
+  } catch (err) {
+    if ((err as { code?: string }).code === "P2002") return reply.code(409).send({ error: "Ce numéro est déjà utilisé par un autre compte." });
+    throw err;
+  }
+  await audit(currentId(request), "VERIFY_PHONE", "User", currentId(request));
+  return { verified: true, phone };
 });
 // Section 9.2 : le mobile crée ce jeton opaque (jamais son vrai jeton de session) avant d'ouvrir le
 // navigateur intégré vers /pay/:applicationId ; à usage unique, expire en quelques minutes.
@@ -52,6 +116,6 @@ app.post("/auth/payment-session-exchange", async (request, reply) => {
   if (!session || session.usedAt || session.expiresAt < new Date()) return reply.code(401).send({ error: "Session de paiement invalide ou expirée" });
   await prisma.paymentSession.update({ where: { id: session.id }, data: { usedAt: new Date() } });
   const user = await prisma.user.findUniqueOrThrow({ where: { id: session.userId } });
-  const jwt = app.jwt.sign({ sub: user.id, role: user.role, phone: user.phone }, { expiresIn: "15m" });
+  const jwt = app.jwt.sign({ sub: user.id, role: user.role }, { expiresIn: "15m" });
   return { token: jwt, applicationId: session.applicationId };
 });

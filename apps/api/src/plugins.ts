@@ -43,6 +43,8 @@ app.setErrorHandler((error, _request, reply) => {
   // panne serveur. 404 (sans confirmer si la ressource existe pour quelqu'un d'autre) est la réponse
   // correcte, jamais journalisée comme une erreur serveur.
   if ((error as { code?: string }).code === "P2025") return reply.code(404).send({ error: "Ressource introuvable" });
+  // Contrainte d'unicité (e-mail ou numéro déjà utilisés par un autre compte) : conflit explicite, pas une panne.
+  if ((error as { code?: string }).code === "P2002") return reply.code(409).send({ error: "Cette valeur (e-mail ou numéro) est déjà utilisée par un autre compte." });
   const status = (error as any).statusCode ?? 500;
   // Refus du fournisseur SMS : toujours journalisé avec le code Twilio (jamais le numéro ni les
   // identifiants), y compris en 4xx — sans cela, une erreur de configuration restait invisible.
@@ -54,5 +56,7 @@ app.setErrorHandler((error, _request, reply) => {
     // saisie ou d'autorisation (400/401/403/404/409), qui ne relève pas d'une surveillance de panne.
     if (env.SENTRY_DSN) Sentry.captureException(error);
   }
-  return reply.code(status).send({ error: status >= 500 ? "Erreur interne" : (error as Error).message });
+  // clientFlags : indications destinées à l'interface (ex. phoneVerificationRequired), jamais pour une 5xx.
+  const flags = status < 500 ? (error as { clientFlags?: Record<string, unknown> }).clientFlags ?? {} : {};
+  return reply.code(status).send({ error: status >= 500 ? "Erreur interne" : (error as Error).message, ...flags });
 });

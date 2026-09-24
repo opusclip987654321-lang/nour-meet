@@ -8,7 +8,12 @@ export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthState["user"]>(null); const [loading, setLoading] = useState(true);
-  const refresh = async () => { if (!getToken()) { setUser(null); setLoading(false); return; } try { setUser(await api("/me")); } catch (err) {
+  const refresh = async () => { if (!getToken()) { setUser(null); setLoading(false); return; } try {
+    // Session glissante : l'API renvoie au plus une fois par jour un jeton neuf de 90 jours.
+    const me = await api<SessionUser & { refreshedToken?: string }>("/me");
+    if (me.refreshedToken) setToken(me.refreshedToken);
+    setUser(me);
+  } catch (err) {
     // Seul un refus réel de l'API (jeton expiré, compte suspendu ou supprimé) efface la session. Une
     // panne réseau ou un redémarrage de l'API ne déconnecte jamais : sinon chaque incident
     // obligerait à redemander un code SMS (coût Twilio). L'utilisateur reste simplement non chargé.

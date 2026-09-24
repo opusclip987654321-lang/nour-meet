@@ -1713,3 +1713,67 @@
   outline: 3px solid var(--saffron);
   outline-offset: 3px;
 }
+
+/* ---------- Connexion Google / e-mail et vérification du numéro (2026-09-24) ---------- */
+.google-button {
+  display: flex;
+  justify-content: center;
+  min-height: 44px;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.auth-form .link-button {
+  gap: var(--s-2);
+  align-self: center;
+}
+
+.phone-verification {
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.phone-verification.compact {
+  padding: var(--s-4);
+}
+
+.phone-verification-head {
+  display: flex;
+  gap: var(--s-3);
+  align-items: flex-start;
+}
+
+.phone-verification-head svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--success);
+}
+
+.phone-verification-head div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.phone-verification-head span {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}

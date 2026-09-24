@@ -1,6 +1,7 @@
 import { eventRequiresScreening } from "@nour/shared";
 import { AlternativeOfferStatus, ApplicationStatus, ContactRequestStatus } from "@prisma/client";
 import { z } from "zod";
+import { assertPhoneVerified } from "../services/session.js";
 import { app, httpError, prisma } from "../context.js";
 import { eventsOverlap } from "../domain.js";
 import { cachedQrDataUrl } from "../qr-cache.js";
@@ -133,6 +134,7 @@ app.post("/alternative-offers/:id/respond", { preHandler: auth }, async (request
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const { accept } = z.object({ accept: z.boolean() }).parse(request.body);
   const userId = currentId(request);
+  if (accept) await assertPhoneVerified(userId);
   const offer = await prisma.alternativeOffer.findFirstOrThrow({ where: { id, userId }, include: { alternativeEvent: true, originalEvent: true } });
   if (offer.status !== AlternativeOfferStatus.PENDING) return reply.code(409).send({ error: "Cette proposition a déjà été traitée" });
   if (offer.respondsBy < new Date()) { await prisma.alternativeOffer.update({ where: { id }, data: { status: AlternativeOfferStatus.EXPIRED } }); return reply.code(409).send({ error: "Cette proposition a expiré" }); }

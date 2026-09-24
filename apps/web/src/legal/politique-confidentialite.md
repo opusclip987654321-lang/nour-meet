@@ -1,6 +1,6 @@
 # Politique de confidentialité — Nour Meet
 
-Dernière mise à jour : 23 septembre 2026
+Dernière mise à jour : 24 septembre 2026
 
 ## 1. Responsable du traitement
 
@@ -122,10 +122,11 @@ Nour Meet prévoit notamment d'utiliser :
 
 - **OVHcloud** : hébergement et infrastructure ;
 - **Stripe** : paiement et remboursement ;
-- **Twilio** : vérification et communications SMS ;
+- **Twilio** : vérification du numéro de téléphone par SMS ;
+- **Google** : connexion avec un compte Google, à la demande de l'utilisateur (Google transmet l'identifiant du compte, le nom et l'adresse e-mail) ;
 - **Resend** : envoi d'e-mails transactionnels et, selon consentement, marketing ;
 - **Google Maps** : fonctionnalités cartographiques et d'adresses ;
-- **Google Analytics** : mesure d'audience, lorsque l'utilisateur y a consenti si ce consentement est requis ;
+- **Mesure d'audience interne** (hébergée par Nour Meet, sans transmission à un tiers) : après consentement de l'utilisateur ;
 - **Meta Pixel** : mesure et publicité, après consentement ;
 - **TikTok Pixel** : mesure et publicité, après consentement ;
 - **Sentry** : détection d'erreurs, performance et sécurité technique.
