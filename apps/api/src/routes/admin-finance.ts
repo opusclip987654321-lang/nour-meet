@@ -4,6 +4,7 @@ import { app, prisma, stripe } from "../context.js";
 import { refundEligibility } from "../domain.js";
 import { audit } from "../services/audit.js";
 import { currentId, roles } from "../services/auth.js";
+import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 import { executeRefund } from "../services/payments.js";
 import { getSetting } from "../settings.js";
@@ -22,7 +23,7 @@ app.post("/admin/payments/:id/refund", { preHandler: roles(UserRole.ADMIN) }, as
   const ok = await executeRefund(payment, payment.reservation.event, { exceptionReason: eligible ? undefined : reason });
   if (!ok) return reply.code(502).send({ error: "Le remboursement a échoué côté prestataire ; les administrateurs ont été notifiés." });
   const alreadyPaidOutWarning = !!payment.ledgerEntry?.paidOutAt;
-  await notify(payment.reservation.userId, "Remboursement effectué", `Votre paiement pour « ${payment.reservation.event.title} » a été remboursé.`, "/dashboard?tab=reservations");
+  await notify(payment.reservation.userId, "Remboursement effectué", `Votre paiement pour « ${payment.reservation.event.title} » a été remboursé.`, links.reservation(payment.reservation.applicationId));
   await audit(currentId(request), "REFUND_PAYMENT", "Payment", id, { alreadyPaidOutWarning, exception: !eligible, reason });
   return { refunded: true, alreadyPaidOutWarning, exception: !eligible };
 });

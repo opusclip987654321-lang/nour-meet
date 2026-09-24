@@ -4,6 +4,7 @@ import { app, ownsBackgroundJobs, prisma, stripe } from "./context.js";
 import { logArticleTransition } from "./services/articles.js";
 import { audit } from "./services/audit.js";
 import { cancelEventWithRefunds } from "./services/event-cancellation.js";
+import { links } from "./services/links.js";
 import { notify } from "./services/notify.js";
 import { offerNextWaitlistEntry, releaseReservationSlot } from "./services/reservations.js";
 import { getSetting } from "./settings.js";
@@ -15,7 +16,7 @@ const releaseExpiredReservations = async () => {
   const expired = await prisma.reservation.findMany({ where: { expiresAt: { lt: new Date() }, confirmedAt: null, cancelledAt: null } });
   for (const reservation of expired) {
     await prisma.$transaction(tx => releaseReservationSlot(tx, reservation));
-    await notify(reservation.userId, "Délai de paiement expiré", "Le délai pour régler votre billet est dépassé ; la place a été libérée.", "/dashboard?tab=reservations");
+    await notify(reservation.userId, "Délai de paiement expiré", "Le délai pour régler votre billet est dépassé ; la place a été libérée.", links.reservation(reservation.applicationId));
     await audit(undefined, "RESERVATION_EXPIRED", "Reservation", reservation.id);
     await offerNextWaitlistEntry(reservation.eventId, reservation.quotaCategory);
   }
@@ -89,7 +90,7 @@ const sendEventReminders = async () => {
     });
     for (const reservation of due) {
       await prisma.reservation.update({ where: { id: reservation.id }, data: { [field]: new Date() } });
-      await notify(reservation.userId, "Votre événement approche", `« ${reservation.event.title} » a lieu ${label} (${reservation.event.startsAt.toLocaleString("fr-FR")}). À très vite !`, "/dashboard?tab=tickets");
+      await notify(reservation.userId, "Votre événement approche", `« ${reservation.event.title} » a lieu ${label} (${reservation.event.startsAt.toLocaleString("fr-FR")}). À très vite !`, links.ticket(reservation.id));
     }
   };
   await sendBatch(getSetting("EVENT_REMINDER_HOURS_BEFORE"), "reminderSentAt", "demain");

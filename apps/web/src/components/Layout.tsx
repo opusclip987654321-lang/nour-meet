@@ -4,6 +4,7 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { api } from "../api";
 import { STAFF_ROLES, useAuth } from "../auth";
 import { Logo } from "./brand";
+import { NotificationBell } from "./NotificationBell";
 
 // Navigation publique : 3 entrées seulement (au-delà, le menu devient une liste à lire plutôt qu'un
 // repère). « Mon espace » ou « Mon établissement » selon le compte, l'administration pour l'équipe.
@@ -46,6 +47,7 @@ function Header() {
         <div className="header-actions">
           {user ? (
             <>
+              <NotificationBell />
               <span className="member-name" title={user.displayName}>{user.displayName}</span>
               <button className="button ghost small desktop-only" onClick={logout}>Se déconnecter</button>
             </>

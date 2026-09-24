@@ -10,6 +10,7 @@ import { audit } from "../services/audit.js";
 import { TokenUser, assertEventAccess, currentId, ownRestaurant, roles } from "../services/auth.js";
 import { cancelEventWithRefunds } from "../services/event-cancellation.js";
 import { defaultCategoryImage, formatPaymentDeadline } from "../services/events.js";
+import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 import { claimReservation } from "../services/reservations.js";
 import { getSetting } from "../settings.js";
@@ -84,7 +85,7 @@ app.post("/admin/waitlist/:id/promote", { preHandler: roles(UserRole.ADMIN) }, a
     return reply.code(409).send({ error: messages[result.reason] });
   }
   await prisma.waitlistEntry.update({ where: { id }, data: { offeredAt: new Date(), expiresAt: result.reservation.expiresAt } });
-  await notify(entry.userId, "Une place vous a été attribuée", `Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet.`, "/dashboard?tab=reservations");
+  await notify(entry.userId, "Une place vous a été attribuée", `Vous avez ${formatPaymentDeadline(result.reservation.expiresAt)} pour régler votre billet.`, links.reservation(entry.applicationId));
   await audit(currentId(request), "ADMIN_PROMOTE_WAITLIST", "WaitlistEntry", id);
   return result.reservation;
 });

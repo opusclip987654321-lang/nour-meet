@@ -1,11 +1,11 @@
 import { EVENT_VIEWER_STATUS_LABEL } from "@nour/shared";
 import type { EventViewerStatus, PublicEvent } from "@nour/shared";
-import { ArrowRight, BadgeCheck, Bell, CalendarDays, CircleCheck, Heart, Hourglass, MapPin, Share2, Users } from "lucide-react";
+import { ArrowRight, BadgeCheck, CalendarDays, CircleCheck, Heart, Hourglass, MapPin, Share2, Users } from "lucide-react";
 import { ReactNode, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
-import { dateTime, imgUrl, money } from "../lib/format";
+import { imgUrl, money } from "../lib/format";
 
 // Avatar : vraie photo de profil si elle existe, sinon les initiales — jamais l'inverse, jamais un
 // visage générique. Même composant partout (dashboard, messagerie, entretiens) pour que l'ajout
@@ -20,24 +20,6 @@ export const Avatar = ({ name, photoUrl, size, className, verified }: { name?: s
 export { Logo } from "./brand";
 
 export function Loading() { return <div className="state-page"><div className="spinner"/><h2>Chargement…</h2></div>; }
-// C13/C14 (ordre correctif 2026-09-20) : liste de notifications partagée (participant, restaurateur,
-// admin) — chronologique, lu/non lu, cliquable vers la destination métier exacte (linkPath), jamais
-// un lien générique. Un clic marque lu puis navigue ; une notification sans linkPath reste affichée
-// mais non cliquable plutôt que de pointer vers un lien mort.
-export function NotificationList({ items, onRead }: { items: any[]; onRead: (id: string) => void }) {
-  const navigate = useNavigate();
-  const open = async (n: any) => {
-    if (!n.readAt) { try { await api(`/notifications/${n.id}/read`, { method: "POST" }); onRead(n.id); } catch { /* déjà lue ou introuvable */ } }
-    if (n.linkPath) navigate(n.linkPath);
-  };
-  if (items.length === 0) return <div className="empty small"><Bell size={24} aria-hidden="true"/><p>Aucune notification pour le moment.</p></div>;
-  return <div className="stack">{items.map(n => {
-    const Tag = n.linkPath ? "button" : "div";
-    return <Tag key={n.id} type={n.linkPath ? "button" : undefined} className={`notification ${n.readAt ? "read" : "unread"}`} onClick={n.linkPath ? () => open(n) : undefined} style={n.linkPath ? { cursor: "pointer", textAlign: "left", border: 0, width: "100%", font: "inherit" } : undefined}>
-      <i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div>
-    </Tag>;
-  })}</div>;
-}
 export function Notice({ kind="info", children }: {kind?: "info"|"error"|"success", children: ReactNode}) { return <div className={`notice ${kind}`}>{children}</div>; }
 
 // C23 (ordre correctif 2026-09-20) : un seul bouton principal, libellé 2-3 mots ("Invite un ami"),

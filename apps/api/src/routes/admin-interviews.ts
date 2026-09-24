@@ -4,6 +4,7 @@ import { app, httpError, prisma } from "../context.js";
 import { interviewRetryDate } from "../domain.js";
 import { audit } from "../services/audit.js";
 import { currentId, roles } from "../services/auth.js";
+import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 
 // Entretiens globaux : uniquement le super-admin, jamais un restaurateur (voir cahier des charges §6).
@@ -21,7 +22,7 @@ app.post("/admin/global-interviews/:id/decision", { preHandler: roles(UserRole.A
     const refused = await prisma.application.update({ where: { id }, data: { status: ApplicationStatus.REFUSED, notes, decidedAt: new Date() } });
     // §4.1 : un refus reste neutre et sans motif pour le participant, quoi que l'admin ait consigné
     // dans `notes` (visible uniquement en interne, jamais renvoyé dans la notification).
-    await notify(application.userId, "Profil non validé", `Votre profil n’a pas été validé pour le moment. Vous pourrez redemander un entretien à partir du ${interviewRetryDate(refused.decidedAt!).toLocaleDateString("fr-FR")}.`, "/dashboard?tab=interview");
+    await notify(application.userId, "Profil non validé", `Votre profil n’a pas été validé pour le moment. Vous pourrez redemander un entretien à partir du ${interviewRetryDate(refused.decidedAt!).toLocaleDateString("fr-FR")}.`, links.interview());
     await audit(adminId, "REFUSE_GLOBAL_INTERVIEW", "Application", id, { notes });
     return refused;
   }
@@ -29,7 +30,7 @@ app.post("/admin/global-interviews/:id/decision", { preHandler: roles(UserRole.A
     prisma.profile.update({ where: { userId: application.userId }, data: { validatedAt: new Date() } }),
     prisma.application.update({ where: { id }, data: { status: ApplicationStatus.ACCEPTED, notes, decidedAt: new Date() } })
   ]);
-  await notify(application.userId, "Profil validé", "Votre profil est validé : vous pouvez désormais vous inscrire directement aux événements, sans nouvel entretien.", "/dashboard?tab=profile");
+  await notify(application.userId, "Profil validé", "Votre profil est validé : vous pouvez désormais vous inscrire directement aux événements, sans nouvel entretien.", links.interview());
   await audit(adminId, "VALIDATE_PROFILE", "Application", id);
   return updatedApplication;
 });
@@ -40,7 +41,7 @@ app.post("/admin/profiles/:userId/revoke-validation", { preHandler: roles(UserRo
   const profile = await prisma.profile.findUnique({ where: { userId } });
   if (!profile?.validatedAt) return reply.code(409).send({ error: "Ce profil n’est pas validé" });
   await prisma.profile.update({ where: { userId }, data: { validatedAt: null } });
-  await notify(userId, "Validation de profil retirée", "Votre profil n’est plus marqué comme vérifié. Vous pouvez redemander un entretien de validation.", "/dashboard?tab=profile");
+  await notify(userId, "Validation de profil retirée", "Votre profil n’est plus marqué comme vérifié. Vous pouvez redemander un entretien de validation.", links.interview());
   await audit(currentId(request), "REVOKE_PROFILE_VALIDATION", "Profile", userId);
   return { ok: true };
 });
@@ -59,7 +60,7 @@ app.post("/admin/global-interviews/:id/reschedule", { preHandler: roles(UserRole
     if (updated.count !== 1) throw httpError(409, "Ce créneau vient d’être réservé par un autre participant. Choisissez-en un autre.");
     return tx.screeningCall.findUniqueOrThrow({ where: { id: slotId } });
   });
-  await notify(application.userId, "Entretien reprogrammé", `Votre appel est désormais prévu le ${slot.startsAt.toLocaleString("fr-FR")}.`, "/dashboard?tab=interview");
+  await notify(application.userId, "Entretien reprogrammé", `Votre appel est désormais prévu le ${slot.startsAt.toLocaleString("fr-FR")}.`, links.interview());
   await audit(currentId(request), "RESCHEDULE_GLOBAL_INTERVIEW", "Application", id, { slotId });
   return { rescheduled: true, slot };
 });

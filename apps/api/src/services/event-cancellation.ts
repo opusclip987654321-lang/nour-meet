@@ -1,6 +1,7 @@
 import { ApplicationStatus, EventStatus, PaymentStatus, Prisma, TicketStatus } from "@prisma/client";
 import { httpError, prisma } from "../context.js";
 import { audit } from "./audit.js";
+import { links } from "./links.js";
 import { notify } from "./notify.js";
 import { executeRefund } from "./payments.js";
 import { createAlternativeOfferIfPossible } from "./reservations.js";
@@ -38,7 +39,7 @@ export const cancelEventWithRefunds = async (event: { id: string; title: string;
     const offers = offersByUser.get(r.userId) ?? [];
     const refundNote = refundedIds.has(r.id) ? ` Vous avez été intégralement remboursé(e) (${(r.payment!.amountCents / 100).toFixed(2)} €).` : "";
     const altNote = offers.length > 0 ? ` ${offers.length > 1 ? "Des événements alternatifs" : "Un événement alternatif"} vous ${offers.length > 1 ? "sont" : "est"} proposé${offers.length > 1 ? "s" : ""} dans votre espace.` : "";
-    return notify(r.userId, "Événement annulé", `« ${event.title} » a été annulé.${refundNote}${altNote}`, "/dashboard?tab=reservations");
+    return notify(r.userId, "Événement annulé", `« ${event.title} » a été annulé.${refundNote}${altNote}`, links.reservation(r.applicationId));
   }));
   await audit(actorId, action, "Event", event.id, { affectedReservations: reservations.length, refunded: refundedIds.size, refundFailed: paid.length - refundedIds.size });
   return { cancelled: true, refundedCount: refundedIds.size, refundFailedCount: paid.length - refundedIds.size };

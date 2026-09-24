@@ -9,6 +9,7 @@ import { env } from "../env.js";
 import { ADULT_ONLY_ERROR, hasAcceptedCurrent, recordAcceptance } from "../services/account.js";
 import { audit } from "../services/audit.js";
 import { auth, currentId } from "../services/auth.js";
+import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 import { recordCheckoutSession, syncSubscriptionFromStripe } from "../services/subscriptions.js";
 import { claimReservation, createAlternativeOfferIfPossible } from "../services/reservations.js";
@@ -48,7 +49,7 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
       let waitlistEntry = await prisma.waitlistEntry.findUnique({ where: { eventId_userId: { eventId: application.eventId, userId } } });
       if (!waitlistEntry) {
         waitlistEntry = await prisma.waitlistEntry.create({ data: { eventId: application.eventId, userId, applicationId: application.id, quotaCategory: application.quotaCategory, position: (await prisma.waitlistEntry.count({ where: { eventId: application.eventId } })) + 1 } });
-        await notify(userId, "Liste d’attente", `« ${event.title} » est complet pour votre catégorie ; vous avez été placé(e) sur liste d’attente.`, "/dashboard?tab=reservations");
+        await notify(userId, "Liste d’attente", `« ${event.title} » est complet pour votre catégorie ; vous avez été placé(e) sur liste d’attente.`, links.reservation(application.id));
         await createAlternativeOfferIfPossible(userId, event);
         await audit(userId, "APPLICATION_WAITLISTED_FULL", "Application", application.id);
       }
@@ -79,10 +80,10 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
       return "CONFIRMED" as const;
     });
     if (outcome === "CONFIRMED") {
-      await notify(userId, "Place confirmée", `Votre billet gratuit pour « ${event.title} » est disponible.`, "/dashboard?tab=tickets");
+      await notify(userId, "Place confirmée", `Votre billet gratuit pour « ${event.title} » est disponible.`, links.ticket(reservation.id));
       if (event.controllerRestaurantId) {
         const controllerRestaurant = await prisma.restaurant.findUnique({ where: { id: event.controllerRestaurantId } });
-        if (controllerRestaurant) await notify(controllerRestaurant.ownerId, "Nouvelle inscription gratuite", `Une place gratuite pour « ${event.title} » vient d’être confirmée.`, `/admin/events?highlight=${event.id}`);
+        if (controllerRestaurant) await notify(controllerRestaurant.ownerId, "Nouvelle inscription gratuite", `Une place gratuite pour « ${event.title} » vient d’être confirmée.`, links.adminEvent(event.id));
       }
       await audit(userId, "FREE_RESERVATION_CONFIRMED", "Reservation", reservation.id);
     }
@@ -142,11 +143,11 @@ await app.register(async (webhooks) => {
             return "CONFIRMED" as const;
           });
           if (outcome === "CONFIRMED") {
-            await notify(reservation.userId, "Paiement confirmé", `Votre billet pour ${reservation.event.title} est disponible.`, "/dashboard?tab=tickets");
+            await notify(reservation.userId, "Paiement confirmé", `Votre billet pour ${reservation.event.title} est disponible.`, links.ticket(reservationId));
             // C16 (ordre correctif 2026-09-20) : le restaurateur est informé d'une vente une seule
             // fois, ici, après confirmation réelle du webhook — jamais à la simple ouverture de la
             // page de paiement par le participant.
-            if (reservation.event.controllerRestaurant) await notify(reservation.event.controllerRestaurant.ownerId, "Nouvelle place vendue", `Un billet pour « ${reservation.event.title} » vient d’être payé.`, `/admin/events?highlight=${reservation.eventId}`);
+            if (reservation.event.controllerRestaurant) await notify(reservation.event.controllerRestaurant.ownerId, "Nouvelle place vendue", `Un billet pour « ${reservation.event.title} » vient d’être payé.`, links.adminEvent(reservation.eventId));
             await audit(reservation.userId, "PAYMENT_SUCCEEDED", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });
             // Comptabilité 30/70 : neutralisée par défaut depuis le passage à l'abonnement mensuel
             // (§8.2 — voir ENABLE_COMMISSION_LEDGER). Les anciennes lignes restent en base, aucune
@@ -170,7 +171,7 @@ await app.register(async (webhooks) => {
               await prisma.ledgerEntry.create({ data: { paymentId: reservation.payment!.id, eventId: reservation.eventId, restaurantId: restaurant.id, grossAmountCents, commissionRate, commissionAmountCents, restaurantDueCents, stripeFeeCents } });
             }
           } else if (outcome === "LATE_AFTER_RELEASE") {
-            await notify(reservation.userId, "Paiement reçu après expiration", "Votre place n’était plus disponible au moment où votre paiement a été confirmé. Le remboursement sera traité manuellement par notre équipe.", "/dashboard?tab=reservations");
+            await notify(reservation.userId, "Paiement reçu après expiration", "Votre place n’était plus disponible au moment où votre paiement a été confirmé. Le remboursement sera traité manuellement par notre équipe.", links.reservation(reservation.applicationId));
             const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
             await Promise.all(admins.map(a => notify(a.id, "Paiement tardif après libération de place", `Un paiement a été confirmé pour « ${reservation.event.title} » après l’expiration de la réservation : remboursement à traiter manuellement.`, "/admin/finance")));
             await audit(reservation.userId, "PAYMENT_SUCCEEDED_AFTER_RELEASE", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });

@@ -1698,3 +1698,10 @@
 .pricing-card.featured .fine {
   color: var(--on-night-2);
 }
+
+/* Carte mise en évidence à l'arrivée depuis une notification (corrections web 2026-09-24, §4.3) */
+.reservation.focused,
+.ticket.focused {
+  outline: 3px solid var(--saffron);
+  outline-offset: 3px;
+}
