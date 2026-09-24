@@ -107,7 +107,7 @@ export function Home() {
     <section className="section how" id="comment" aria-labelledby="how-title">
       <div className="section-title"><h2 id="how-title">Comment ça marche</h2><p>De l’inscription à l’après-soirée, chaque étape est pensée pour que vous veniez l’esprit tranquille.</p></div>
       <ol className="steps">
-        <li><PhoneCall size={22} aria-hidden="true"/><b>Créez votre compte</b><span>Avec votre numéro de téléphone, vérifié par SMS. Complétez votre profil en quelques minutes.</span></li>
+        <li><PhoneCall size={22} aria-hidden="true"/><b>Créez votre compte</b><span>Avec Google ou votre adresse e-mail, sans mot de passe. Votre numéro est vérifié une seule fois par SMS avant votre première réservation.</span></li>
         <li><BadgeCheck size={22} aria-hidden="true"/><b>Faites-vous valider</b><span>Pour les rencontres : un court entretien avec l’équipe, une seule fois. Le networking est en accès direct.</span></li>
         <li><Ticket size={22} aria-hidden="true"/><b>Réservez votre place</b><span>Paiement sécurisé. Votre billet avec QR code arrive dans votre espace dès la confirmation.</span></li>
         <li><QrCode size={22} aria-hidden="true"/><b>Venez à la soirée</b><span>L’équipe vous accueille, scanne votre billet et anime la soirée du début à la fin.</span></li>
@@ -123,7 +123,7 @@ export function Home() {
           <Picture name="portrait-woman" className="trust-photo" sizes="(max-width: 900px) 60vw, 26vw"/>
         </div>
         <ul className="trust-list">
-          <li><ShieldCheck size={24} aria-hidden="true"/><div><b>Des profils vérifiés</b><span>Numéro de téléphone confirmé par SMS, entretien de validation pour les soirées de rencontre, badge « Vérifié » visible sur le profil.</span></div></li>
+          <li><ShieldCheck size={24} aria-hidden="true"/><div><b>Des profils vérifiés</b><span>Numéro de téléphone confirmé par SMS avant toute réservation, entretien de validation pour les soirées de rencontre, badge « Vérifié » visible sur le profil.</span></div></li>
           <li><Lock size={24} aria-hidden="true"/><div><b>Vos coordonnées restent privées</b><span>Aucun participant ne voit votre numéro. Le restaurant ne reçoit que votre prénom pour l’accueil ; vos réponses au questionnaire de rencontre ne sont jamais partagées.</span></div></li>
           <li><MessageCircleHeart size={24} aria-hidden="true"/><div><b>Le consentement avant tout</b><span>Après la soirée, un échange ne s’ouvre que si les deux personnes l’acceptent. Rien n’est automatique.</span></div></li>
           <li><Flag size={24} aria-hidden="true"/><div><b>Signalement et modération</b><span>Un comportement déplacé se signale à l’équipe, sur place ou à contact@nourmeet.com ; chaque signalement est examiné et peut entraîner la suspension du compte.</span></div></li>

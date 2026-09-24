@@ -38,6 +38,8 @@ const envSchema = z.object({
   // clé, la publication quotidienne retombe sur la réserve d'articles déjà rédigés et le reste du
   // site fonctionne normalement. Clé serveur uniquement, jamais exposée au navigateur.
   ANTHROPIC_API_KEY: optionalEnvironmentSecret,
+  // Connexion avec Google (identifiant client OAuth, public par nature). Sans valeur : bouton masqué.
+  GOOGLE_CLIENT_ID: optionalEnvironmentSecret,
   // Illustrations générées par IA pour l'article du jour (OpenAI Images). Facultatif : sans clé, la
   // photothèque du site est utilisée. Modèle modifiable sans changer le code.
   OPENAI_API_KEY: optionalEnvironmentSecret,

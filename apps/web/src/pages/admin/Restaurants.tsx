@@ -82,7 +82,7 @@ export function AdminRestaurants() {
     {items===null?<div className="stack" aria-busy="true">{[0,1,2].map(i=><div key={i} className="skeleton" style={{height:64}}/>)}</div>:items.length===0?<div className="empty"><h2>Aucune demande</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request">
       <div>
         <h3>{r.name}</h3>
-        <p>{r.owner.displayName} · <a href={`tel:${r.phone||r.owner.phone}`}>{r.phone||r.owner.phone}</a>{r.owner.email?<> · <a href={`mailto:${r.owner.email}`}>Contacter par e-mail</a></>:null}</p>
+        <p>{r.owner.displayName} · {(r.phone||r.owner.phone)?<a href={`tel:${r.phone||r.owner.phone}`}>{r.phone||r.owner.phone}</a>:(r.owner.email??"coordonnées non renseignées")}{r.owner.email?<> · <a href={`mailto:${r.owner.email}`}>Contacter par e-mail</a></>:null}</p>
         <p className="fine left">Responsable : {r.managerName??"—"} · SIRET {r.siret??"—"}</p>
         {r.district&&<p className="fine left">{r.address}, {r.district}</p>}
         {r.description&&<p className="fine left">{r.description}</p>}

@@ -89,7 +89,11 @@ export type AlternativeOfferStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "EXPI
 
 export interface SessionUser {
   id: string;
-  phone: string;
+  // Facultatif depuis la connexion par Google ou e-mail (2026-09-24) ; vérifié une seule fois par
+  // SMS avant la première réservation (phoneVerified).
+  phone: string | null;
+  phoneVerified?: boolean;
+  googleLinked?: boolean;
   email?: string | null;
   displayName: string;
   role: UserRole;

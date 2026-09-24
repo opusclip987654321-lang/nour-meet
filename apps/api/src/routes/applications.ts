@@ -1,6 +1,7 @@
 import { eventRequiresScreening, isAdult } from "@nour/shared";
 import { ApplicationStatus, PaymentStatus, QuotaCategory, TicketStatus } from "@prisma/client";
 import { z } from "zod";
+import { assertPhoneVerified } from "../services/session.js";
 import { app, prisma } from "../context.js";
 import { interviewRetryDate, refundEligibility, resolvePriceCents } from "../domain.js";
 import { ADULT_ONLY_ERROR } from "../services/account.js";
@@ -50,6 +51,8 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   // Un compte restaurateur (candidature en cours ou déjà approuvée) n'a jamais le droit de participer
   // aux événements en tant que participant, quel que soit le statut de sa fiche Restaurant.
   if (await prisma.restaurant.findUnique({ where: { ownerId: userId } })) return reply.code(403).send({ error: "Les comptes restaurateurs ne peuvent pas participer aux événements" });
+  // Numéro vérifié une seule fois par SMS avant la première inscription (connexion Google/e-mail).
+  await assertPhoneVerified(userId);
   const event = await prisma.event.findUniqueOrThrow({ where: { id }, include: { priceTiers: true } });
   const requiresScreening = eventRequiresScreening(event);
   const profile = await prisma.profile.findUnique({ where: { userId } });
@@ -117,6 +120,8 @@ app.post("/me/global-interview", { preHandler: auth }, async (request, reply) =>
   const { motivation } = z.object({ motivation: z.string().min(30).max(1200) }).parse(request.body);
   const userId = currentId(request);
   if (await prisma.restaurant.findUnique({ where: { ownerId: userId } })) return reply.code(403).send({ error: "Les comptes restaurateurs ne peuvent pas participer aux événements" });
+  // Numéro vérifié une seule fois par SMS avant la première inscription (connexion Google/e-mail).
+  await assertPhoneVerified(userId);
   const profile = await prisma.profile.findUnique({ where: { userId } });
   if (!profile?.profileCompleted) return reply.code(409).send({ error: "Complétez votre profil avant de demander un entretien" });
   if (profile.validatedAt) return reply.code(409).send({ error: "Votre profil est déjà validé" });

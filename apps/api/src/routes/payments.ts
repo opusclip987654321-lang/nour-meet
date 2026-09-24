@@ -3,6 +3,7 @@ import { ApplicationStatus, LegalDocument, PaymentStatus, Prisma, SubscriptionSt
 import { randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import { z } from "zod";
+import { assertPhoneVerified } from "../services/session.js";
 import { app, prisma, stripe } from "../context.js";
 import { NOT_BOOKABLE_MESSAGE, isEventBookable, paymentLockExpiry, resolvePriceCents } from "../domain.js";
 import { env } from "../env.js";
@@ -25,6 +26,7 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
   if (!stripe) return reply.code(503).send({ error: "Le paiement par carte n’est pas configuré sur ce serveur" });
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const userId = currentId(request);
+  await assertPhoneVerified(userId);
   const application = await prisma.application.findFirstOrThrow({ where: { id, userId }, include: { event: { include: { priceTiers: true } }, reservation: true } });
   if (application.status !== ApplicationStatus.PAYMENT_PENDING) return reply.code(409).send({ error: "Cette candidature n’est pas en attente de paiement" });
   // §8 (corrections web 2026-09-24) : un événement de démonstration peut être découvert et le parcours
