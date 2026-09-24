@@ -1695,6 +1695,11 @@
   font-size: var(--fs-sm);
 }
 
+.pricing-card.featured h3,
+.pricing-card.featured .pricing-price strong {
+  color: var(--on-night);
+}
+
 .pricing-card.featured .fine {
   color: var(--on-night-2);
 }

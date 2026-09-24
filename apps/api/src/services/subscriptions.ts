@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { httpError, prisma, stripe } from "../context.js";
 import { audit } from "./audit.js";
 import { notify } from "./notify.js";
+import { planChangeDirection } from "../domain.js";
 import { mapStripeSubscriptionStatus } from "./payments.js";
 
 // Changement de formule restaurateur (corrections web 2026-09-24, §1.4) : règle métier unique,
@@ -14,9 +15,6 @@ import { mapStripeSubscriptionStatus } from "./payments.js";
 // - Vers une formule moins chère (Premium → Standard) : la formule payée reste acquise jusqu'à la fin
 //   de la période en cours, la nouvelle ne s'applique qu'à l'échéance, via un calendrier d'abonnement
 //   Stripe (subscription schedule) — jamais un simple drapeau local que Stripe ignorerait.
-export type PlanChangeDirection = "UPGRADE" | "DOWNGRADE";
-export const planChangeDirection = (current: Pick<Plan, "monthlyPriceCents">, target: Pick<Plan, "monthlyPriceCents">): PlanChangeDirection =>
-  target.monthlyPriceCents > current.monthlyPriceCents ? "UPGRADE" : "DOWNGRADE";
 
 export const priceIdFor = (plan: Pick<Plan, "stripePriceMonthlyId" | "stripePriceAnnualId">, billingPeriod: string) =>
   billingPeriod === "ANNUAL" ? plan.stripePriceAnnualId : plan.stripePriceMonthlyId;

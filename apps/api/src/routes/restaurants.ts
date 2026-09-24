@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, app, httpError, prisma, restaurantUploadsDir, stripe } from "../context.js";
+import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, app, httpError, prisma, restaurantUploadsDir, smsVerification, stripe } from "../context.js";
 import { currentYearMonth } from "../domain.js";
 import { env } from "../env.js";
 import { audit } from "../services/audit.js";
@@ -22,7 +22,8 @@ app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
 });
 // §19/§20 : formulaire explicitement cité comme devant être protégé contre un abus automatisé,
 // au même titre que l'authentification et la génération IA.
-app.post("/restaurants/apply", { preHandler: auth, config: { rateLimit: { max: 5, timeWindow: "10 minutes" } } }, async (request, reply) => {
+// Plafond relâché uniquement en mode SMS simulé (développement, tests d'intégration), comme pour l'OTP.
+app.post("/restaurants/apply", { preHandler: auth, config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 5, timeWindow: "10 minutes" } } }, async (request, reply) => {
   // Le SIRET est saisi par le demandeur mais n'est pas vérifié auprès d'un registre officiel : ce
   // n'est qu'une déclaration, à ne jamais présenter comme une vérification légale effectuée par Nour.
   const input = z.object({

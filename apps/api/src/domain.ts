@@ -63,3 +63,10 @@ export const NOT_BOOKABLE_MESSAGE = "Cet événement n’est actuellement pas r�
 export function isEventBookable(event: { isDemo: boolean }) {
   return !event.isDemo;
 }
+
+// Sens d'un changement de formule restaurateur (§1.4, corrections web 2026-09-24) : une formule plus
+// chère s'applique immédiatement avec prorata, une formule moins chère à la fin de la période payée.
+export type PlanChangeDirection = "UPGRADE" | "DOWNGRADE";
+export function planChangeDirection(current: { monthlyPriceCents: number }, target: { monthlyPriceCents: number }): PlanChangeDirection {
+  return target.monthlyPriceCents > current.monthlyPriceCents ? "UPGRADE" : "DOWNGRADE";
+}
