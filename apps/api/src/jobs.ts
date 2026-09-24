@@ -201,3 +201,7 @@ if (ownsBackgroundJobs) {
   setTimeout(() => { runDailyArticle().catch(err => app.log.error(err)); }, 60_000);
   setInterval(() => { runDailyArticle().catch(err => app.log.error(err)); }, 30 * 60_000);
 }
+
+// Codes de retour de la connexion Google mobile : valables 2 minutes, purgés après une heure.
+const purgeLoginHandoffs = () => prisma.loginHandoff.deleteMany({ where: { expiresAt: { lt: new Date(Date.now() - 60 * 60_000) } } });
+if (ownsBackgroundJobs) setInterval(() => { purgeLoginHandoffs().catch(err => app.log.error(err)); }, 60 * 60_000);

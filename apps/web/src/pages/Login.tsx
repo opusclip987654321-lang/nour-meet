@@ -1,5 +1,6 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Mail, Smartphone } from "lucide-react";
+import { GOOGLE_CLIENT_ID, GoogleButton } from "../components/GoogleButton";
 import { useNavigate } from "react-router-dom";
 import { api, setToken } from "../api";
 import { STAFF_ROLES, useAuth } from "../auth";
@@ -42,31 +43,7 @@ const QUICK_LOGIN_GROUPS: {title:string; items:{label:string; phone:string}[]}[]
 
 // Connexion (2026-09-24) : Google ou code par e-mail, sans SMS. Le SMS reste proposé pour les comptes
 // créés avec un numéro ; ailleurs, il n'est demandé qu'une fois, avant la première réservation.
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 type LoginResult = { token: string; isNewUser?: boolean; user: { role: string } };
-type GoogleId = { accounts: { id: { initialize: (o: object) => void; renderButton: (el: HTMLElement, o: object) => void } } };
-
-// Script Google chargé uniquement sur cette page, et seulement si la connexion Google est configurée.
-function GoogleButton({ onCredential }: { onCredential: (credential: string) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) return;
-    const render = () => {
-      const google = (window as unknown as { google?: GoogleId }).google;
-      if (!google || !ref.current) return;
-      google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: (r: { credential: string }) => onCredential(r.credential), ux_mode: "popup" });
-      google.accounts.id.renderButton(ref.current, { theme: "outline", size: "large", text: "continue_with", shape: "rectangular", width: Math.min(ref.current.offsetWidth || 360, 400), locale: "fr" });
-    };
-    if ((window as unknown as { google?: GoogleId }).google) { render(); return; }
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client"; script.async = true; script.onload = render; script.onerror = () => setFailed(true);
-    document.head.appendChild(script);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- rendu une seule fois
-  }, []);
-  if (!GOOGLE_CLIENT_ID) return null;
-  return failed ? <p className="fine">Connexion Google momentanément indisponible : utilisez votre e-mail.</p> : <div ref={ref} className="google-button" data-testid="google-button" />;
-}
 
 export function Login() {
   useSeo({title:"Connexion",description:"Connectez-vous à Nūr Meet avec Google ou votre adresse e-mail.",path:"/login",noindex:true});

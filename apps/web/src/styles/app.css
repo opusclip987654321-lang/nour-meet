@@ -1777,3 +1777,30 @@
   color: var(--ink-2);
   font-size: var(--fs-sm);
 }
+
+/* Page de connexion Google de l'application mobile (2026-09-24) */
+.mobile-auth {
+  display: grid;
+  justify-items: center;
+  gap: var(--s-4);
+  max-width: 420px;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-4);
+  align-content: center;
+  text-align: center;
+}
+
+.mobile-auth h1 {
+  margin: 0;
+  font-size: var(--fs-h2);
+}
+
+.mobile-auth p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.mobile-auth .google-button {
+  width: 100%;
+}

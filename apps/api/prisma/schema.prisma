@@ -954,3 +954,17 @@ model SocialCredential {
   expiresAt   DateTime?
   refreshedAt DateTime @default(now())
 }
+
+// Connexion Google depuis l'application mobile (2026-09-24) : la connexion a lieu sur le site, dans le
+// navigateur intégré, puis l'application récupère sa session grâce à ce code à usage unique (2 minutes),
+// renvoyé uniquement vers le schéma de l'application. Jamais le jeton de session dans une URL.
+model LoginHandoff {
+  id        String    @id @default(cuid())
+  codeHash  String    @unique
+  challenge String
+  userId    String
+  isNewUser Boolean   @default(false)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}

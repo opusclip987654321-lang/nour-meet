@@ -4,8 +4,9 @@ import { app, prisma, smsVerification } from "../context.js";
 import { env } from "../env.js";
 import { normalizePhoneNumber } from "../phone.js";
 import { audit } from "../services/audit.js";
-import { auth, currentId } from "../services/auth.js";
+import { TokenUser, auth, currentId } from "../services/auth.js";
 import { checkEmailLoginCode, normalizeEmail, sendEmailLoginCode, verifyGoogleCredential } from "../services/login.js";
+import { PKCE_CHALLENGE, PKCE_VERIFIER, hashHandoffCode, isAllowedAppRedirect, pkceChallenge } from "../services/app-redirect.js";
 import { loginResponse } from "../services/session.js";
 
 app.post("/auth/request-otp", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 3, timeWindow: "10 minutes" } } }, async (request) => {
@@ -116,6 +117,26 @@ app.post("/auth/payment-session-exchange", async (request, reply) => {
   if (!session || session.usedAt || session.expiresAt < new Date()) return reply.code(401).send({ error: "Session de paiement invalide ou expirée" });
   await prisma.paymentSession.update({ where: { id: session.id }, data: { usedAt: new Date() } });
   const user = await prisma.user.findUniqueOrThrow({ where: { id: session.userId } });
-  const jwt = app.jwt.sign({ sub: user.id, role: user.role }, { expiresIn: "15m" });
+  const jwt = app.jwt.sign({ sub: user.id, role: user.role, scope: "payment" }, { expiresIn: "15m" });
   return { token: jwt, applicationId: session.applicationId };
+});
+
+// Connexion Google de l'application mobile (2026-09-24), voir services/app-redirect.ts.
+app.post("/auth/mobile-handoff", { preHandler: auth, config: { rateLimit: { max: 20, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const { redirect, isNewUser, challenge } = z.object({ redirect: z.string().max(300), isNewUser: z.boolean().default(false), challenge: z.string().regex(PKCE_CHALLENGE) }).parse(request.body);
+  // Un jeton de paiement (15 min) ne doit jamais devenir une session de 90 jours.
+  if ((request.user as TokenUser & { scope?: string }).scope === "payment") return reply.code(403).send({ error: "Connexion non autorisée avec ce jeton." });
+  if (!isAllowedAppRedirect(redirect, env.NODE_ENV === "production")) return reply.code(400).send({ error: "Retour vers l’application non autorisé." });
+  const code = randomUUID().replace(/-/g, "");
+  await prisma.loginHandoff.create({ data: { codeHash: hashHandoffCode(code), challenge, userId: currentId(request), isNewUser, expiresAt: new Date(Date.now() + 2 * 60_000) } });
+  return { redirectUrl: `${redirect}${redirect.includes("?") ? "&" : "?"}code=${code}` };
+});
+app.post("/auth/mobile-handoff/exchange", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 20, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const { code, verifier } = z.object({ code: z.string().regex(/^[0-9a-f]{32}$/), verifier: z.string().regex(PKCE_VERIFIER) }).parse(request.body);
+  const found = await prisma.loginHandoff.findUnique({ where: { codeHash: hashHandoffCode(code) } });
+  const handoff = found && found.challenge === pkceChallenge(verifier) ? found : null;
+  // Consommation atomique : un code ne sert qu'une fois, même en cas de double appel simultané.
+  const claimed = handoff && handoff.expiresAt > new Date() && (await prisma.loginHandoff.updateMany({ where: { id: handoff.id, usedAt: null }, data: { usedAt: new Date() } })).count === 1;
+  if (!handoff || !claimed) return reply.code(401).send({ error: "Connexion expirée. Réessayez depuis l’application." });
+  return loginResponse(handoff.userId, handoff.isNewUser);
 });
