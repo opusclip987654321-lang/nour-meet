@@ -7,11 +7,12 @@ import { cachedQrDataUrl } from "../qr-cache.js";
 import { profileAge } from "../services/account.js";
 import { audit } from "../services/audit.js";
 import { auth, currentId } from "../services/auth.js";
+import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 import { getSetting } from "../settings.js";
 
 app.get("/me/tickets", { preHandler: auth }, async (request) => {
-  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: true } } } } }, orderBy: { createdAt: "desc" } });
+  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: { select: { id: true, name: true } } } } } } }, orderBy: { createdAt: "desc" } });
   return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await cachedQrDataUrl(t.code) })));
 });
 
@@ -48,7 +49,7 @@ app.post("/contacts/request", { preHandler: auth }, async (request, reply) => {
   const requestRow = existing
     ? await prisma.contactRequest.update({ where: { id: existing.id }, data: { status: ContactRequestStatus.PENDING } })
     : await prisma.contactRequest.create({ data: { requesterId, recipientId } });
-  await notify(recipientId, "Nouvelle demande de contact", "Un participant souhaite entrer en contact avec vous.", "/dashboard?tab=contacts");
+  await notify(recipientId, "Nouvelle demande de contact", "Un participant souhaite entrer en contact avec vous.", links.contacts());
   return requestRow;
 });
 
@@ -65,7 +66,7 @@ app.post("/contacts/:id/respond", { preHandler: auth }, async (request, reply) =
   const updated = await prisma.contactRequest.update({ where: { id }, data: { status: accept ? ContactRequestStatus.ACCEPTED : ContactRequestStatus.REFUSED } });
   if (accept) {
     const conversation = await prisma.conversation.create({ data: { members: { create: [{ userId: contact.requesterId }, { userId: contact.recipientId }] } } });
-    await notify(contact.requesterId, "Demande acceptée", "Vous pouvez maintenant échanger des messages.", "/dashboard?tab=contacts");
+    await notify(contact.requesterId, "Demande acceptée", "Vous pouvez maintenant échanger des messages.", links.contacts());
     return { contact: updated, conversation };
   }
   return reply.send({ contact: updated });
@@ -101,10 +102,20 @@ app.post("/reports", { preHandler: auth }, async (request, reply) => {
   return report;
 });
 
-app.get("/notifications", { preHandler: auth }, async (request) => prisma.notification.findMany({ where: { userId: currentId(request) }, orderBy: { createdAt: "desc" }, take: 50 }));
+app.get("/notifications", { preHandler: auth }, async (request) => {
+  // La cloche de l'en-tête ne demande que les dernières (limit), la page complète jusqu'à 100.
+  const { limit } = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).parse(request.query);
+  return prisma.notification.findMany({ where: { userId: currentId(request) }, orderBy: { createdAt: "desc" }, take: limit });
+});
 app.get("/notifications/unread-count", { preHandler: auth }, async (request) => ({ count: await prisma.notification.count({ where: { userId: currentId(request), readAt: null } }) }));
 // C13 (ordre correctif 2026-09-20) : marquer une notification lue au clic, jamais recyclé depuis
 // l'outbox admin — cette route agit uniquement sur les notifications du compte courant.
+// Corrections web 2026-09-24 (§4) : « Tout marquer comme lu » depuis la cloche ou la page complète —
+// uniquement les notifications du compte courant.
+app.post("/notifications/read-all", { preHandler: auth }, async (request) => {
+  const { count } = await prisma.notification.updateMany({ where: { userId: currentId(request), readAt: null }, data: { readAt: new Date() } });
+  return { count };
+});
 app.post("/notifications/:id/read", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const updated = await prisma.notification.updateMany({ where: { id, userId: currentId(request), readAt: null }, data: { readAt: new Date() } });
@@ -162,7 +173,7 @@ app.post("/alternative-offers/:id/respond", { preHandler: auth }, async (request
   if (eventsOverlap(offer.originalEvent, offer.alternativeEvent)) {
     await prisma.waitlistEntry.deleteMany({ where: { eventId: offer.originalEventId, userId } });
   }
-  await notify(userId, "Événement alternatif accepté", `Vous pouvez maintenant régler votre billet pour « ${offer.alternativeEvent.title} ».`, "/dashboard?tab=reservations");
+  await notify(userId, "Événement alternatif accepté", `Vous pouvez maintenant régler votre billet pour « ${offer.alternativeEvent.title} ».`, links.reservation(application.id));
   await audit(userId, "ACCEPT_ALTERNATIVE_OFFER", "AlternativeOffer", id);
   return { ...updated, application };
 });

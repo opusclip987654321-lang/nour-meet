@@ -24,7 +24,7 @@ export function Wordmark({ className }: { className?: string }) {
 
 export function Logo({ onNight = false, to = "/" }: { onNight?: boolean; to?: string }) {
   return (
-    <Link className={`logo${onNight ? " on-night" : ""}`} to={to} aria-label="Nour Meet — accueil">
+    <Link className={`logo${onNight ? " on-night" : ""}`} to={to} aria-label="Nūr Meet — accueil">
       <BrandMark size={32} />
       <Wordmark />
     </Link>

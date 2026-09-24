@@ -5,16 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#1c2653" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <link rel="preload" href="/fonts/hanken-grotesk-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/bricolage-grotesque-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
-    <title>Nour Meet — rencontres et soirées en petit comité à Paris</title>
-    <meta name="description" content="Speed dating et soirées networking en petit comité dans des restaurants partenaires à Paris et en Île-de-France. Profils vérifiés, contact uniquement si l'intérêt est réciproque." />
+    <title>Nūr Meet — rencontres et soirées en petit comité à Paris</title>
+    <meta name="description" content="Speed dating et soirées networking en petit comité dans des restaurants partenaires à Paris et en Île-de-France. Profils vérifiés, contact uniquement si l’intérêt est réciproque." />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Nour Meet" />
-    <meta property="og:title" content="Nour Meet — rencontres et soirées en petit comité à Paris" />
-    <meta property="og:description" content="Speed dating et soirées networking en petit comité dans des restaurants partenaires. Profils vérifiés, contact uniquement si l'intérêt est réciproque." />
-    <meta property="og:image" content="/images/paris-terrace-1600.webp" />
+    <meta property="og:site_name" content="Nūr Meet" />
+    <meta property="og:title" content="Nūr Meet — rencontres et soirées en petit comité à Paris" />
+    <meta property="og:description" content="Speed dating et soirées networking en petit comité dans des restaurants partenaires. Profils vérifiés, contact uniquement si l’intérêt est réciproque." />
+    <meta property="og:image" content="%VITE_SITE_URL%/images/paris-terrace-1600.webp" />
     <meta property="og:locale" content="fr_FR" />
+    <meta name="twitter:card" content="summary_large_image" />
   </head>
-  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+  <body>
+    <div id="root"></div>
+    <!-- Contenu lisible sans JavaScript (robots qui n'exécutent pas le script, lecteurs hors ligne) :
+         uniquement des informations exactes, reprises des pages du site. -->
+    <noscript>
+      <main style="max-width:720px;margin:40px auto;padding:0 16px;font-family:system-ui,sans-serif;line-height:1.6">
+        <h1>Nūr Meet — rencontres et soirées en petit comité à Paris</h1>
+        <p>Nūr Meet organise des soirées en petit comité dans des restaurants partenaires à Paris et en Île-de-France : speed dating sur sélection (entretien de validation préalable) et networking en accès direct. Paiement en ligne sécurisé, billet avec QR code, annulation gratuite jusqu’à 24 heures avant la soirée. Service réservé aux personnes majeures.</p>
+        <ul>
+          <li><a href="/events">Prochaines soirées</a></li>
+          <li><a href="/concept">Comment ça marche</a></li>
+          <li><a href="/blog">Le journal</a></li>
+          <li><a href="/legal/mentions-legales">Mentions légales</a></li>
+        </ul>
+        <p>Activez JavaScript pour réserver une soirée.</p>
+      </main>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

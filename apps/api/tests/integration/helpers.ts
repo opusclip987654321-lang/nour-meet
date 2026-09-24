@@ -17,7 +17,7 @@ function readEnvValue(key: string): string {
   if (!match) throw new Error(`${key} introuvable dans .env : requis pour les tests de paiement.`);
   return match[1].trim();
 }
-const stripe = new Stripe(readEnvValue("STRIPE_SECRET_KEY"));
+export const stripe = new Stripe(readEnvValue("STRIPE_SECRET_KEY"));
 
 export const API_URL = process.env.API_URL ?? "http://localhost:4000";
 // Ces tests tournent sur l'hôte (pas dans le réseau Docker) : "postgres" n'y est pas résolvable, on

@@ -52,9 +52,9 @@ export const SETTINGS_SCHEMA = {
     description: "Active les virements réels de la place de marché (Stripe Connect ou équivalent). Désactivée par défaut : modèle juridique non validé."
   },
   AI_BLOG_GENERATION_MODE: {
-    schema: z.enum(["DRAFT_ONLY"]),
-    default: "DRAFT_ONLY" as const,
-    description: "Mode de la génération assistée par IA pour le blog. Aucune valeur ne permet la publication automatique."
+    schema: z.enum(["DRAFT_ONLY", "AUTO_PUBLISH_DAILY"]),
+    default: "AUTO_PUBLISH_DAILY" as "DRAFT_ONLY" | "AUTO_PUBLISH_DAILY",
+    description: "Blog (corrections web 2026-09-24, §3). AUTO_PUBLISH_DAILY : en production, un article est généré (IA avec recherche web, ANTHROPIC_API_KEY) et publié automatiquement chaque jour, sans validation préalable ; à défaut d'IA, un article de la réserve est publié. DRAFT_ONLY : aucune publication automatique, la génération IA ne produit que des brouillons."
   },
   WHATSAPP_ENABLED: {
     schema: z.boolean(),
@@ -98,8 +98,8 @@ export const SETTINGS_SCHEMA = {
   },
   ANALYTICS_ENABLED: {
     schema: z.boolean(),
-    default: false,
-    description: "Active la mesure d'audience (POST /analytics/pageview, C32-C34 de l'ordre correctif 2026-09-20). Désactivée par défaut : ne jamais collecter silencieusement. Avant activation en production, mettre en place un bandeau de consentement OU configurer la collecte pour respecter l'exemption CNIL « mesure d'audience » (anonyme, jamais transmis à un tiers, jamais croisé avec d'autres données, rétention courte) — décision à faire valider juridiquement, pas par ce réglage seul."
+    default: true,
+    description: "Active l'enregistrement des visites (POST /analytics/pageview). Depuis les corrections web du 2026-09-24 (§15), le site n'envoie une visite qu'après consentement explicite du visiteur (bandeau cookies, choix conservé 6 mois, modifiable via « Gérer mes cookies ») : ce réglage sert seulement à couper la collecte côté serveur."
   },
   ANALYTICS_RETENTION_DAYS: {
     schema: z.number().int().positive(),

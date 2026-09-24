@@ -1,9 +1,10 @@
 import { PaymentStatus, UserRole } from "@prisma/client";
 import { z } from "zod";
-import { app, httpError, prisma, stripe } from "../context.js";
+import { app, prisma, stripe } from "../context.js";
 import { refundEligibility } from "../domain.js";
 import { audit } from "../services/audit.js";
-import { TokenUser, currentId, ownRestaurant, roles } from "../services/auth.js";
+import { currentId, roles } from "../services/auth.js";
+import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 import { executeRefund } from "../services/payments.js";
 import { getSetting } from "../settings.js";
@@ -22,39 +23,23 @@ app.post("/admin/payments/:id/refund", { preHandler: roles(UserRole.ADMIN) }, as
   const ok = await executeRefund(payment, payment.reservation.event, { exceptionReason: eligible ? undefined : reason });
   if (!ok) return reply.code(502).send({ error: "Le remboursement a échoué côté prestataire ; les administrateurs ont été notifiés." });
   const alreadyPaidOutWarning = !!payment.ledgerEntry?.paidOutAt;
-  await notify(payment.reservation.userId, "Remboursement effectué", `Votre paiement pour « ${payment.reservation.event.title} » a été remboursé.`, "/dashboard?tab=reservations");
+  await notify(payment.reservation.userId, "Remboursement effectué", `Votre paiement pour « ${payment.reservation.event.title} » a été remboursé.`, links.reservation(payment.reservation.applicationId));
   await audit(currentId(request), "REFUND_PAYMENT", "Payment", id, { alreadyPaidOutWarning, exception: !eligible, reason });
   return { refunded: true, alreadyPaidOutWarning, exception: !eligible };
 });
-// Le restaurateur peut demander un remboursement AVEC MOTIF, jamais l'exécuter lui-même : cette
-// route ne fait qu'enregistrer la demande et notifier le super-admin, qui décide via l'endpoint
-// ci-dessus.
-app.post("/admin/payments/:id/refund-request", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
-  const { id } = z.object({ id: z.string() }).parse(request.params);
-  const { reason } = z.object({ reason: z.string().min(3).max(1000) }).parse(request.body);
-  const payment = await prisma.payment.findUniqueOrThrow({ where: { id }, include: { reservation: { include: { event: true } } } });
-  const token = request.user as TokenUser;
-  if (token.role === UserRole.ORGANIZER) {
-    const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: token.sub } });
-    if (payment.reservation.event.controllerRestaurantId !== restaurant.id) throw httpError(403, "Ce paiement appartient à un autre restaurateur");
-  }
-  if (payment.status !== PaymentStatus.SUCCEEDED) return reply.code(409).send({ error: "Seul un paiement réussi peut faire l’objet d’une demande de remboursement" });
-  const updated = await prisma.payment.update({ where: { id }, data: { refundRequestedAt: new Date(), refundRequestedBy: currentId(request), refundRequestReason: reason } });
-  const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
-  await Promise.all(admins.map(a => notify(a.id, "Demande de remboursement", `Une demande de remboursement a été faite pour « ${payment.reservation.event.title} » : ${reason}`, "/admin/finance")));
-  await audit(currentId(request), "REQUEST_REFUND", "Payment", id, { reason });
-  return updated;
-});
-// Grand livre 30/70 : le restaurateur ne voit que ses propres ventes, le super-admin voit tout.
+// Corrections web 2026-09-24 (§6.1) : un restaurateur ne demande ni ne déclenche jamais lui-même un
+// remboursement — l'ancienne route de « demande de remboursement » ouverte aux restaurateurs est
+// supprimée. Seuls le super-admin (route ci-dessus) et les règles automatiques de Nūr Meet
+// (annulation plus de 24h avant, annulation d'événement) remboursent.
+// Grand livre 30/70 et synthèse financière : informations internes de Nūr Meet (montant dû, reversements,
+// commissions, solde Stripe), réservées au super-admin (corrections web 2026-09-24, §6.2). Le
+// restaurateur retrouve ses propres ventes dans son tableau de bord (GET /admin/dashboard).
 // "Prêt à reverser" n'est qu'une indication (7 jours après la fin de l'événement, pour laisser le
 // temps à une éventuelle contestation) — jamais un blocage : "Marquer comme reversé" reste possible
 // à tout moment, à la seule discrétion du super-admin.
 const PAYOUT_COOLDOWN_MS = 7 * 24 * 60 * 60_000;
-app.get("/admin/finance/ledger", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
-  const token = request.user as TokenUser;
-  const restaurant = await ownRestaurant(token);
+app.get("/admin/finance/ledger", { preHandler: roles(UserRole.ADMIN) }, async () => {
   const entries = await prisma.ledgerEntry.findMany({
-    where: restaurant ? { restaurantId: restaurant.id } : undefined,
     include: { event: true, restaurant: true, payment: { include: { reservation: { include: { user: true } } } } },
     orderBy: { createdAt: "desc" }
   });
@@ -65,10 +50,8 @@ app.get("/admin/finance/ledger", { preHandler: roles(UserRole.ADMIN, UserRole.OR
 // pertinent pour les anciennes ventes sous commission), chiffre d'affaires PROPRE de Nour (ses
 // événements en direct, controllerRestaurantId null) et abonnements restaurateur (revenu récurrent
 // distinct, jamais mélangé avec le volume de billets vendu pour compte de tiers).
-app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
-  const token = request.user as TokenUser;
-  const restaurant = await ownRestaurant(token);
-  const where = restaurant ? { restaurantId: restaurant.id } : undefined;
+app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN) }, async () => {
+  const where = {};
   // grossTicketVolumeCents vient directement de Payment, indépendamment de LedgerEntry : depuis le
   // passage à l'abonnement (§8.2, Lot 2), ENABLE_COMMISSION_LEDGER est désactivé par défaut et plus
   // aucune LedgerEntry n'est créée pour les nouvelles ventes restaurateur. gross/commission/due/
@@ -79,10 +62,10 @@ app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN, UserRole.O
     prisma.ledgerEntry.aggregate({ where, _sum: { grossAmountCents: true } }),
     prisma.ledgerEntry.aggregate({ where, _sum: { commissionAmountCents: true } }),
     prisma.ledgerEntry.aggregate({ where, _sum: { restaurantDueCents: true } }),
-    prisma.ledgerEntry.aggregate({ where: { ...where, paidOutAt: { not: null } }, _sum: { restaurantDueCents: true } }),
+    prisma.ledgerEntry.aggregate({ where: { paidOutAt: { not: null } }, _sum: { restaurantDueCents: true } }),
     prisma.ledgerEntry.aggregate({ where, _sum: { refundedAmountCents: true } }),
     prisma.payment.aggregate({
-      where: { status: PaymentStatus.SUCCEEDED, reservation: { event: { controllerRestaurantId: restaurant ? restaurant.id : { not: null } } } },
+      where: { status: PaymentStatus.SUCCEEDED, reservation: { event: { controllerRestaurantId: { not: null } } } },
       _sum: { amountCents: true }
     }),
     // H2/§14 (cahier des charges consolidé 2026-09-20) : frais Stripe déjà connus (voir la
@@ -100,7 +83,6 @@ app.get("/admin/finance/summary", { preHandler: roles(UserRole.ADMIN, UserRole.O
     feesCents: fees._sum.stripeFeeCents ?? 0,
     commissionLedgerEnabled: getSetting("ENABLE_COMMISSION_LEDGER")
   };
-  if (restaurant) return summary;
   // Le reste n'a de sens qu'à l'échelle de la plateforme, jamais restreint à un seul restaurateur.
   // Le revenu récurrent d'abonnement ne compte que les abonnements ACTIVE (jamais TRIALING, qui
   // n'ont encore rien payé) : chez Stripe, ACTIVE signifie précisément que la dernière facture de

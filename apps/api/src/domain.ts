@@ -56,3 +56,17 @@ export function resolvePriceCents(event: { priceCents: number; priceTiers?: Pric
 export function eventsOverlap(a: { startsAt: Date; endsAt: Date }, b: { startsAt: Date; endsAt: Date }) {
   return a.startsAt < b.endsAt && b.startsAt < a.endsAt;
 }
+
+// Données de démonstration (§8, corrections web 2026-09-24) : un événement isDemo n'est jamais
+// réservable. Fonction pure, partagée par la route de paiement et les propositions d'alternatives.
+export const NOT_BOOKABLE_MESSAGE = "Cet événement n’est actuellement pas réservable. Découvrez nos autres soirées à venir.";
+export function isEventBookable(event: { isDemo: boolean }) {
+  return !event.isDemo;
+}
+
+// Sens d'un changement de formule restaurateur (§1.4, corrections web 2026-09-24) : une formule plus
+// chère s'applique immédiatement avec prorata, une formule moins chère à la fin de la période payée.
+export type PlanChangeDirection = "UPGRADE" | "DOWNGRADE";
+export function planChangeDirection(current: { monthlyPriceCents: number }, target: { monthlyPriceCents: number }): PlanChangeDirection {
+  return target.monthlyPriceCents > current.monthlyPriceCents ? "UPGRADE" : "DOWNGRADE";
+}

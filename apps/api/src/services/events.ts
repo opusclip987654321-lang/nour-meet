@@ -1,4 +1,5 @@
-import { EVENT_CATEGORIES } from "@nour/shared";
+import { EVENT_CATEGORIES, EventViewerStatus, eventViewerStatus } from "@nour/shared";
+import { prisma } from "../context.js";
 import { getSetting } from "../settings.js";
 
 export const defaultCategoryImage = (category: string) => EVENT_CATEGORIES.find(c => c.name === category)?.defaultImage ?? EVENT_CATEGORIES[0].defaultImage;
@@ -39,5 +40,24 @@ export const publicEvent = (event: any, revealAddress = false, viewerQuotaCatego
   // le tri chronologique de la page Événements — seulement un badge visuel, jamais un ré-ordonnancement.
   highlightTier: event.controllerRestaurant?.subscription?.status === "ACTIVE" || event.controllerRestaurant?.subscription?.status === "TRIALING" ? event.controllerRestaurant.subscription.plan.highlightTier ?? null : null,
   venue: event.venueRestaurant ? { id: event.venueRestaurant.id, name: event.venueRestaurant.name } : null,
-  hasQuotas: (event.quotas ?? []).length > 0
+  hasQuotas: (event.quotas ?? []).length > 0,
+  // §8 : jamais affiché comme tel ; sert uniquement à ne pas déclarer aux moteurs de recherche un
+  // événement qui ne peut pas être réservé (noindex, pas de données structurées Event).
+  bookable: !event.isDemo
 });
+
+// Statut du visiteur connecté pour une liste d'événements (§5.2 des corrections web 2026-09-24), en
+// deux requêtes groupées quel que soit le nombre d'événements affichés.
+export const viewerStatuses = async (userId: string | null, eventIds: string[]): Promise<Map<string, EventViewerStatus>> => {
+  const out = new Map<string, EventViewerStatus>();
+  if (!userId || eventIds.length === 0) return out;
+  const [reservations, waitlist] = await Promise.all([
+    prisma.reservation.findMany({ where: { userId, eventId: { in: eventIds } }, select: { eventId: true, confirmedAt: true, cancelledAt: true } }),
+    prisma.waitlistEntry.findMany({ where: { userId, eventId: { in: eventIds } }, select: { eventId: true } })
+  ]);
+  for (const eventId of eventIds) {
+    const status = eventViewerStatus({ reservation: reservations.find(r => r.eventId === eventId), onWaitlist: waitlist.some(w => w.eventId === eventId) });
+    if (status) out.set(eventId, status);
+  }
+  return out;
+};

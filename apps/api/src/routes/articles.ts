@@ -15,7 +15,9 @@ app.get("/articles", async (request) => {
       status: "PUBLISHED", category: query.category, keywords: query.keyword ? { has: query.keyword } : undefined,
       OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" } }, { excerpt: { contains: query.q, mode: "insensitive" } }] : undefined
     },
-    orderBy: { publishedAt: "desc" }
+    orderBy: { publishedAt: "desc" },
+    // Liste du journal : jamais le corps complet de chaque article (inutilement lourd), seulement la carte.
+    select: { id: true, slug: true, title: true, excerpt: true, imageUrl: true, category: true, keywords: true, publishedAt: true }
   });
 });
 app.get("/articles/:slug", async (request, reply) => {

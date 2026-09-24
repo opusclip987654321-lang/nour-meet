@@ -4,6 +4,9 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { api } from "../api";
 import { STAFF_ROLES, useAuth } from "../auth";
 import { Logo } from "./brand";
+import { NotificationBell } from "./NotificationBell";
+import { CookieConsent } from "./CookieConsent";
+import { CONSENT_CHANGED, analyticsAllowed, openConsentSettings } from "../lib/consent";
 
 // Navigation publique : 3 entrées seulement (au-delà, le menu devient une liste à lire plutôt qu'un
 // repère). « Mon espace » ou « Mon établissement » selon le compte, l'administration pour l'équipe.
@@ -46,6 +49,7 @@ function Header() {
         <div className="header-actions">
           {user ? (
             <>
+              <NotificationBell />
               <span className="member-name" title={user.displayName}>{user.displayName}</span>
               <button className="button ghost small desktop-only" onClick={logout}>Se déconnecter</button>
             </>
@@ -112,11 +116,12 @@ function Footer() {
             <li><Link to="/legal/cgv">Conditions de vente</Link></li>
             <li><Link to="/legal/confidentialite">Confidentialité</Link></li>
             <li><Link to="/legal/cookies">Cookies</Link></li>
+            <li><button type="button" className="footer-link-button" onClick={openConsentSettings}>Gérer mes cookies</button></li>
           </ul>
         </nav>
       </div>
       <div className="site-footer-bottom">
-        <span>© {year} Nour Meet · Paris</span>
+        <span>© {year} Nūr Meet · Paris</span>
         <span>Service réservé aux personnes majeures · Contact : contact@nourmeet.com</span>
       </div>
     </footer>
@@ -128,7 +133,10 @@ function Footer() {
 // ANALYTICS_ENABLED est désactivé (défaut), donc cet appel est sans effet hors activation explicite.
 // utm_* n'est capturé qu'une fois par session (sessionStorage), pour attribuer toute la visite à sa
 // source d'origine même après plusieurs pages vues sans paramètres dans l'URL.
+// Corrections web 2026-09-24 (§15) : rien n'est posé ni envoyé sans consentement explicite à la mesure
+// d'audience (voir lib/consent.ts et CookieConsent).
 const trackPageview = (path: string) => {
+  if (!analyticsAllowed()) return;
   try {
     let anonId = localStorage.getItem("nour_anon_id");
     if (!anonId) { anonId = crypto.randomUUID(); localStorage.setItem("nour_anon_id", anonId); }
@@ -148,6 +156,12 @@ const trackPageview = (path: string) => {
 export function Layout({ children, footer = true }: { children: ReactNode; footer?: boolean }) {
   const location = useLocation();
   useEffect(() => { trackPageview(location.pathname); }, [location.pathname]);
+  // La page où le consentement est donné compte aussi, sans attendre la navigation suivante.
+  useEffect(() => {
+    const onConsent = (e: Event) => { if ((e as CustomEvent).detail?.analytics) trackPageview(window.location.pathname); };
+    window.addEventListener(CONSENT_CHANGED, onConsent);
+    return () => window.removeEventListener(CONSENT_CHANGED, onConsent);
+  }, []);
   // Chaque navigation repart du haut de la page (sauf ancre explicite) : sans cela, React Router
   // conserve la position de défilement de la page précédente.
   useEffect(() => { if (!location.hash) window.scrollTo(0, 0); }, [location.pathname, location.hash]);
@@ -157,6 +171,7 @@ export function Layout({ children, footer = true }: { children: ReactNode; foote
       <Header />
       <main id="contenu" tabIndex={-1}>{children}</main>
       {footer && <Footer />}
+      <CookieConsent />
     </>
   );
 }

@@ -51,7 +51,7 @@ export function AdminStats() {
       {stats.alerts.pendingRefundRequests>0&&<>{stats.alerts.pendingRefundRequests} demande{stats.alerts.pendingRefundRequests>1?"s":""} de remboursement en attente. </>}
       {stats.alerts.underfilledEventsPending>0&&<>{stats.alerts.underfilledEventsPending} soirée{stats.alerts.underfilledEventsPending>1?"s":""} sous le seuil de participants, décision attendue.</>}
     </Notice>}
-    {!stats.analyticsEnabled&&<Notice kind="info">Mesure d’audience désactivée (visiteurs, sources, entonnoir haut) : à activer dans Réglages après mise en place d’un consentement conforme.</Notice>}
+    {!stats.analyticsEnabled&&<Notice kind="info">Mesure d’audience coupée côté serveur (réglage ANALYTICS_ENABLED) : aucune visite n’est enregistrée.</Notice>}
 
     {(scope==="all"||scope==="participants")&&<>
       <div className="panel-title"><h2>Audience</h2></div>

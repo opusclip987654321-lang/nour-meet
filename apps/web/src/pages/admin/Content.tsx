@@ -84,6 +84,6 @@ export function AdminTestimonials() {
       <label className="wide">Texte<textarea required minLength={10} value={form.text} onChange={e=>setForm({...form,text:e.target.value})}/></label>
       <button className="button" disabled={busy==="new"}>Créer (en brouillon)</button>
     </form>
-    <div className="stack">{items.map(t=><article key={t.id} className="panel restaurant-request"><div><h3>{t.displayName}</h3><p className="fine left">{t.eventType}{t.rating?` · ${"★".repeat(t.rating)}`:""}</p><p className="fine left">{t.text}</p><small>{t.status==="PUBLISHED"?"Publié":"Brouillon"}</small></div><div className="decision-buttons"><button className="button small" disabled={busy===t.id} onClick={()=>toggleStatus(t)}>{t.status==="PUBLISHED"?"Dépublier":"Publier"}</button><button className="button small danger" disabled={busy===t.id} onClick={()=>remove(t.id)}>Supprimer</button></div></article>)}</div>
+    <div className="stack">{items.map(t=><article key={t.id} className="panel restaurant-request"><div><h3>{t.displayName}</h3><p className="fine left">{t.eventType}{t.rating?` · ${t.rating}/5`:""}</p><p className="fine left">{t.text}</p><small>{t.status==="PUBLISHED"?"Publié":"Brouillon"}</small></div><div className="decision-buttons"><button className="button small" disabled={busy===t.id} onClick={()=>toggleStatus(t)}>{t.status==="PUBLISHED"?"Dépublier":"Publier"}</button><button className="button small danger" disabled={busy===t.id} onClick={()=>remove(t.id)}>Supprimer</button></div></article>)}</div>
   </div></section></Layout>;
 }

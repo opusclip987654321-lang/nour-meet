@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
-import { ReactNode } from "react";
+import { Fragment, ReactNode } from "react";
+import { useSeo } from "./lib/seo";
 import mentionsMd from "./legal/mentions-legales.md?raw";
 import cguMd from "./legal/cgu.md?raw";
 import cgvMd from "./legal/cgv.md?raw";
@@ -20,11 +21,10 @@ const inline = (text: string): ReactNode[] =>
   text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map((part, i) =>
     part.startsWith("**") && part.endsWith("**") ? <b key={i}>{part.slice(2, -2)}</b> : part);
 
+// Chaque ligne est enveloppée dans son propre fragment à clé : sans cela, les morceaux de deux lignes
+// différentes partageaient les mêmes clés (avertissement React, contenu potentiellement omis).
 const withBreaks = (lines: string[]): ReactNode[] =>
-  lines.flatMap((line, i) => {
-    const content = inline(line.replace(/ {2,}$/, ""));
-    return i < lines.length - 1 && / {2,}$/.test(line) ? [...content, <br key={`br${i}`} />] : i < lines.length - 1 ? [...content, " "] : content;
-  });
+  lines.map((line, i) => <Fragment key={i}>{inline(line.replace(/ {2,}$/, ""))}{i < lines.length - 1 ? (/ {2,}$/.test(line) ? <br /> : " ") : null}</Fragment>);
 
 const tableCells = (row: string) => row.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
 
@@ -85,8 +85,9 @@ function LegalPage({ markdown }: { markdown: string }) {
   );
 }
 
-export const MentionsLegales = () => <LegalPage markdown={mentionsMd} />;
-export const CGU = () => <LegalPage markdown={cguMd} />;
-export const CGV = () => <LegalPage markdown={cgvMd} />;
-export const Confidentialite = () => <LegalPage markdown={confidentialiteMd} />;
-export const Cookies = () => <LegalPage markdown={cookiesMd} />;
+const Titled = ({ title, path, markdown }: { title: string; path: string; markdown: string }) => { useSeo({ title, path, description: `${title} du service Nūr Meet.` }); return <LegalPage markdown={markdown} />; };
+export const MentionsLegales = () => <Titled title="Mentions légales" path="/legal/mentions-legales" markdown={mentionsMd} />;
+export const CGU = () => <Titled title="Conditions générales d’utilisation" path="/legal/cgu" markdown={cguMd} />;
+export const CGV = () => <Titled title="Conditions générales de vente" path="/legal/cgv" markdown={cgvMd} />;
+export const Confidentialite = () => <Titled title="Politique de confidentialité" path="/legal/confidentialite" markdown={confidentialiteMd} />;
+export const Cookies = () => <Titled title="Politique cookies" path="/legal/cookies" markdown={cookiesMd} />;

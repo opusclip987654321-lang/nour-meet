@@ -4,13 +4,14 @@ import { randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import { z } from "zod";
 import { app, prisma, stripe } from "../context.js";
-import { paymentLockExpiry, resolvePriceCents } from "../domain.js";
+import { NOT_BOOKABLE_MESSAGE, isEventBookable, paymentLockExpiry, resolvePriceCents } from "../domain.js";
 import { env } from "../env.js";
 import { ADULT_ONLY_ERROR, hasAcceptedCurrent, recordAcceptance } from "../services/account.js";
 import { audit } from "../services/audit.js";
 import { auth, currentId } from "../services/auth.js";
+import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
-import { mapStripeSubscriptionStatus } from "../services/payments.js";
+import { recordCheckoutSession, syncSubscriptionFromStripe } from "../services/subscriptions.js";
 import { claimReservation, createAlternativeOfferIfPossible } from "../services/reservations.js";
 import { getSetting } from "../settings.js";
 
@@ -26,6 +27,10 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
   const userId = currentId(request);
   const application = await prisma.application.findFirstOrThrow({ where: { id, userId }, include: { event: { include: { priceTiers: true } }, reservation: true } });
   if (application.status !== ApplicationStatus.PAYMENT_PENDING) return reply.code(409).send({ error: "Cette candidature n’est pas en attente de paiement" });
+  // §8 (corrections web 2026-09-24) : un événement de démonstration peut être découvert et le parcours
+  // commencé, mais aucune transaction n'est jamais possible — ni PaymentIntent, ni verrou de place, ni
+  // billet gratuit. Refus côté serveur, quel que soit le client (site, application mobile, appel direct).
+  if (application.event && isEventBookable(application.event) === false) return reply.code(409).send({ error: NOT_BOOKABLE_MESSAGE, notBookable: true });
   // CGV A3 : la réservation ne devient ferme qu'après acceptation des CGV. Exigée avant de poser le
   // moindre verrou ou PaymentIntent, y compris pour une soirée gratuite.
   const { acceptCgv } = z.object({ acceptCgv: z.boolean().optional() }).parse(request.body ?? {});
@@ -48,7 +53,7 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
       let waitlistEntry = await prisma.waitlistEntry.findUnique({ where: { eventId_userId: { eventId: application.eventId, userId } } });
       if (!waitlistEntry) {
         waitlistEntry = await prisma.waitlistEntry.create({ data: { eventId: application.eventId, userId, applicationId: application.id, quotaCategory: application.quotaCategory, position: (await prisma.waitlistEntry.count({ where: { eventId: application.eventId } })) + 1 } });
-        await notify(userId, "Liste d’attente", `« ${event.title} » est complet pour votre catégorie ; vous avez été placé(e) sur liste d’attente.`, "/dashboard?tab=reservations");
+        await notify(userId, "Liste d’attente", `« ${event.title} » est complet pour votre catégorie ; vous avez été placé(e) sur liste d’attente.`, links.reservation(application.id));
         await createAlternativeOfferIfPossible(userId, event);
         await audit(userId, "APPLICATION_WAITLISTED_FULL", "Application", application.id);
       }
@@ -79,10 +84,10 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
       return "CONFIRMED" as const;
     });
     if (outcome === "CONFIRMED") {
-      await notify(userId, "Place confirmée", `Votre billet gratuit pour « ${event.title} » est disponible.`, "/dashboard?tab=tickets");
+      await notify(userId, "Place confirmée", `Votre billet gratuit pour « ${event.title} » est disponible.`, links.ticket(reservation.id));
       if (event.controllerRestaurantId) {
         const controllerRestaurant = await prisma.restaurant.findUnique({ where: { id: event.controllerRestaurantId } });
-        if (controllerRestaurant) await notify(controllerRestaurant.ownerId, "Nouvelle inscription gratuite", `Une place gratuite pour « ${event.title} » vient d’être confirmée.`, `/admin/events?highlight=${event.id}`);
+        if (controllerRestaurant) await notify(controllerRestaurant.ownerId, "Nouvelle inscription gratuite", `Une place gratuite pour « ${event.title} » vient d’être confirmée.`, links.adminEvent(event.id));
       }
       await audit(userId, "FREE_RESERVATION_CONFIRMED", "Reservation", reservation.id);
     }
@@ -142,11 +147,11 @@ await app.register(async (webhooks) => {
             return "CONFIRMED" as const;
           });
           if (outcome === "CONFIRMED") {
-            await notify(reservation.userId, "Paiement confirmé", `Votre billet pour ${reservation.event.title} est disponible.`, "/dashboard?tab=tickets");
+            await notify(reservation.userId, "Paiement confirmé", `Votre billet pour ${reservation.event.title} est disponible.`, links.ticket(reservationId));
             // C16 (ordre correctif 2026-09-20) : le restaurateur est informé d'une vente une seule
             // fois, ici, après confirmation réelle du webhook — jamais à la simple ouverture de la
             // page de paiement par le participant.
-            if (reservation.event.controllerRestaurant) await notify(reservation.event.controllerRestaurant.ownerId, "Nouvelle place vendue", `Un billet pour « ${reservation.event.title} » vient d’être payé.`, `/admin/events?highlight=${reservation.eventId}`);
+            if (reservation.event.controllerRestaurant) await notify(reservation.event.controllerRestaurant.ownerId, "Nouvelle place vendue", `Un billet pour « ${reservation.event.title} » vient d’être payé.`, links.adminEvent(reservation.eventId));
             await audit(reservation.userId, "PAYMENT_SUCCEEDED", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });
             // Comptabilité 30/70 : neutralisée par défaut depuis le passage à l'abonnement mensuel
             // (§8.2 — voir ENABLE_COMMISSION_LEDGER). Les anciennes lignes restent en base, aucune
@@ -170,7 +175,7 @@ await app.register(async (webhooks) => {
               await prisma.ledgerEntry.create({ data: { paymentId: reservation.payment!.id, eventId: reservation.eventId, restaurantId: restaurant.id, grossAmountCents, commissionRate, commissionAmountCents, restaurantDueCents, stripeFeeCents } });
             }
           } else if (outcome === "LATE_AFTER_RELEASE") {
-            await notify(reservation.userId, "Paiement reçu après expiration", "Votre place n’était plus disponible au moment où votre paiement a été confirmé. Le remboursement sera traité manuellement par notre équipe.", "/dashboard?tab=reservations");
+            await notify(reservation.userId, "Paiement reçu après expiration", "Votre place n’était plus disponible au moment où votre paiement a été confirmé. Le remboursement sera traité manuellement par notre équipe.", links.reservation(reservation.applicationId));
             const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
             await Promise.all(admins.map(a => notify(a.id, "Paiement tardif après libération de place", `Un paiement a été confirmé pour « ${reservation.event.title} » après l’expiration de la réservation : remboursement à traiter manuellement.`, "/admin/finance")));
             await audit(reservation.userId, "PAYMENT_SUCCEEDED_AFTER_RELEASE", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });
@@ -184,33 +189,20 @@ await app.register(async (webhooks) => {
       // C06/C07 (instructions définitives 2026-09-20) : la session Checkout confirme le moyen de
       // paiement et l'essai démarre réellement côté Stripe (trial_period_days, voir la création de la
       // session) — jamais un simple changement de statut local sans passage par Stripe.
-      const session = event.data.object as Stripe.Checkout.Session;
-      const restaurantId = session.metadata?.restaurantId;
-      const planId = session.metadata?.planId;
-      const billingPeriod = session.metadata?.billingPeriod;
-      if (restaurantId && planId && session.subscription && session.customer) {
-        const stripeSub = await stripe.subscriptions.retrieve(session.subscription as string);
-        const updated = await prisma.restaurantSubscription.upsert({
-          where: { restaurantId },
-          update: { planId, billingPeriod: billingPeriod ?? "MONTHLY", status: mapStripeSubscriptionStatus(stripeSub.status), stripeCustomerId: session.customer as string, stripeSubscriptionId: stripeSub.id, currentPeriodStart: new Date(stripeSub.items.data[0].current_period_start * 1000), currentPeriodEnd: new Date(stripeSub.items.data[0].current_period_end * 1000), cancelAtPeriodEnd: false, cancelledAt: null },
-          create: { restaurantId, planId, billingPeriod: billingPeriod ?? "MONTHLY", status: mapStripeSubscriptionStatus(stripeSub.status), stripeCustomerId: session.customer as string, stripeSubscriptionId: stripeSub.id, currentPeriodStart: new Date(stripeSub.items.data[0].current_period_start * 1000), currentPeriodEnd: new Date(stripeSub.items.data[0].current_period_end * 1000) }
-        });
-        const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id: restaurantId } });
-        const plan = await prisma.plan.findUniqueOrThrow({ where: { id: planId } });
-        await notify(restaurant.ownerId, "Abonnement activé", `Votre abonnement « ${plan.name} » (${billingPeriod === "ANNUAL" ? "annuel" : "mensuel"}) est confirmé, essai de 7 jours en cours.`, "/restaurant?tab=subscription");
-        await audit(restaurant.ownerId, "SUBSCRIPTION_CHECKOUT_COMPLETED", "RestaurantSubscription", updated.id, { planId, billingPeriod });
-      }
+      await recordCheckoutSession(event.data.object as Stripe.Checkout.Session);
     } else if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
       const stripeSub = event.data.object as Stripe.Subscription;
       const existing = await prisma.restaurantSubscription.findFirst({ where: { stripeSubscriptionId: stripeSub.id }, include: { restaurant: true, plan: true } });
       if (existing) {
-        const status = event.type === "customer.subscription.deleted" ? SubscriptionStatus.CANCELLED : mapStripeSubscriptionStatus(stripeSub.status);
         const wasActiveOrTrialing = existing.status === SubscriptionStatus.ACTIVE || existing.status === SubscriptionStatus.TRIALING;
-        await prisma.restaurantSubscription.update({ where: { id: existing.id }, data: {
-          status, cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false,
-          currentPeriodStart: new Date(stripeSub.items.data[0].current_period_start * 1000), currentPeriodEnd: new Date(stripeSub.items.data[0].current_period_end * 1000),
-          cancelledAt: status === SubscriptionStatus.CANCELLED ? new Date() : null
-        } });
+        // §1.4 (corrections web 2026-09-24) : formule, statut, période et changement différé toujours
+        // recopiés depuis Stripe par la même fonction que la resynchronisation manuelle.
+        // Stripe ne garantit pas l'ordre des événements : on recopie l'état relu à l'instant chez Stripe,
+        // jamais l'instantané éventuellement périmé porté par l'événement (revue de sécurité 2026-09-24).
+        const fresh = event.type === "customer.subscription.deleted" ? stripeSub : await stripe.subscriptions.retrieve(stripeSub.id);
+        const synced = await syncSubscriptionFromStripe(existing, fresh, { deleted: event.type === "customer.subscription.deleted" || fresh.status === "canceled" });
+        const status = synced.status;
+        if (synced.planId !== existing.planId) await notify(existing.restaurant.ownerId, "Formule d’abonnement modifiée", `Votre établissement est désormais en formule « ${synced.plan.name} ».`, "/restaurant?tab=subscription");
         // C09 : ne notifier une expiration/désactivation que sur une vraie transition, jamais à
         // chaque événement Stripe de mise à jour mineure (ex. changement de carte).
         if (wasActiveOrTrialing && status === SubscriptionStatus.CANCELLED) {

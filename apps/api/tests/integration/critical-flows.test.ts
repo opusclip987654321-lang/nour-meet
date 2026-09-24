@@ -65,9 +65,9 @@ describe("isolation restaurateur", () => {
     const quotas = await api(`/admin/events/${foreignEvent.id}/quotas`, { method: "POST", body: JSON.stringify({ homme: 1, femme: 1 }) }, orgToken);
     expect(quotas.status).toBe(404);
 
+    // Corrections web 2026-09-24 (§6.2) : le grand livre est une information interne de Nūr Meet.
     const ledger = await api<any[]>("/admin/finance/ledger", {}, orgToken);
-    expect(ledger.status).toBe(200);
-    expect(ledger.body).toHaveLength(0);
+    expect(ledger.status).toBe(403);
   });
 });
 
@@ -427,6 +427,10 @@ async function newOrganizer(displayName: string) {
   const { body: restaurant } = await api<{ id: string }>("/restaurants/apply", { method: "POST", body: JSON.stringify({ name: `${displayName} Resto`, managerName: displayName, siret: "12345678900019" }) }, token);
   const admin = await adminToken();
   await api(`/admin/restaurants/${restaurant.id}/decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
+  // L'approbation ne crée plus d'abonnement (le restaurateur choisit sa formule) ; or une soirée ne
+  // peut être publiée qu'avec un abonnement actif : on l'attribue comme le ferait l'administration.
+  const standard = await prisma.plan.findFirstOrThrow({ where: { name: "Standard", active: true } });
+  await api(`/admin/restaurants/${restaurant.id}/subscription`, { method: "POST", body: JSON.stringify({ planId: standard.id, status: "ACTIVE" }) }, admin);
   // Le rôle vient de changer côté serveur : un jeton fraîchement émis le reflète.
   const { body: reverify } = await api<{ token: string }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456" }) });
   token = reverify.token;
@@ -442,7 +446,7 @@ describe("restaurateur limité à son quota mensuel d'événements publiables", 
     // seul l'état ACTIVE compte pour la publication. Le quota est lu sur le plan, jamais codé en dur.
     const plan = await prisma.plan.findFirstOrThrow({ where: { active: true, monthlyEventQuota: { not: null } } });
     const quota = plan.monthlyEventQuota!;
-    await prisma.restaurantSubscription.create({ data: { restaurantId: organizer.restaurantId, planId: plan.id, status: "ACTIVE", currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) } });
+    await prisma.restaurantSubscription.upsert({ where: { restaurantId: organizer.restaurantId }, update: { planId: plan.id, status: "ACTIVE" }, create: { restaurantId: organizer.restaurantId, planId: plan.id, status: "ACTIVE", currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) } });
 
     const publishOne = async (n: number) => {
       const { body: event } = await api<{ id: string }>("/admin/events", { method: "POST", body: JSON.stringify({
@@ -562,8 +566,11 @@ describe("volume brut billets restaurateurs à jour même sans registre commissi
     expect(before.commissionLedgerEnabled).toBe(false);
     expect(before.grossTicketVolumeCents).toBeGreaterThanOrEqual(4200);
 
-    const restaurantScoped = (await api<{ grossTicketVolumeCents: number }>("/admin/finance/summary", {}, organizer.token)).body;
-    expect(restaurantScoped.grossTicketVolumeCents).toBe(4200);
+    // §6.2 : le restaurateur ne lit plus la synthèse financière interne ; il retrouve ses propres
+    // ventes dans son tableau de bord d'administration.
+    expect((await api("/admin/finance/summary", {}, organizer.token)).status).toBe(403);
+    const dashboard = (await api<{ revenueCents: number }>("/admin/dashboard", {}, organizer.token)).body;
+    expect(dashboard.revenueCents).toBe(4200);
   });
 });
 

@@ -1,9 +1,11 @@
 import { AlternativeOfferStatus, EventStatus, UserRole } from "@prisma/client";
 import Stripe from "stripe";
-import { app, ownsBackgroundJobs, prisma, stripe } from "./context.js";
+import { aiProvider, app, ownsBackgroundJobs, prisma, stripe } from "./context.js";
 import { logArticleTransition } from "./services/articles.js";
 import { audit } from "./services/audit.js";
+import { publishDailyArticle } from "./services/blog-autopublish.js";
 import { cancelEventWithRefunds } from "./services/event-cancellation.js";
+import { links } from "./services/links.js";
 import { notify } from "./services/notify.js";
 import { offerNextWaitlistEntry, releaseReservationSlot } from "./services/reservations.js";
 import { getSetting } from "./settings.js";
@@ -15,7 +17,7 @@ const releaseExpiredReservations = async () => {
   const expired = await prisma.reservation.findMany({ where: { expiresAt: { lt: new Date() }, confirmedAt: null, cancelledAt: null } });
   for (const reservation of expired) {
     await prisma.$transaction(tx => releaseReservationSlot(tx, reservation));
-    await notify(reservation.userId, "Délai de paiement expiré", "Le délai pour régler votre billet est dépassé ; la place a été libérée.", "/dashboard?tab=reservations");
+    await notify(reservation.userId, "Délai de paiement expiré", "Le délai pour régler votre billet est dépassé ; la place a été libérée.", links.reservation(reservation.applicationId));
     await audit(undefined, "RESERVATION_EXPIRED", "Reservation", reservation.id);
     await offerNextWaitlistEntry(reservation.eventId, reservation.quotaCategory);
   }
@@ -89,7 +91,7 @@ const sendEventReminders = async () => {
     });
     for (const reservation of due) {
       await prisma.reservation.update({ where: { id: reservation.id }, data: { [field]: new Date() } });
-      await notify(reservation.userId, "Votre événement approche", `« ${reservation.event.title} » a lieu ${label} (${reservation.event.startsAt.toLocaleString("fr-FR")}). À très vite !`, "/dashboard?tab=tickets");
+      await notify(reservation.userId, "Votre événement approche", `« ${reservation.event.title} » a lieu ${label} (${reservation.event.startsAt.toLocaleString("fr-FR")}). À très vite !`, links.ticket(reservation.id));
     }
   };
   await sendBatch(getSetting("EVENT_REMINDER_HOURS_BEFORE"), "reminderSentAt", "demain");
@@ -173,24 +175,18 @@ const checkCancellationSpike = async () => {
 };
 if (ownsBackgroundJobs) setInterval(() => { checkCancellationSpike().catch(err => app.log.error(err)); }, 60 * 60_000);
 
-// §5 (cahier des charges 2026-09) : fait sortir un article de qualité éditoriale de la réserve
-// (ArticleQueueEntry, jamais un brouillon générique) vers Article au statut DRAFT, un par jour et
-// seulement une fois en production — jamais en développement, où cette réserve resterait intacte
-// pour être relue avant la mise en ligne réelle. L'article reste un simple brouillon, exactement
-// comme n'importe quel autre : aucune publication automatique, il doit être validé par un admin.
-const releaseQueuedArticle = async () => {
-  if (process.env.NODE_ENV !== "production") return;
-  const state = await prisma.articleQueueState.upsert({ where: { id: "singleton" }, update: {}, create: { id: "singleton" } });
-  const today = new Date().toISOString().slice(0, 10);
-  if (state.lastReleasedAt?.toISOString().slice(0, 10) === today) return;
-  const next = await prisma.articleQueueEntry.findFirst({ orderBy: { position: "asc" } });
-  if (!next) return;
-  await prisma.$transaction([
-    prisma.article.create({ data: { title: next.title, slug: next.slug, excerpt: next.excerpt, content: next.content, category: next.category, keywords: next.keywords, metaTitle: next.metaTitle, metaDescription: next.metaDescription, imageUrl: next.imageUrl, status: "DRAFT" } }),
-    prisma.articleQueueEntry.delete({ where: { id: next.id } }),
-    prisma.articleQueueState.update({ where: { id: "singleton" }, data: { lastReleasedAt: new Date() } })
-  ]);
-  const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
-  await Promise.all(admins.map(a => notify(a.id, "Nouvel article proposé", `« ${next.title} » attend votre relecture dans le blog.`, "/admin/blog")));
+// Corrections web 2026-09-24 (§3) : un article publié automatiquement chaque jour en production, sans
+// validation manuelle préalable (le super-admin peut le consulter et le supprimer ensuite). Généré
+// par Claude avec recherche web ; si l'IA est indisponible, la réserve d'articles déjà rédigés prend
+// le relais. Passage toutes les 30 minutes : l'heure exacte importe peu, l'unicité par jour est
+// garantie par la base (Article.autoPublishDay), jamais par ce minuteur. Une panne de l'IA n'affecte
+// rien d'autre que cette tâche (erreurs capturées ici, jamais propagées au reste de l'API).
+const runDailyArticle = async () => {
+  if (process.env.NODE_ENV !== "production" || getSetting("AI_BLOG_GENERATION_MODE") !== "AUTO_PUBLISH_DAILY") return;
+  const outcome = await publishDailyArticle({ prisma, aiProvider, notify, log: app.log });
+  if (outcome === "PUBLISHED_AI" || outcome === "PUBLISHED_QUEUE") app.log.info({ outcome }, "Article du jour publié");
 };
-if (ownsBackgroundJobs) setInterval(() => { releaseQueuedArticle().catch(err => app.log.error(err)); }, 60_000);
+if (ownsBackgroundJobs) {
+  setTimeout(() => { runDailyArticle().catch(err => app.log.error(err)); }, 60_000);
+  setInterval(() => { runDailyArticle().catch(err => app.log.error(err)); }, 30 * 60_000);
+}

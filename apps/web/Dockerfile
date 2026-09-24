@@ -6,6 +6,9 @@ ARG VITE_STRIPE_PUBLISHABLE_KEY=
 ENV VITE_STRIPE_PUBLISHABLE_KEY=$VITE_STRIPE_PUBLISHABLE_KEY
 ARG VITE_SENTRY_DSN=
 ENV VITE_SENTRY_DSN=$VITE_SENTRY_DSN
+# Adresse publique du site (ex. https://nourmeet.com) : liens canoniques et Open Graph absolus.
+ARG VITE_SITE_URL=
+ENV VITE_SITE_URL=$VITE_SITE_URL
 COPY package*.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json

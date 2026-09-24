@@ -11,6 +11,7 @@ import { workerCount } from "./cluster-config.js";
 import { createEmailProvider } from "./email-provider.js";
 import { env } from "./env.js";
 import { initSentry } from "./sentry.js";
+import "./validation-fr.js";
 import { createSmsVerificationProvider } from "./sms-verification.js";
 
 initSentry();
@@ -55,7 +56,10 @@ export const app = Fastify({ logger: true, trustProxy: (_address: string, hop: n
 // cluster-entry.ts) — without this guard, each of the setInterval(...) background
 // jobs below would fire once per worker every minute instead of once total.
 export const ownsBackgroundJobs = !cluster.isWorker || cluster.worker?.id === 1;
-export const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
+// §21 (corrections web 2026-09-24) : version d'API figée par le SDK installé (mise à jour délibérée
+// seulement, jamais implicite), délai de 20 s et 2 nouvelles tentatives réseau — le SDK pose des clés
+// d'idempotence sur les écritures, une nouvelle tentative ne crée donc jamais un double paiement.
+export const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY, { timeout: 20_000, maxNetworkRetries: 2, appInfo: { name: "nour-meet-api" } }) : null;
 
 export const smsVerification = createSmsVerificationProvider({
   mode: env.SMS_MODE,
@@ -65,7 +69,7 @@ export const smsVerification = createSmsVerificationProvider({
   serviceSid: env.TWILIO_VERIFY_SERVICE_SID
 });
 export const emailProvider = createEmailProvider({ apiKey: env.RESEND_API_KEY, from: env.RESEND_FROM_EMAIL, fromName: env.RESEND_FROM_NAME });
-export const aiProvider = createAIProvider();
+export const aiProvider = createAIProvider(env.ANTHROPIC_API_KEY);
 
 export const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode });
 // Un champ optionnel envoyé comme chaîne vide par un formulaire (nom non renseigné) doit être traité

@@ -126,7 +126,29 @@ export interface PublicEvent {
   organizer: {id: string | null; name: string};
   venue: {id: string; name: string} | null;
   highlightTier: "simple" | "priority" | null;
+  // Statut du visiteur connecté sur cet événement (null pour un visiteur anonyme ou sans lien avec
+  // l'événement) — voir eventViewerStatus.
+  viewerStatus: EventViewerStatus;
+  // false pour un événement qui ne peut pas être réservé (données de démonstration) : jamais affiché,
+  // utilisé seulement pour ne pas l'annoncer aux moteurs de recherche.
+  bookable: boolean;
 }
+
+// Corrections web 2026-09-24 (§5.2) : seuls deux états sont signalés sur une carte d'événement —
+// « Participe déjà » (place réellement confirmée, billet émis) et « Liste d'attente » (inscrit sur la
+// liste d'attente sans place confirmée). Tout le reste n'affiche rien : pas de statut « Pas intéressé ».
+export type EventViewerStatus = "CONFIRMED" | "WAITLIST" | null;
+export const EVENT_VIEWER_STATUS_LABEL: Record<"CONFIRMED" | "WAITLIST", string> = { CONFIRMED: "Participe déjà", WAITLIST: "Liste d’attente" };
+export const eventViewerStatus = (link: { reservation?: { confirmedAt: Date | string | null; cancelledAt: Date | string | null } | null; onWaitlist?: boolean }): EventViewerStatus => {
+  if (link.reservation?.confirmedAt && !link.reservation.cancelledAt) return "CONFIRMED";
+  if (link.onWaitlist) return "WAITLIST";
+  return null;
+};
+
+// §5.1 : catalogue participant = uniquement les événements futurs, du plus proche au plus éloigné,
+// triés sur la vraie date (jamais sur une chaîne formatée, où « 10/10 » passerait avant « 26/09 »).
+export const upcomingEventsInOrder = <T extends { startsAt: Date | string }>(events: T[], now: Date = new Date()): T[] =>
+  events.filter(e => new Date(e.startsAt).getTime() > now.getTime()).sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
 
 export interface ApiError { error: string; details?: unknown }
 
@@ -154,3 +176,4 @@ export const ageInYears = (birthDate: Date | string, now: Date = new Date()): nu
 };
 export const isAdult = (birthDate: Date | string | null | undefined, now: Date = new Date()): boolean =>
   !!birthDate && !Number.isNaN(new Date(birthDate).getTime()) && ageInYears(birthDate, now) >= MINIMUM_AGE;
+export * from "./article.js";

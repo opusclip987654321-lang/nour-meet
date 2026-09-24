@@ -15,9 +15,12 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:seed:demo": "tsx prisma/seed-demo.ts",
+    "stripe:setup-test-plans": "tsx prisma/stripe-test-plans.ts",
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.1",
     "@fastify/jwt": "^10.2.2",

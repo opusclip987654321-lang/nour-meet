@@ -51,9 +51,9 @@ export function Admin() {
     <Stat label="Événements à venir" value={stats.upcomingEvents}/>
     <Stat label="Événements au total" value={stats.events}/>
     <Stat label="Places restantes" value={stats.remainingSpots}/>
-    <Stat label="Billets vendus (30j)" value={stats.ticketsSold}/>
+    <Stat label={`Billets vendus (${periodDays} jours)`} value={stats.ticketsSold}/>
     <Stat label="Sur liste d’attente" value={stats.waitlisted}/>
-    <Stat label="Revenus (30j)" value={money(stats.revenueCents)}/>
+    <Stat label={user?.role==="ADMIN"?`Encaissements billets (${periodDays} jours)`:`Ventes de billets (${periodDays} jours)`} value={money(stats.revenueCents)}/>
     {stats.openReports!=null&&<Stat label="Signalements ouverts" value={stats.openReports}/>}
     {stats.pendingInterviews!=null&&<Stat label="Entretiens en attente" value={stats.pendingInterviews}/>}
     {stats.upcomingInterviews!=null&&<Stat label="Entretiens à venir" value={stats.upcomingInterviews}/>}

@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { Picture } from "../components/brand";
 import { Layout } from "../components/Layout";
+import { breadcrumbJsonLd, useSeo } from "../lib/seo";
 
 // Page « Comment ça marche » : le parcours réel de chaque format, étape par étape. Chaque phrase
 // décrit un mécanisme existant dans le produit (sélection, paiement, billet, mise en relation).
@@ -11,11 +12,12 @@ export function Concept() {
   const [video,setVideo]=useState<{url:string;thumbnail:string;subtitles:string}|null>(null);
   // Les réglages vidéo sont publics par nature (contenu éditorial), mais /admin/settings est
   // réservé à l'administration : on lit les trois clés utiles depuis une petite route publique dédiée.
+  useSeo({title:"Comment ça marche : speed dating sur sélection et networking",description:"Le parcours réel d’une soirée Nūr Meet : choix de la soirée, entretien pour les rencontres, paiement sécurisé, billet QR et mise en relation seulement si l’intérêt est réciproque.",path:"/concept",jsonLd:breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Comment ça marche",path:"/concept"}])});
   useEffect(()=>{api<{url:string;thumbnail:string;subtitles:string}>("/concept-video").then(setVideo).catch(()=>{})},[]);
   return <Layout>
     <section className="page concept-intro">
       <div className="concept-intro-copy">
-        <h1>Comment fonctionne Nour Meet</h1>
+        <h1>Comment fonctionne Nūr Meet</h1>
         <p className="page-lead">Des soirées en petit comité, dans des restaurants partenaires à Paris. Vous choisissez une soirée, vous réservez votre place, l’équipe s’occupe du reste — et après, c’est vous qui décidez qui vous revoyez.</p>
         <div className="hero-actions"><Link className="button" to="/events">Voir les prochaines soirées<ArrowRight size={18} aria-hidden="true"/></Link><Link className="button secondary" to="/login">Créer mon compte</Link></div>
       </div>

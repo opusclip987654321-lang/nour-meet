@@ -7,6 +7,7 @@ import { ADULT_ONLY_ERROR } from "../services/account.js";
 import { audit } from "../services/audit.js";
 import { auth, currentId } from "../services/auth.js";
 import { defaultCategoryImage } from "../services/events.js";
+import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 import { executeRefund } from "../services/payments.js";
 import { offerNextWaitlistEntry, releaseReservationSlot } from "../services/reservations.js";
@@ -84,7 +85,7 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
     }
   });
   await audit(userId, "CREATE_APPLICATION", "Application", application.id);
-  await notify(userId, "Inscription enregistrée", `Vous pouvez maintenant régler votre billet pour « ${event.title} » (${(resolvePriceCents(event, quotaCategory, getSetting("ENABLE_GENDER_PRICING")) / 100).toFixed(2)} €). La place n’est confirmée qu’une fois le paiement réussi.`, "/dashboard?tab=reservations");
+  await notify(userId, "Inscription enregistrée", `Vous pouvez maintenant régler votre billet pour « ${event.title} » (${(resolvePriceCents(event, quotaCategory, getSetting("ENABLE_GENDER_PRICING")) / 100).toFixed(2)} €). La place n’est confirmée qu’une fois le paiement réussi.`, links.reservation(application.id));
   return reply.code(201).send({ application });
 });
 
@@ -128,7 +129,7 @@ app.post("/me/global-interview", { preHandler: auth }, async (request, reply) =>
     if (retryAt > new Date()) return reply.code(409).send({ error: `Vous pourrez redemander un entretien à partir du ${retryAt.toLocaleDateString("fr-FR")}`, retryAvailableAt: retryAt });
   }
   const application = await prisma.application.create({ data: { userId, motivation } });
-  await notify(userId, "Demande d’entretien reçue", "Choisissez maintenant un créneau pour votre entretien.", "/dashboard?tab=interview");
+  await notify(userId, "Demande d’entretien reçue", "Choisissez maintenant un créneau pour votre entretien.", links.interview());
   await audit(userId, "REQUEST_GLOBAL_INTERVIEW", "Application", application.id);
   return reply.code(201).send(application);
 });
@@ -152,12 +153,12 @@ app.post("/applications/:id/schedule", { preHandler: auth }, async (request, rep
     return tx.screeningCall.findUniqueOrThrow({ where: { id: slotId } });
   });
   if (!slot) return reply.code(409).send({ error: "Ce créneau vient d’être réservé par un autre participant. Choisissez-en un autre." });
-  await notify(userId, "Entretien planifié", `Votre appel est prévu le ${slot.startsAt.toLocaleString("fr-FR")}.`, "/dashboard?tab=interview");
+  await notify(userId, "Entretien planifié", `Votre appel est prévu le ${slot.startsAt.toLocaleString("fr-FR")}.`, links.interview());
   return { scheduled: true, slot };
 });
 
 app.get("/me/applications", { preHandler: auth }, async (request) => {
-  const applications = await prisma.application.findMany({ where: { userId: currentId(request) }, include: { event: true, call: true, reservation: { include: { payment: true, ticket: true } } }, orderBy: { createdAt: "desc" } });
+  const applications = await prisma.application.findMany({ where: { userId: currentId(request) }, include: { event: true, call: true, waitlistEntry: true, reservation: { include: { payment: true, ticket: true } } }, orderBy: { createdAt: "desc" } });
   // Même résolution d'image par défaut que les routes publiques (§ligne 307/1316) : un événement
   // sans photo uploadée ne doit jamais renvoyer imageUrl:null au front.
   return applications.map(a => a.event ? { ...a, event: { ...a.event, imageUrl: a.event.imageUrl ?? defaultCategoryImage(a.event.category) } } : a);
@@ -201,7 +202,7 @@ app.post("/me/applications/:id/cancel", { preHandler: auth }, async (request, re
       : hadSucceededPayment
         ? "Votre annulation a été prise en compte. Le remboursement sera examiné manuellement par notre équipe."
         : "Votre candidature a été annulée.";
-  await notify(userId, "Candidature annulée", message, "/dashboard?tab=reservations");
+  await notify(userId, "Candidature annulée", message, links.reservation(id));
   return reply.send({ cancelled: true, refunded, refundedAmountCents, eligible });
 });
 

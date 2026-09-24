@@ -14,7 +14,10 @@ export class ResendEmailProvider implements EmailProvider {
   constructor(private readonly apiKey: string, private readonly from: string, private readonly http: typeof fetch = fetch) {}
 
   async send(to: string, subject: string, body: string): Promise<void> {
+    // §21 : délai borné — l'envoi a lieu pendant une requête utilisateur, qui ne doit jamais rester
+    // suspendue à Resend ; l'échec est tracé dans l'outbox (FAILED) par l'appelant.
     const response = await this.http("https://api.resend.com/emails", {
+      signal: AbortSignal.timeout(10_000),
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from: this.from, to, subject, text: body })

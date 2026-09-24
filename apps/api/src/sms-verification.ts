@@ -36,13 +36,20 @@ export class TwilioVerifyProvider implements SmsVerificationProvider {
 
   private async post(endpoint: "Verifications" | "VerificationCheck", values: Record<string, string>) {
     const url = `https://verify.twilio.com/v2/Services/${encodeURIComponent(this.config.serviceSid)}/${endpoint}`;
+    // §21 (corrections web 2026-09-24) : délai borné, jamais une connexion bloquée indéfiniment ; pas
+    // de nouvelle tentative automatique (un second envoi pourrait expédier deux SMS au participant).
     const response = await this.http(url, {
+      signal: AbortSignal.timeout(10_000),
       method: "POST",
       headers: {
         Authorization: `Basic ${Buffer.from(`${this.config.accountSid}:${this.config.authToken}`).toString("base64")}`,
         "Content-Type": "application/x-www-form-urlencoded"
       },
       body: new URLSearchParams(values)
+    }).catch((err: Error) => {
+      // Délai dépassé ou réseau coupé : indisponibilité du fournisseur, présentée comme telle (503)
+      // plutôt qu'une « erreur interne » opaque.
+      throw Object.assign(new Error("Le service d’envoi des SMS est momentanément indisponible. Réessayez dans quelques instants."), { statusCode: 503, cause: err });
     });
     const data = await response.json().catch(() => ({})) as { status?: string; message?: string; code?: number };
     if (!response.ok) {

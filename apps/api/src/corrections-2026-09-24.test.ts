@@ -1,0 +1,96 @@
+import { EVENT_VIEWER_STATUS_LABEL, eventViewerStatus, upcomingEventsInOrder } from "@nour/shared";
+import { describe, expect, it } from "vitest";
+import { NOT_BOOKABLE_MESSAGE, isEventBookable, planChangeDirection } from "./domain.js";
+import { parisDay, sanitizeGeneratedArticle } from "./services/blog-content.js";
+
+// Règles critiques des corrections web du 2026-09-24 testables sans base ni serveur.
+
+describe("catalogue participant : événements futurs, du plus proche au plus éloigné (§5.1)", () => {
+  const now = new Date("2026-09-24T12:00:00Z");
+  it("écarte les événements passés et trie sur la vraie date, jamais sur une chaîne", () => {
+    const events = [
+      { id: "octobre", startsAt: "2026-10-02T19:00:00Z" },
+      { id: "passe", startsAt: "2026-09-20T19:00:00Z" },
+      { id: "septembre", startsAt: "2026-09-26T19:00:00Z" },
+      // « 10/10 » passerait avant « 26/09 » dans un tri de chaînes au format jour/mois.
+      { id: "dix-octobre", startsAt: new Date("2026-10-10T17:00:00Z") }
+    ];
+    expect(upcomingEventsInOrder(events, now).map(e => e.id)).toEqual(["septembre", "octobre", "dix-octobre"]);
+  });
+});
+
+describe("statut du visiteur sur une carte d'événement (§5.2)", () => {
+  it("« Participe déjà » pour une place confirmée non annulée", () => {
+    expect(eventViewerStatus({ reservation: { confirmedAt: new Date(), cancelledAt: null } })).toBe("CONFIRMED");
+    expect(EVENT_VIEWER_STATUS_LABEL.CONFIRMED).toBe("Participe déjà");
+  });
+  it("« Liste d’attente » pour une inscription en liste d'attente sans place confirmée", () => {
+    expect(eventViewerStatus({ reservation: null, onWaitlist: true })).toBe("WAITLIST");
+    expect(EVENT_VIEWER_STATUS_LABEL.WAITLIST).toBe("Liste d’attente");
+  });
+  it("rien pour tous les autres cas (réservation annulée, verrou de paiement en cours, aucun lien)", () => {
+    expect(eventViewerStatus({ reservation: { confirmedAt: new Date(), cancelledAt: new Date() } })).toBeNull();
+    expect(eventViewerStatus({ reservation: { confirmedAt: null, cancelledAt: null } })).toBeNull();
+    expect(eventViewerStatus({})).toBeNull();
+  });
+});
+
+describe("événement de démonstration jamais réservable (§8)", () => {
+  it("isEventBookable refuse un événement isDemo et accepte les autres", () => {
+    expect(isEventBookable({ isDemo: true })).toBe(false);
+    expect(isEventBookable({ isDemo: false })).toBe(true);
+    expect(NOT_BOOKABLE_MESSAGE).toMatch(/pas réservable/);
+    expect(NOT_BOOKABLE_MESSAGE).not.toMatch(/d[ée]mo|test/i);
+  });
+});
+
+describe("sens d'un changement de formule restaurateur (§1.4)", () => {
+  it("Standard → Premium est une montée (immédiate), Premium → Standard une descente (à l'échéance)", () => {
+    const standard = { monthlyPriceCents: 6900 }, premium = { monthlyPriceCents: 8900 };
+    expect(planChangeDirection(standard, premium)).toBe("UPGRADE");
+    expect(planChangeDirection(premium, standard)).toBe("DOWNGRADE");
+  });
+});
+
+describe("article généré : seules les sources réellement trouvées sont publiées (§3.4)", () => {
+  const body = (extra: string) => [
+    "## Pourquoi c'est difficile", `${"Un texte de fond sur la solitude en ville, avec des exemples concrets et des conseils pratiques. ".repeat(40)}`,
+    extra,
+    "![Une terrasse animée](photo:paris-terrace)", "![Image inventée](photo:inexistante)",
+    "```chart\n" + JSON.stringify({ title: "Part des personnes seules", unit: "%", sourceLabel: "INSEE", sourceUrl: "https://www.insee.fr/fr/statistiques/1", data: [{ label: "2010", value: 10 }, { label: "2020", value: 12 }] }) + "\n```",
+    "```chart\n" + JSON.stringify({ title: "Chiffre inventé", sourceLabel: "Blog", sourceUrl: "https://inconnu.example/x", data: [{ label: "a", value: 1 }, { label: "b", value: 2 }] }) + "\n```",
+    "[[cta:/events|Voir les soirées]]", "[[cta:/admin|Espace admin]]"
+  ].join("\n\n");
+  const base = { kind: "factual" as const, title: "La solitude en ville", excerpt: "Chapô.", category: "Solitude et vie sociale", keywords: ["Solitude"], metaTitle: "Solitude", metaDescription: "Description", coverPhoto: "friends-duo", sources: [] as { title: string; url: string }[] };
+
+  it("retire les liens et graphiques non vérifiés, les images et appels à l'action invalides, et ajoute les sources", () => {
+    const clean = sanitizeGeneratedArticle({ ...base, content: body("Selon [l'INSEE](https://www.insee.fr/fr/statistiques/1) et [une étude inventée](https://fausse.example/etude), voir [nos soirées](/events) ou [l'admin](/admin)."), sources: [{ title: "INSEE", url: "https://www.insee.fr/fr/statistiques/1" }, { title: "Inventée", url: "https://fausse.example/etude" }] }, ["https://www.insee.fr/fr/statistiques/1/"]);
+    expect(clean.content).toContain("[l'INSEE](https://www.insee.fr/fr/statistiques/1)");
+    expect(clean.content).not.toContain("fausse.example");
+    expect(clean.content).toContain("une étude inventée");
+    expect(clean.content).toContain("[nos soirées](/events)");
+    expect(clean.content).not.toContain("(/admin)");
+    expect(clean.content).toContain("photo:paris-terrace");
+    expect(clean.content).not.toContain("photo:inexistante");
+    expect(clean.content).toContain("Part des personnes seules");
+    expect(clean.content).not.toContain("Chiffre inventé");
+    expect(clean.content).toContain("[[cta:/events|Voir les soirées]]");
+    expect(clean.content).not.toContain("cta:/admin");
+    expect(clean.content).toMatch(/## Sources\n\n- \[INSEE\]\(https:\/\/www\.insee\.fr\/fr\/statistiques\/1\)$/);
+    expect(clean.imageUrl).toBe("photo:friends-duo");
+  });
+
+  it("refuse un article factuel sans aucune source vérifiée, et le mot interdit par la charte", () => {
+    expect(() => sanitizeGeneratedArticle({ ...base, content: body("Selon [une étude](https://fausse.example/x).") }, [])).toThrow(/source/);
+    expect(() => sanitizeGeneratedArticle({ ...base, kind: "editorial", title: "Rencontres musulmanes", content: body("") }, [])).toThrow(/interdit/);
+  });
+
+  it("accepte un article éditorial sans source", () => {
+    expect(sanitizeGeneratedArticle({ ...base, kind: "editorial", content: body("") }, []).sourcesCount).toBe(0);
+  });
+
+  it("calcule le jour de publication dans le fuseau de Paris", () => {
+    expect(parisDay(new Date("2026-09-24T22:30:00Z"))).toBe("2026-09-25");
+    expect(parisDay(new Date("2026-09-24T21:30:00Z"))).toBe("2026-09-24");
+  });
+});

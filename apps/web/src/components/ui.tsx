@@ -1,10 +1,11 @@
-import type { PublicEvent } from "@nour/shared";
-import { ArrowRight, BadgeCheck, Bell, CalendarDays, Heart, MapPin, Share2, Users } from "lucide-react";
+import { EVENT_VIEWER_STATUS_LABEL } from "@nour/shared";
+import type { EventViewerStatus, PublicEvent } from "@nour/shared";
+import { ArrowRight, BadgeCheck, CalendarDays, CircleCheck, Heart, Hourglass, MapPin, Share2, Users } from "lucide-react";
 import { ReactNode, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
-import { dateTime, imgUrl, money } from "../lib/format";
+import { imgUrl, money } from "../lib/format";
 
 // Avatar : vraie photo de profil si elle existe, sinon les initiales — jamais l'inverse, jamais un
 // visage générique. Même composant partout (dashboard, messagerie, entretiens) pour que l'ajout
@@ -19,24 +20,6 @@ export const Avatar = ({ name, photoUrl, size, className, verified }: { name?: s
 export { Logo } from "./brand";
 
 export function Loading() { return <div className="state-page"><div className="spinner"/><h2>Chargement…</h2></div>; }
-// C13/C14 (ordre correctif 2026-09-20) : liste de notifications partagée (participant, restaurateur,
-// admin) — chronologique, lu/non lu, cliquable vers la destination métier exacte (linkPath), jamais
-// un lien générique. Un clic marque lu puis navigue ; une notification sans linkPath reste affichée
-// mais non cliquable plutôt que de pointer vers un lien mort.
-export function NotificationList({ items, onRead }: { items: any[]; onRead: (id: string) => void }) {
-  const navigate = useNavigate();
-  const open = async (n: any) => {
-    if (!n.readAt) { try { await api(`/notifications/${n.id}/read`, { method: "POST" }); onRead(n.id); } catch { /* déjà lue ou introuvable */ } }
-    if (n.linkPath) navigate(n.linkPath);
-  };
-  if (items.length === 0) return <div className="empty small"><Bell size={24} aria-hidden="true"/><p>Aucune notification pour le moment.</p></div>;
-  return <div className="stack">{items.map(n => {
-    const Tag = n.linkPath ? "button" : "div";
-    return <Tag key={n.id} type={n.linkPath ? "button" : undefined} className={`notification ${n.readAt ? "read" : "unread"}`} onClick={n.linkPath ? () => open(n) : undefined} style={n.linkPath ? { cursor: "pointer", textAlign: "left", border: 0, width: "100%", font: "inherit" } : undefined}>
-      <i/><div><h3>{n.title}</h3><p>{n.body}</p><small>{dateTime(n.createdAt)}</small></div>
-    </Tag>;
-  })}</div>;
-}
 export function Notice({ kind="info", children }: {kind?: "info"|"error"|"success", children: ReactNode}) { return <div className={`notice ${kind}`}>{children}</div>; }
 
 // C23 (ordre correctif 2026-09-20) : un seul bouton principal, libellé 2-3 mots ("Invite un ami"),
@@ -78,6 +61,13 @@ export function CategoryBadge({ category, className }: {category: string; classN
   return <span className={`category-badge${className ? ` ${className}` : ""}`} data-category={category}>{CATEGORY_ICON[category] ?? null}{category}</span>;
 }
 
+// §5.2 (corrections web 2026-09-24) : « Participe déjà » ou « Liste d'attente », rien d'autre — un
+// événement sans lien avec le visiteur n'affiche aucun statut.
+export function ViewerStatusBadge({ status }: { status: EventViewerStatus | undefined }) {
+  if (!status) return null;
+  return <span className={`viewer-badge ${status === "CONFIRMED" ? "confirmed" : "waitlist"}`} data-testid="viewer-status">{status === "CONFIRMED" ? <CircleCheck size={14} aria-hidden="true"/> : <Hourglass size={14} aria-hidden="true"/>}{EVENT_VIEWER_STATUS_LABEL[status]}</span>;
+}
+
 // C24 : jamais de chiffre brut de capacité/quota — seulement ce que la disponibilité calculée
 // côté serveur autorise à dire pour CE visiteur.
 export const availabilityLabel=(a:PublicEvent["availability"])=>a.kind==="unknown"?"Places selon catégorie":a.full?"Complet":`${a.remaining} place${a.remaining>1?"s":""} restante${a.remaining>1?"s":""}`;
@@ -96,24 +86,10 @@ export function EventCard({ event, priority = false, headingLevel = 3 }: {event:
       {full&&<span className="full-badge">Complet</span>}
     </div>
     <div className="event-copy">
-      <p className="event-date"><CalendarDays size={16} aria-hidden="true"/>{shortDate(event.startsAt)}</p>
+      <p className="event-date"><CalendarDays size={16} aria-hidden="true"/>{shortDate(event.startsAt)}<ViewerStatusBadge status={event.viewerStatus}/></p>
       <Title className="event-title"><Link to={`/events/${event.slug}`} className="stretched">{event.title}</Link></Title>
       <p className="event-place"><MapPin size={16} aria-hidden="true"/>{event.district}<span aria-hidden="true">·</span>{availabilityLabel(event.availability)}</p>
       <div className="event-foot"><strong>{priceLabel}</strong><span className="event-more" aria-hidden="true">Voir la soirée<ArrowRight size={16}/></span></div>
     </div>
   </article>;
 }
-
-// §5 (cahier des charges 2026-09) : les articles doivent pouvoir renvoyer vers d'autres parties
-// du site (ex. réserver une soirée), pas seulement exister pour le SEO. Convention légère de type
-// Markdown "[libellé](/chemin)" dans le texte : un chemin commençant par "/" devient un lien interne
-// (react-router, jamais de rechargement de page), tout le reste un lien externe classique.
-export const renderArticleParagraph = (text: string) => {
-  const parts = text.split(/(\[[^\]]+\]\([^)]+\))/g);
-  return parts.map((part, i) => {
-    const match = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-    if (!match) return part;
-    const [, label, url] = match;
-    return url.startsWith("/") ? <Link key={i} to={url} className="link-button" style={{display:"inline"}}>{label}</Link> : <a key={i} href={url} target="_blank" rel="noreferrer">{label}</a>;
-  });
-};

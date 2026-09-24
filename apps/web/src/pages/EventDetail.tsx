@@ -1,16 +1,20 @@
 import { NETWORKING_QUESTIONS, SCREENING_QUESTIONS, eventRequiresScreening } from "@nour/shared";
 import type { PublicEvent } from "@nour/shared";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Suspense, lazy, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CalendarDays, Clock, Info, MapPin, ShieldCheck, Store, Ticket, Users, UserCheck } from "lucide-react";
 import { ProgressiveBlur } from "../components/brand";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { Layout } from "../components/Layout";
-import { PaymentModal } from "../components/payment";
-import { CategoryBadge, Loading, Notice, ShareButton, availabilityLabel } from "../components/ui";
+import { CategoryBadge, Loading, Notice, ShareButton, ViewerStatusBadge, availabilityLabel } from "../components/ui";
+import { absoluteUrl, breadcrumbJsonLd, useSeo } from "../lib/seo";
+import { NotFound } from "./NotFound";
 import { dateTime, imgUrl, money } from "../lib/format";
 import { APPLICATION_STATUS_LABEL } from "../lib/labels";
+
+// Stripe (≈ 90 ko) ne se charge qu'à l'ouverture du paiement, jamais avec la page (corrections web 2026-09-24, §11).
+const PaymentModal = lazy(() => import("../components/payment").then(m => ({ default: m.PaymentModal })));
 
 // Arbitrage 12/E3 (cahier des charges consolidé 2026-09-20) : proposé uniquement une fois la place
 // confirmée, jamais avant ou pendant le paiement, et entièrement facultatif — "Plus tard" ne bloque
@@ -48,11 +52,11 @@ function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { 
   // La candidature autorise à tenter le paiement, elle ne garantit jamais de place à elle seule
   // (§5) : le clic sur "Payer" est ce qui pose réellement le verrou, via PaymentModal.
   if (application.status === "PAYMENT_PENDING") return <div className="payment-block">
-    <Notice kind="success">{application.reservation ? `Votre place est retenue quelques minutes (jusqu’au ${dateTime(application.reservation.expiresAt)}) : finalisez votre paiement.` : "Vous pouvez régler votre billet dès maintenant."}</Notice>
+    {event.viewerStatus === "WAITLIST" ? <Notice kind="info">Vous êtes sur la liste d’attente. Dès qu’une place se libère, vous êtes prévenu(e) : elle revient à la première personne qui finalise son paiement.</Notice> : <Notice kind="success">{application.reservation ? `Votre place est retenue quelques minutes (jusqu’au ${dateTime(application.reservation.expiresAt)}) : finalisez votre paiement.` : "Vous pouvez régler votre billet dès maintenant."}</Notice>}
     <button className="button full" onClick={() => setShowPayment(true)}>{event.priceCents === 0 ? "Confirmer ma place (gratuit)" : `Payer par carte · ${money(event.priceCents)}`}</button>
-    {showPayment && <PaymentModal applicationId={application.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }} onWaitlisted={onWaitlisted}/>}
+    {showPayment && <Suspense fallback={null}><PaymentModal applicationId={application.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }} onWaitlisted={onWaitlisted}/></Suspense>}
   </div>;
-  if (application.call) return <div className="call-scheduled"><span className="eyebrow">Entretien programmé</span><strong>{dateTime(application.call.startsAt)}</strong><p>L’organisateur vous appellera à cette heure, puis vous serez informé(e) de sa décision.</p></div>;
+  if (application.call) return <div className="call-scheduled"><span className="eyebrow">Entretien programmé</span><strong>{dateTime(application.call.startsAt)}</strong><p>L’équipe Nūr Meet vous appellera à cette heure, puis vous serez informé(e) de sa décision.</p></div>;
   return null;
 }
 
@@ -106,7 +110,25 @@ export function EventDetail() {
     return ()=>{ignore=true};
   },[user,event?.id]);
 
-  if(notFound)return <Layout><div className="state-page"><h2>Cette soirée est introuvable</h2><p className="page-lead" style={{margin:0}}>Elle a peut-être été retirée ou le lien est incomplet.</p><Link className="button" to="/events">Voir les prochaines soirées</Link></div></Layout>;
+  // §19/§20 (corrections web 2026-09-24) : données structurées Event fidèles à la fiche affichée ; un
+  // événement non réservable (données de démonstration) n'est ni indexé ni déclaré aux moteurs.
+  useSeo(event?{
+    title:`${event.title} · ${event.category} à ${event.district}`,
+    description:event.description.slice(0,155),
+    path:`/events/${event.slug}`,
+    image:imgUrl(event.imageUrl),
+    noindex:!event.bookable,
+    jsonLd:event.bookable?[{
+      "@context":"https://schema.org","@type":"Event",name:event.title,description:event.description,
+      startDate:event.startsAt,endDate:event.endsAt,eventStatus:event.status==="CANCELLED"?"https://schema.org/EventCancelled":"https://schema.org/EventScheduled",
+      eventAttendanceMode:"https://schema.org/OfflineEventAttendanceMode",image:[imgUrl(event.imageUrl)],
+      location:{"@type":event.venue?"Restaurant":"Place",name:event.venue?.name??event.district,address:{"@type":"PostalAddress",addressLocality:event.district,addressRegion:"Île-de-France",addressCountry:"FR"}},
+      organizer:{"@type":"Organization",name:event.organizer.name},
+      offers:{"@type":"Offer",url:absoluteUrl(`/events/${event.slug}`),price:(event.priceCents/100).toFixed(2),priceCurrency:"EUR",availability:event.availability.kind!=="unknown"&&event.availability.full?"https://schema.org/SoldOut":"https://schema.org/InStock"},
+      ...(event.minAge?{typicalAgeRange:event.maxAge?`${event.minAge}-${event.maxAge}`:`${event.minAge}-`}:{})
+    },breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Soirées",path:"/events"},{name:event.title,path:`/events/${event.slug}`}])]:null
+  }:null);
+  if(notFound)return <NotFound title="Cette soirée est introuvable" message="Elle a peut-être été retirée, ou le lien est incomplet."/>;
   if(!event)return <Layout><Loading/></Layout>;
 
   const requiresScreening = eventRequiresScreening(event);
@@ -188,7 +210,7 @@ export function EventDetail() {
       <ProgressiveBlur position="bottom" height="70%"/>
       <div className="event-hero-shade" aria-hidden="true"/>
       <div className="event-hero-copy">
-        <div className="event-hero-badges"><CategoryBadge category={event.category} className="inline"/><span className={`flow-badge ${requiresScreening?"screening":"direct"}`}>{requiresScreening?<><UserCheck size={14} aria-hidden="true"/>Sur sélection</>:<><Ticket size={14} aria-hidden="true"/>Accès direct</>}</span></div>
+        <div className="event-hero-badges"><CategoryBadge category={event.category} className="inline"/><ViewerStatusBadge status={event.viewerStatus}/><span className={`flow-badge ${requiresScreening?"screening":"direct"}`}>{requiresScreening?<><UserCheck size={14} aria-hidden="true"/>Sur sélection</>:<><Ticket size={14} aria-hidden="true"/>Accès direct</>}</span></div>
         <h1>{event.title}</h1>
         <p className="event-hero-meta"><span><CalendarDays size={18} aria-hidden="true"/>{day} · {time}</span><span><MapPin size={18} aria-hidden="true"/>{event.district}</span></p>
       </div>
@@ -220,7 +242,7 @@ export function EventDetail() {
         {event.photos.length>0&&<section aria-labelledby="photos" className="event-block"><h2 id="photos">Le lieu</h2><div className="event-gallery">{event.photos.map((url,i)=><img key={i} src={imgUrl(url)} alt={`Photo ${i+1} du lieu`} loading="lazy" width={480} height={360}/>)}</div></section>}
         <section aria-labelledby="annulation" className="event-block cancellation-policy">
           <h2 id="annulation"><Info size={20} aria-hidden="true"/>Annulation</h2>
-          <p>Annulation gratuite jusqu’à 24 heures avant le début de la soirée : remboursement intégral automatique. Passé ce délai, ou en cas d’absence, aucun remboursement n’est dû. Si la soirée est annulée par l’organisateur, vous êtes intégralement remboursé. <Link className="text-link" to="/legal/cgv">Conditions de vente</Link></p>
+          <p>Annulation gratuite jusqu’à 24 heures avant le début de la soirée : remboursement intégral automatique. Passé ce délai, ou en cas d’absence, aucun remboursement n’est dû. Si la soirée est annulée par l’organisateur, vous êtes intégralement remboursé(e). <Link className="text-link" to="/legal/cgv">Conditions de vente</Link></p>
         </section>
       </article>
       <aside className="booking" id="reserver" aria-labelledby="booking-title">
@@ -238,10 +260,10 @@ export function EventDetail() {
       {canCancel&&<button className="button danger full" disabled={busy} onClick={cancelApplication}>Annuler mon inscription</button>}
     </>
     :user.hasRestaurant?<Notice kind="info">Votre compte restaurateur vous permet de découvrir les événements proposés, mais ne permet pas d’y participer.</Notice>
-    :requiresScreening&&!profileValidated?<Notice kind="error">Votre profil doit d’abord être validé lors d’un entretien avec Nour Meet avant de vous inscrire à un speed dating. <Link to="/dashboard">Demander mon entretien →</Link></Notice>
+    :requiresScreening&&!profileValidated?<Notice kind="error">Votre profil doit d’abord être validé lors d’un entretien avec Nūr Meet avant de vous inscrire à un speed dating. <Link to="/dashboard">Demander mon entretien →</Link></Notice>
     :categoryUnknown?<Notice kind="error">Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement.</Notice>
     :requiresScreening&&showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>
-    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même candidater : une liste d’attente et une éventuelle proposition alternative vous seront proposées au moment de payer.</Notice>}<button className="button full" disabled={busy} onClick={()=>requiresScreening?setShowQuestionnaire(true):apply()}>{requiresScreening?"Candidater":busy?"…":"S’inscrire"}</button></>}
+    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même vous inscrire : au moment de payer, vous serez placé(e) sur liste d’attente et, si possible, une soirée comparable vous sera proposée.</Notice>}<button className="button full" disabled={busy} onClick={()=>requiresScreening?setShowQuestionnaire(true):apply()}>{requiresScreening?"Candidater":busy?"…":"S’inscrire"}</button></>}
     <p className="fine">{requiresScreening?"Le paiement est proposé immédiatement après le questionnaire ; la place n’est acquise qu’une fois le paiement confirmé.":"Le paiement est proposé immédiatement après l’inscription ; la place n’est acquise qu’une fois le paiement confirmé."}</p>
         <ShareButton event={event}/>
       </aside>

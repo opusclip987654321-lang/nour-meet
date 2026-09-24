@@ -4,6 +4,7 @@ import { prisma } from "../context.js";
 import { paymentDeadline } from "../domain.js";
 import { getSetting } from "../settings.js";
 import { profileAge } from "./account.js";
+import { links } from "./links.js";
 import { notify } from "./notify.js";
 
 type ClaimableApplication = { id: string; userId: string; quotaCategory: QuotaCategory | null };
@@ -75,7 +76,7 @@ export const offerNextWaitlistEntry = async (eventId: string, category: QuotaCat
   if (candidates.length === 0) return;
   const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
   await prisma.waitlistEntry.updateMany({ where: { id: { in: candidates.map(c => c.id) } }, data: { offeredAt: new Date() } });
-  await Promise.all(candidates.map(entry => notify(entry.userId, "Une place s’est libérée !", `Une place pour « ${event.title} » est disponible. Réglez votre billet dès maintenant : elle revient au premier qui finalise son paiement.`, "/dashboard?tab=reservations")));
+  await Promise.all(candidates.map(entry => notify(entry.userId, "Une place s’est libérée !", `Une place pour « ${event.title} » est disponible. Réglez votre billet dès maintenant : elle revient au premier qui finalise son paiement.`, links.event(event.slug))));
 };
 
 // Une place existe réellement pour cette catégorie (ou en capacité globale si l'événement n'a pas
@@ -111,7 +112,8 @@ export const createAlternativeOfferIfPossible = async (userId: string, originalE
   const candidates = await prisma.event.findMany({
     where: {
       id: { not: originalEvent.id }, category: originalEvent.category, zone: { in: zonesInRegion },
-      status: EventStatus.PUBLISHED, startsAt: { gt: new Date() }, applications: { none: { userId } },
+      // Jamais un événement de démonstration (§8) : proposé en alternative, il ne serait pas réservable.
+      status: EventStatus.PUBLISHED, isDemo: false, startsAt: { gt: new Date() }, applications: { none: { userId } },
       alternativeOffers: { none: { userId, originalEventId: originalEvent.id, status: AlternativeOfferStatus.DECLINED } }
     },
     orderBy: { startsAt: "asc" },
@@ -130,6 +132,7 @@ export const createAlternativeOfferIfPossible = async (userId: string, originalE
     offers.push(offer);
   }
   if (offers.length === 0) return [];
-  await notify(userId, offers.length > 1 ? "Des événements similaires pourraient vous intéresser" : "Un événement similaire pourrait vous intéresser", offers.map(o => `« ${o.alternativeEvent.title} » (${o.alternativeEvent.district}, ${new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" }).format(o.alternativeEvent.startsAt)})`).join(" · "), "/dashboard?tab=reservations");
+  const originalApplication = await prisma.application.findUnique({ where: { eventId_userId: { eventId: originalEvent.id, userId } }, select: { id: true } });
+  await notify(userId, offers.length > 1 ? "Des événements similaires pourraient vous intéresser" : "Un événement similaire pourrait vous intéresser", offers.map(o => `« ${o.alternativeEvent.title} » (${o.alternativeEvent.district}, ${new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" }).format(o.alternativeEvent.startsAt)})`).join(" · "), originalApplication ? links.reservation(originalApplication.id) : "/dashboard?tab=reservations");
   return offers;
 };

@@ -34,6 +34,10 @@ const envSchema = z.object({
   // Surveillance d'erreurs (Sentry) : désactivée tant qu'aucun DSN n'est fourni, jamais activée
   // par défaut — voir sentry.ts pour le filtrage des données personnelles avant tout envoi.
   SENTRY_DSN: optionalEnvironmentSecret,
+  // Génération des articles du blog par Claude (corrections web 2026-09-24, §3). Facultative : sans
+  // clé, la publication quotidienne retombe sur la réserve d'articles déjà rédigés et le reste du
+  // site fonctionne normalement. Clé serveur uniquement, jamais exposée au navigateur.
+  ANTHROPIC_API_KEY: optionalEnvironmentSecret,
   // See the comment beside its only use in index.ts (perWorkerConnectionLimit) for why
   // this is a total budget across all cluster workers, not a per-worker value. Keep it
   // comfortably under Postgres's max_connections (default 100) to leave headroom for

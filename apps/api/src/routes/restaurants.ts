@@ -3,22 +3,31 @@ import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, app, prisma, restaurantUploadsDir, stripe } from "../context.js";
+import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, app, httpError, prisma, restaurantUploadsDir, smsVerification, stripe } from "../context.js";
 import { currentYearMonth } from "../domain.js";
 import { env } from "../env.js";
 import { audit } from "../services/audit.js";
 import { auth, currentId, roles } from "../services/auth.js";
 import { notify } from "../services/notify.js";
+import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, syncSubscriptionFromStripe } from "../services/subscriptions.js";
 
+// Jamais les notes internes de l'administration, le taux de commission, l'auteur de la décision ni le
+// marquage démo dans une réponse destinée au restaurateur : informations internes de Nūr Meet
+// (§6.2 des corrections web 2026-09-24). Appliqué à toutes les routes qui renvoient sa fiche.
+const ownRestaurantView = <T extends { adminNotes?: unknown; commissionRate?: unknown; reviewedBy?: unknown; isDemo?: unknown }>(restaurant: T) => {
+  const { adminNotes: _adminNotes, commissionRate: _commissionRate, reviewedBy: _reviewedBy, isDemo: _isDemo, ...visible } = restaurant;
+  return visible;
+};
 app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
   const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) }, include: { photos: { orderBy: { position: "asc" } }, subscription: { include: { plan: true } }, connectedAccount: true } });
   if (!restaurant) return reply.code(404).send({ error: "Aucune demande restaurateur" });
   const usage = await prisma.restaurantMonthlyUsage.findUnique({ where: { restaurantId_yearMonth: { restaurantId: restaurant.id, yearMonth: currentYearMonth() } } });
-  return { ...restaurant, currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
+  return { ...ownRestaurantView(restaurant), currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
 });
 // §19/§20 : formulaire explicitement cité comme devant être protégé contre un abus automatisé,
 // au même titre que l'authentification et la génération IA.
-app.post("/restaurants/apply", { preHandler: auth, config: { rateLimit: { max: 5, timeWindow: "10 minutes" } } }, async (request, reply) => {
+// Plafond relâché uniquement en mode SMS simulé (développement, tests d'intégration), comme pour l'OTP.
+app.post("/restaurants/apply", { preHandler: auth, config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 5, timeWindow: "10 minutes" } } }, async (request, reply) => {
   // Le SIRET est saisi par le demandeur mais n'est pas vérifié auprès d'un registre officiel : ce
   // n'est qu'une déclaration, à ne jamais présenter comme une vérification légale effectuée par Nour.
   const input = z.object({
@@ -42,7 +51,7 @@ app.post("/restaurants/apply", { preHandler: auth, config: { rateLimit: { max: 5
   const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
   await Promise.all(admins.map(a => notify(a.id, "Nouvelle demande restaurateur", `${input.name} souhaite ouvrir un compte professionnel.`, "/admin/restaurants")));
   await audit(userId, "APPLY_RESTAURANT", "Restaurant", restaurant.id);
-  return reply.code(201).send(restaurant);
+  return reply.code(201).send(ownRestaurantView(restaurant));
 });
 app.get("/admin/restaurants", { preHandler: roles(UserRole.ADMIN) }, async (request) => {
   const query = z.object({ status: z.enum(["PENDING", "APPROVED", "REJECTED", "SUSPENDED"]).optional() }).parse(request.query);
@@ -95,7 +104,7 @@ app.patch("/restaurants/me", { preHandler: roles(UserRole.ORGANIZER) }, async (r
   }).parse(request.body);
   const updated = await prisma.restaurant.update({ where: { id: restaurant.id }, data: input });
   await audit(currentId(request), "UPDATE_RESTAURANT_PROFILE", "Restaurant", restaurant.id);
-  return updated;
+  return ownRestaurantView(updated);
 });
 app.post("/restaurants/me/photos", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
   const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
@@ -162,20 +171,29 @@ app.post("/restaurants/me/subscription/checkout", { preHandler: auth }, async (r
   if (!stripe) return reply.code(503).send({ error: "Stripe n’est pas configuré sur ce serveur : paiement d’abonnement non opérationnel." });
   const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) }, include: { owner: true, subscription: true } });
   const { planId, billingPeriod } = z.object({ planId: z.string(), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]) }).parse(request.body);
-  if (restaurant.subscription?.stripeSubscriptionId) return reply.code(409).send({ error: "Un abonnement existe déjà pour cet établissement." });
+  // Un abonnement en cours se modifie via /subscription/change-plan (prorata ou changement différé),
+  // jamais par un second Checkout qui créerait un deuxième abonnement facturé en parallèle.
+  if (restaurant.subscription?.stripeSubscriptionId && restaurant.subscription.status !== "CANCELLED") return reply.code(409).send({ error: "Un abonnement existe déjà pour cet établissement : utilisez « Changer de formule »." });
   const plan = await prisma.plan.findUniqueOrThrow({ where: { id: planId } });
   const priceId = billingPeriod === "ANNUAL" ? plan.stripePriceAnnualId : plan.stripePriceMonthlyId;
   if (!priceId) return reply.code(409).send({ error: `Formule ${plan.name} indisponible en facturation ${billingPeriod === "ANNUAL" ? "annuelle" : "mensuelle"} pour le moment.` });
-  let customerId = restaurant.subscription?.stripeCustomerId ?? undefined;
+  // Un seul client Stripe par établissement, et une seule session Checkout ouverte à la fois : deux
+  // onglets payés en parallèle créeraient sinon deux abonnements facturés (revue de sécurité 2026-09-24).
+  let customerId = restaurant.subscription?.stripeCustomerId ?? (await stripe.customers.search({ query: `metadata['restaurantId']:'${restaurant.id}'`, limit: 1 })).data[0]?.id;
   if (!customerId) {
     const customer = await stripe.customers.create({ email: restaurant.owner.email ?? undefined, name: restaurant.name, metadata: { restaurantId: restaurant.id } });
     customerId = customer.id;
+  } else {
+    const open = await stripe.checkout.sessions.list({ customer: customerId, status: "open", limit: 10 });
+    await Promise.all(open.data.map(s => stripe!.checkout.sessions.expire(s.id).catch(() => null)));
   }
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
-    subscription_data: { trial_period_days: 7, metadata: { restaurantId: restaurant.id, planId, billingPeriod } },
+    // L'essai gratuit n'est offert qu'une fois par établissement : un restaurateur qui se réabonne
+    // après une résiliation (ou qui quitte un abonnement géré à la main) paie dès la souscription.
+    subscription_data: { ...(restaurant.subscription ? {} : { trial_period_days: 7 }), metadata: { restaurantId: restaurant.id, planId, billingPeriod } },
     payment_method_collection: "always",
     metadata: { restaurantId: restaurant.id, planId, billingPeriod },
     success_url: `${env.WEB_ORIGIN}/restaurant?tab=subscription&checkout=success`,
@@ -183,6 +201,45 @@ app.post("/restaurants/me/subscription/checkout", { preHandler: auth }, async (r
   });
   await audit(currentId(request), "SUBSCRIPTION_CHECKOUT_CREATED", "Restaurant", restaurant.id, { planId, billingPeriod });
   return { url: session.url };
+});
+// Corrections web 2026-09-24 (§1.4) : changement de formule d'un abonnement déjà souscrit — immédiat
+// avec prorata vers une formule supérieure, à l'échéance vers une formule inférieure (règle dans
+// services/subscriptions.ts). La réponse reflète toujours l'état relu chez Stripe.
+const ownSubscription = async (userId: string) => {
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: userId } });
+  const subscription = await prisma.restaurantSubscription.findUnique({ where: { restaurantId: restaurant.id }, include: { plan: true } });
+  if (!subscription) throw httpError(404, "Aucun abonnement pour cet établissement");
+  return { restaurant, subscription };
+};
+app.post("/restaurants/me/subscription/change-plan", { preHandler: auth, config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } }, async (request) => {
+  const { planId } = z.object({ planId: z.string() }).parse(request.body);
+  const { subscription } = await ownSubscription(currentId(request));
+  const target = await prisma.plan.findUniqueOrThrow({ where: { id: planId } });
+  const result = await changeSubscriptionPlan(subscription, target);
+  await audit(currentId(request), result.direction === "UPGRADE" ? "SUBSCRIPTION_UPGRADED" : "SUBSCRIPTION_DOWNGRADE_SCHEDULED", "RestaurantSubscription", subscription.id, { from: subscription.planId, to: target.id });
+  return result;
+});
+app.post("/restaurants/me/subscription/cancel-plan-change", { preHandler: auth }, async (request) => {
+  const { subscription } = await ownSubscription(currentId(request));
+  const updated = await cancelPendingPlanChange(subscription);
+  await audit(currentId(request), "SUBSCRIPTION_PLAN_CHANGE_CANCELLED", "RestaurantSubscription", subscription.id);
+  return updated;
+});
+// Relecture explicite de l'état Stripe (retour de Checkout avant l'arrivée du webhook, ou webhook non
+// reçu en local) : l'interface n'affiche ainsi jamais un statut que Stripe ne confirme pas.
+app.post("/restaurants/me/subscription/sync", { preHandler: auth, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
+  if (!stripe) return reply.code(503).send({ error: "Stripe non configuré" });
+  const subscription = await prisma.restaurantSubscription.findUnique({ where: { restaurantId: restaurant.id } });
+  if (subscription?.stripeSubscriptionId) return syncSubscriptionFromStripe(subscription, await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId));
+  // Checkout terminé mais webhook pas encore reçu : on retrouve l'abonnement par le client Stripe
+  // créé pour cet établissement (metadata.restaurantId), jamais par une simple supposition.
+  const customerId = subscription?.stripeCustomerId ?? (await stripe.customers.search({ query: `metadata['restaurantId']:'${restaurant.id}'`, limit: 1 })).data[0]?.id;
+  if (!customerId) return reply.code(404).send({ error: "Aucun abonnement Stripe trouvé" });
+  const sessions = await stripe.checkout.sessions.list({ limit: 5, customer: customerId });
+  const completed = sessions.data.find(s => s.metadata?.restaurantId === restaurant.id && s.status === "complete" && s.subscription);
+  if (!completed) return subscription ? prisma.restaurantSubscription.findUnique({ where: { id: subscription.id }, include: { plan: true } }) : reply.code(404).send({ error: "Aucun abonnement Stripe trouvé" });
+  return recordCheckoutSession(completed);
 });
 // Formules actives lisibles par tout compte authentifié (page d'abonnement restaurateur) — jamais
 // les champs internes Stripe, seulement ce qui doit s'afficher.

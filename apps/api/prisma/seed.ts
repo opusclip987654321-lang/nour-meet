@@ -1,6 +1,19 @@
+import { LEGAL_VERSIONS } from "@nour/shared";
 import { PrismaClient, UserRole, EventStatus, EventFlow, ApplicationStatus, PaymentStatus, TicketStatus, ContactRequestStatus, AlternativeOfferStatus } from "@prisma/client";
 
+import { seedDemoData } from "./demo-data.js";
+
 const prisma = new PrismaClient();
+
+// Dates relatives au jour du seed (heure locale) : le jeu de données reste utilisable quel que soit
+// le jour où il est rejoué, jamais des soirées figées dans un passé qui les ferait disparaître du
+// catalogue (corrections web 2026-09-24, §2 — seed reproductible).
+const at = (daysFromNow: number, hours: number, minutes = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + daysFromNow);
+  d.setHours(hours, minutes, 0, 0);
+  return d;
+};
 
 async function main() {
   const admin = await prisma.user.upsert({
@@ -36,33 +49,33 @@ async function main() {
     // tourne. Sur une installation neuve (migrate deploy puis seed, table Event vide au moment de
     // la migration), sans ce champ explicite, cet événement retomberait sur le défaut DIRECT du
     // schéma alors qu'il doit exiger un entretien (§4.1).
-    update: { zone: "Paris intra-muros", flow: EventFlow.SCREENING },
-    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "diner-connexions-septembre", title: "Dîner & Connexions", category: "Speed dating", flow: EventFlow.SCREENING, description: "Un dîner en petit comité, des échanges guidés et des temps libres dans un lieu privatisé.", startsAt: new Date("2026-09-26T19:30:00+02:00"), endsAt: new Date("2026-09-26T23:30:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 28, priceCents: 3500, status: EventStatus.PUBLISHED }
+    update: { startsAt: at(3, 19, 30), endsAt: at(3, 23, 30),  zone: "Paris intra-muros", flow: EventFlow.SCREENING },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "diner-connexions-septembre", title: "Dîner & Connexions", category: "Speed dating", flow: EventFlow.SCREENING, description: "Un dîner en petit comité, des échanges guidés et des temps libres dans un lieu privatisé.", startsAt: at(3, 19, 30), endsAt: at(3, 23, 30), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 28, priceCents: 3500, status: EventStatus.PUBLISHED }
   });
   await prisma.eventQuota.upsert({ where: { eventId_category: { eventId: event.id, category: "HOMME" } }, update: {}, create: { eventId: event.id, category: "HOMME", capacity: 14 } });
   await prisma.eventQuota.upsert({ where: { eventId_category: { eventId: event.id, category: "FEMME" } }, update: {}, create: { eventId: event.id, category: "FEMME", capacity: 14, heldCount: 1 } });
   const afterwork = await prisma.event.upsert({
-    where: { slug: "afterwork-entrepreneurs-octobre" }, update: { zone: "La Défense" },
-    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "afterwork-entrepreneurs-octobre", title: "Afterwork des entrepreneurs", category: "Networking", description: "Rencontrez des entrepreneurs et indépendants autour d’échanges structurés.", startsAt: new Date("2026-10-01T19:00:00+02:00"), endsAt: new Date("2026-10-01T22:30:00+02:00"), district: "La Défense", address: "2 place de la Défense, 92800 Puteaux", zone: "La Défense", capacity: 40, priceCents: 4500, status: EventStatus.PUBLISHED }
+    where: { slug: "afterwork-entrepreneurs-octobre" }, update: { startsAt: at(8, 19), endsAt: at(8, 22, 30),  zone: "La Défense" },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "afterwork-entrepreneurs-octobre", title: "Afterwork des entrepreneurs", category: "Networking", description: "Rencontrez des entrepreneurs et indépendants autour d’échanges structurés.", startsAt: at(8, 19), endsAt: at(8, 22, 30), district: "La Défense", address: "2 place de la Défense, 92800 Puteaux", zone: "La Défense", capacity: 40, priceCents: 4500, status: EventStatus.PUBLISHED }
   });
   const artThe = await prisma.event.upsert({
-    where: { slug: "art-the-conversations" }, update: { zone: "Paris intra-muros" },
-    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "art-the-conversations", title: "Art, thé & conversations", category: "Networking", description: "Une rencontre culturelle dans un salon privatisé du Marais.", startsAt: new Date("2026-10-04T16:00:00+02:00"), endsAt: new Date("2026-10-04T19:00:00+02:00"), district: "Paris 4e", address: "18 rue des Archives, 75004 Paris", zone: "Paris intra-muros", capacity: 20, priceCents: 2900, status: EventStatus.PUBLISHED }
+    where: { slug: "art-the-conversations" }, update: { startsAt: at(11, 16), endsAt: at(11, 19),  zone: "Paris intra-muros" },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "art-the-conversations", title: "Art, thé & conversations", category: "Networking", description: "Une rencontre culturelle dans un salon privatisé du Marais.", startsAt: at(11, 16), endsAt: at(11, 19), district: "Paris 4e", address: "18 rue des Archives, 75004 Paris", zone: "Paris intra-muros", capacity: 20, priceCents: 2900, status: EventStatus.PUBLISHED }
   });
   const soireeNour = await prisma.event.upsert({
-    where: { slug: "soiree-nour-x-amana" }, update: { zone: "Paris intra-muros" },
-    create: { controllerRestaurantId: null, venueRestaurantId: restaurant.id, slug: "soiree-nour-x-amana", title: "Soirée Nūr × Maison Amana", category: "Networking", description: "Un événement organisé directement par Nūr Meet, accueilli par notre partenaire Maison Amana.", startsAt: new Date("2026-10-10T19:00:00+02:00"), endsAt: new Date("2026-10-10T22:00:00+02:00"), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 30, priceCents: 4000, status: EventStatus.PUBLISHED }
+    where: { slug: "soiree-nour-x-amana" }, update: { startsAt: at(17, 19), endsAt: at(17, 22),  zone: "Paris intra-muros" },
+    create: { controllerRestaurantId: null, venueRestaurantId: restaurant.id, slug: "soiree-nour-x-amana", title: "Soirée Nūr × Maison Amana", category: "Networking", description: "Un événement organisé directement par Nūr Meet, accueilli par notre partenaire Maison Amana.", startsAt: at(17, 19), endsAt: at(17, 22), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 30, priceCents: 4000, status: EventStatus.PUBLISHED }
   });
   // Deuxième événement Networking à La Défense, pour démontrer les propositions d'événements alternatifs
   // (même catégorie + même zone) lorsque l'Afterwork est complet.
   const networkingBis = await prisma.event.upsert({
-    where: { slug: "networking-la-defense-bis" }, update: { zone: "La Défense" },
-    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "networking-la-defense-bis", title: "Networking des indépendants", category: "Networking", description: "Une seconde soirée networking à La Défense pour les indépendants et entrepreneurs.", startsAt: new Date("2026-10-08T19:00:00+02:00"), endsAt: new Date("2026-10-08T22:00:00+02:00"), district: "La Défense", address: "5 place de la Défense, 92800 Puteaux", zone: "La Défense", capacity: 30, priceCents: 4000, status: EventStatus.PUBLISHED }
+    where: { slug: "networking-la-defense-bis" }, update: { startsAt: at(15, 19), endsAt: at(15, 22),  zone: "La Défense" },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "networking-la-defense-bis", title: "Networking des indépendants", category: "Networking", description: "Une seconde soirée networking à La Défense pour les indépendants et entrepreneurs.", startsAt: at(15, 19), endsAt: at(15, 22), district: "La Défense", address: "5 place de la Défense, 92800 Puteaux", zone: "La Défense", capacity: 30, priceCents: 4000, status: EventStatus.PUBLISHED }
   });
 
-  const slots = ["2026-09-22T18:00:00+02:00", "2026-09-22T18:20:00+02:00", "2026-09-24T18:40:00+02:00", "2026-09-24T19:20:00+02:00"];
+  const slots = [at(1, 18), at(1, 18, 20), at(2, 18, 40), at(2, 19, 20)];
   for (const start of slots) {
-    const startsAt = new Date(start); const endsAt = new Date(startsAt.getTime() + 15 * 60_000);
+    const startsAt = start; const endsAt = new Date(startsAt.getTime() + 15 * 60_000);
     const existing = await prisma.screeningCall.findFirst({ where: { eventId: event.id, startsAt } });
     if (!existing) await prisma.screeningCall.create({ data: { eventId: event.id, startsAt, endsAt } });
   }
@@ -74,7 +87,7 @@ async function main() {
   });
   const reservation = await prisma.reservation.upsert({
     where: { applicationId: application.id }, update: { confirmedAt: new Date(), quotaCategory: "FEMME" },
-    create: { eventId: event.id, userId: sofia.id, applicationId: application.id, expiresAt: new Date("2026-09-25T20:00:00+02:00"), confirmedAt: new Date(), quotaCategory: "FEMME" }
+    create: { eventId: event.id, userId: sofia.id, applicationId: application.id, expiresAt: at(2, 20), confirmedAt: new Date(), quotaCategory: "FEMME" }
   });
   await prisma.payment.upsert({ where: { reservationId: reservation.id }, update: {}, create: { reservationId: reservation.id, amountCents: 3500, status: PaymentStatus.SUCCEEDED, provider: "fake", providerRef: "demo-payment", paidAt: new Date() } });
   await prisma.ticket.upsert({ where: { reservationId: reservation.id }, update: {}, create: { reservationId: reservation.id, code: "NOUR-TICKET-DEMO-482", status: TicketStatus.VALID } });
@@ -94,10 +107,11 @@ async function main() {
       { conversationId: conversation.id, senderId: sofia.id, body: "Bonsoir Karim, moi aussi 😊" }
     ] });
   }
+  await prisma.notification.deleteMany({ where: { userId: sofia.id } });
   await prisma.notification.createMany({ data: [
-    { userId: sofia.id, title: "Votre place est confirmée", body: "Votre billet pour Dîner & Connexions est disponible." },
-    { userId: sofia.id, title: "Nouveau message de Karim", body: "Avec plaisir, à bientôt !" }
-  ], skipDuplicates: true });
+    { userId: sofia.id, title: "Votre place est confirmée", body: "Votre billet pour Dîner & Connexions est disponible.", linkPath: `/dashboard?tab=tickets&reservation=${reservation.id}` },
+    { userId: sofia.id, title: "Demande acceptée", body: "Karim a accepté votre demande de contact : vous pouvez échanger des messages.", linkPath: "/dashboard?tab=contacts" }
+  ] });
   await prisma.auditLog.create({ data: { actorId: admin.id, action: "SEED_DATABASE", entity: "System", metadata: { contactId: contact.id } } });
 
   // Comptes de test dédiés au développement local (connexion rapide depuis la page de connexion en
@@ -189,6 +203,77 @@ async function main() {
   });
   const existingWaitingApp = await prisma.application.findFirst({ where: { userId: enAttenteEntretien.id, eventId: null } });
   if (!existingWaitingApp) await prisma.application.create({ data: { userId: enAttenteEntretien.id, motivation: "Compte de test : entretien demandé, aucun créneau réservé.", status: ApplicationStatus.PENDING_CALL } });
+
+  // Corrections web 2026-09-24 (§2) : un compte par état de parcours participant, rejouable à
+  // l'identique (upserts sur téléphone/slug, notifications recréées à chaque passage). Aucun vrai
+  // paiement : les paiements « réussis » ci-dessous portent provider "seed", jamais une référence Stripe.
+  const scenarioUser = (phone: string, displayName: string, quotaCategory: "HOMME" | "FEMME") => prisma.user.upsert({
+    where: { phone },
+    update: { displayName },
+    create: { phone, displayName, role: UserRole.PARTICIPANT, profile: { create: { birthDate: new Date("1993-03-12"), city: "Paris", profession: "Cadre", interests: ["Rencontres", "Entrepreneuriat"], profileCompleted: true, validatedAt: new Date(), quotaCategory } } }
+  });
+  const confirmedFree = await scenarioUser("+33600000040", "Participant Confirmé", "FEMME");
+  const waitlisted = await scenarioUser("+33600000041", "Participant Liste d’attente", "HOMME");
+  const pendingPayer = await scenarioUser("+33600000042", "Paiement En Attente", "FEMME");
+  const paidConfirmed = await scenarioUser("+33600000043", "Paiement Confirmé", "HOMME");
+  for (const u of [confirmedFree, waitlisted, pendingPayer, paidConfirmed]) {
+    for (const document of ["CGU", "CGV"] as const) {
+      const exists = await prisma.legalAcceptance.findFirst({ where: { userId: u.id, document, version: LEGAL_VERSIONS[document] } });
+      if (!exists) await prisma.legalAcceptance.create({ data: { userId: u.id, document, version: LEGAL_VERSIONS[document], context: "seed" } });
+    }
+  }
+  // Brunch gratuit (confirmation sans paiement) et dîner complet (capacité 5 atteinte) pour la liste d'attente.
+  const brunch = await prisma.event.upsert({
+    where: { slug: "brunch-networking-independants" },
+    update: { startsAt: at(6, 11), endsAt: at(6, 14), status: EventStatus.PUBLISHED },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "brunch-networking-independants", title: "Brunch networking des indépendants", category: "Networking", flow: EventFlow.DIRECT, description: "Un brunch offert pour rencontrer d’autres indépendants du quartier : tour de table rapide puis échanges libres.", startsAt: at(6, 11), endsAt: at(6, 14), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 20, priceCents: 0, includesDrink: true, includesMain: true, status: EventStatus.PUBLISHED }
+  });
+  const fullDinner = await prisma.event.upsert({
+    where: { slug: "diner-networking-complet" },
+    update: { startsAt: at(9, 19, 30), endsAt: at(9, 22, 30), status: EventStatus.PUBLISHED, capacity: 5 },
+    create: { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, slug: "diner-networking-complet", title: "Dîner networking en petit comité", category: "Networking", flow: EventFlow.DIRECT, description: "Cinq convives, un dîner et des échanges approfondis entre porteurs de projets. Soirée complète : inscrivez-vous sur la liste d’attente.", startsAt: at(9, 19, 30), endsAt: at(9, 22, 30), district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", zone: "Paris intra-muros", capacity: 5, priceCents: 2500, includesDrink: true, includesMain: true, status: EventStatus.PUBLISHED }
+  });
+  // Place confirmée (et payée si le prix est non nul) : candidature, réservation, paiement "seed" et billet.
+  const confirmSeat = async (userId: string, eventId: string, amountCents: number, ticketCode: string) => {
+    const app = await prisma.application.upsert({ where: { eventId_userId: { eventId, userId } }, update: { status: ApplicationStatus.CONFIRMED }, create: { eventId, userId, status: ApplicationStatus.CONFIRMED, decidedAt: new Date() } });
+    const res = await prisma.reservation.upsert({ where: { applicationId: app.id }, update: { confirmedAt: new Date(), cancelledAt: null, expiresAt: at(1, 12) }, create: { eventId, userId, applicationId: app.id, expiresAt: at(1, 12), confirmedAt: new Date() } });
+    await prisma.payment.upsert({ where: { reservationId: res.id }, update: { status: PaymentStatus.SUCCEEDED, amountCents }, create: { reservationId: res.id, amountCents, status: PaymentStatus.SUCCEEDED, provider: amountCents === 0 ? "free" : "seed", paidAt: new Date() } });
+    await prisma.ticket.upsert({ where: { reservationId: res.id }, update: { status: TicketStatus.VALID, usedAt: null }, create: { reservationId: res.id, code: ticketCode, status: TicketStatus.VALID } });
+    return { app, res };
+  };
+  const free = await confirmSeat(confirmedFree.id, brunch.id, 0, "NOUR-SEED-BRUNCH-040");
+  for (let i = 0; i < 5; i++) {
+    const filler = await scenarioUser(`+3360000005${i}`, `Convive ${i + 1}`, i % 2 === 0 ? "FEMME" : "HOMME");
+    await confirmSeat(filler.id, fullDinner.id, 2500, `NOUR-SEED-COMPLET-05${i}`);
+  }
+  const paid = await confirmSeat(paidConfirmed.id, soireeNour.id, soireeNour.priceCents, "NOUR-SEED-PAYE-043");
+  // Liste d'attente réelle sur le dîner complet, avec des soirées similaires disponibles proposées
+  // (même catégorie, même région, places libres) — exactement ce que produit l'API quand un paiement
+  // tombe sur un événement complet.
+  const waitApp = await prisma.application.upsert({ where: { eventId_userId: { eventId: fullDinner.id, userId: waitlisted.id } }, update: { status: ApplicationStatus.PAYMENT_PENDING }, create: { eventId: fullDinner.id, userId: waitlisted.id, status: ApplicationStatus.PAYMENT_PENDING } });
+  await prisma.waitlistEntry.upsert({ where: { applicationId: waitApp.id }, update: { offeredAt: null, expiresAt: null }, create: { eventId: fullDinner.id, userId: waitlisted.id, applicationId: waitApp.id, position: 1 } });
+  for (const alt of [artThe, networkingBis, brunch]) {
+    const existingOffer = await prisma.alternativeOffer.findFirst({ where: { userId: waitlisted.id, originalEventId: fullDinner.id, alternativeEventId: alt.id } });
+    if (existingOffer) await prisma.alternativeOffer.update({ where: { id: existingOffer.id }, data: { status: AlternativeOfferStatus.PENDING, respondedAt: null, respondsBy: at(7, 23) } });
+    else await prisma.alternativeOffer.create({ data: { userId: waitlisted.id, originalEventId: fullDinner.id, alternativeEventId: alt.id, status: AlternativeOfferStatus.PENDING, respondsBy: at(7, 23) } });
+  }
+  // Paiement en attente : inscription acceptée, aucun verrou de place posé (le verrou n'existe que
+  // pendant une vraie tentative de paiement, voir POST /applications/:id/payment-intent).
+  const pendingApp = await prisma.application.upsert({ where: { eventId_userId: { eventId: artThe.id, userId: pendingPayer.id } }, update: { status: ApplicationStatus.PAYMENT_PENDING }, create: { eventId: artThe.id, userId: pendingPayer.id, status: ApplicationStatus.PAYMENT_PENDING } });
+  await prisma.reservation.deleteMany({ where: { applicationId: pendingApp.id, confirmedAt: null } });
+  await prisma.notification.deleteMany({ where: { userId: { in: [confirmedFree.id, waitlisted.id, pendingPayer.id, paidConfirmed.id] } } });
+  await prisma.notification.createMany({ data: [
+    { userId: confirmedFree.id, title: "Place confirmée", body: `Votre billet gratuit pour « ${brunch.title} » est disponible.`, linkPath: `/dashboard?tab=tickets&reservation=${free.res.id}` },
+    { userId: waitlisted.id, title: "Liste d’attente", body: `« ${fullDinner.title} » est complet ; vous avez été placé(e) sur liste d’attente.`, linkPath: `/dashboard?tab=reservations&application=${waitApp.id}` },
+    { userId: waitlisted.id, title: "Des événements similaires pourraient vous intéresser", body: `« ${artThe.title} », « ${networkingBis.title} » et « ${brunch.title} » ont encore des places.`, linkPath: `/dashboard?tab=reservations&application=${waitApp.id}` },
+    { userId: pendingPayer.id, title: "Inscription enregistrée", body: `Vous pouvez maintenant régler votre billet pour « ${artThe.title} ».`, linkPath: `/dashboard?tab=reservations&application=${pendingApp.id}` },
+    { userId: paidConfirmed.id, title: "Paiement confirmé", body: `Votre billet pour « ${soireeNour.title} » est disponible.`, linkPath: `/dashboard?tab=tickets&reservation=${paid.res.id}` },
+    { userId: paidConfirmed.id, title: "Votre événement approche", body: `« ${soireeNour.title} » a lieu bientôt. À très vite !`, linkPath: `/events/${soireeNour.slug}`, readAt: new Date() }
+  ] });
+
+  // §8 : restaurants et soirées de démonstration (isDemo=true), identiques à ceux de la production,
+  // pour vérifier en local que leur paiement est bien refusé.
+  await seedDemoData(prisma);
 
   // CGU §2 : service réservé aux personnes majeures, l'API refuse toute inscription sans date de
   // naissance adulte. Les comptes de démonstration qui n'en ont pas en reçoivent une (y compris sur
