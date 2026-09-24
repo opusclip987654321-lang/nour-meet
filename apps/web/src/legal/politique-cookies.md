@@ -1,6 +1,6 @@
 # Politique de cookies — Nour Meet
 
-Dernière mise à jour : 23 septembre 2026
+Dernière mise à jour : 24 septembre 2026
 
 ## 1. Objet
 
@@ -26,9 +26,9 @@ Lorsqu'ils sont strictement nécessaires à la fourniture du service demandé, i
 
 ### B. Mesure d'audience et statistiques
 
-Nour Meet peut utiliser **Google Analytics** ou une autre solution de mesure pour comprendre l'utilisation du site et améliorer l'expérience.
+Nour Meet utilise sa propre mesure d'audience, hébergée sur ses serveurs, pour comprendre l'utilisation du site et l'améliorer : pages consultées, site ou campagne de provenance, et un identifiant aléatoire conservé dans le navigateur. Ces données ne sont ni transmises à un tiers ni utilisées à des fins publicitaires.
 
-Lorsque la configuration utilisée ne remplit pas les conditions permettant une exemption de consentement, ces traceurs sont désactivés jusqu'à ce que l'utilisateur les accepte.
+Cette mesure n'est activée qu'après l'acceptation de l'utilisateur dans le bandeau de consentement ; en cas de refus, aucun identifiant n'est déposé et aucune visite n'est enregistrée.
 
 ### C. Publicité et marketing
 

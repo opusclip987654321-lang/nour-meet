@@ -98,8 +98,8 @@ export const SETTINGS_SCHEMA = {
   },
   ANALYTICS_ENABLED: {
     schema: z.boolean(),
-    default: false,
-    description: "Active la mesure d'audience (POST /analytics/pageview, C32-C34 de l'ordre correctif 2026-09-20). Désactivée par défaut : ne jamais collecter silencieusement. Avant activation en production, mettre en place un bandeau de consentement OU configurer la collecte pour respecter l'exemption CNIL « mesure d'audience » (anonyme, jamais transmis à un tiers, jamais croisé avec d'autres données, rétention courte) — décision à faire valider juridiquement, pas par ce réglage seul."
+    default: true,
+    description: "Active l'enregistrement des visites (POST /analytics/pageview). Depuis les corrections web du 2026-09-24 (§15), le site n'envoie une visite qu'après consentement explicite du visiteur (bandeau cookies, choix conservé 6 mois, modifiable via « Gérer mes cookies ») : ce réglage sert seulement à couper la collecte côté serveur."
   },
   ANALYTICS_RETENTION_DAYS: {
     schema: z.number().int().positive(),

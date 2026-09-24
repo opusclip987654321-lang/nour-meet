@@ -259,7 +259,8 @@
   display: grid;
 }
 
-.site-footer li a {
+.site-footer li a,
+.site-footer li .footer-link-button {
   display: inline-flex;
   align-items: center;
   min-height: 40px;
@@ -267,7 +268,8 @@
   font-size: var(--fs-sm);
 }
 
-.site-footer li a:hover {
+.site-footer li a:hover,
+.site-footer li .footer-link-button:hover {
   color: var(--on-night);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -481,4 +483,95 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.footer-link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* ---------- Bandeau de consentement (corrections web 2026-09-24, §15) ---------- */
+.consent-banner {
+  position: fixed;
+  inset: auto var(--s-4) var(--s-4) var(--s-4);
+  z-index: 80;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.consent-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s-4) var(--s-5);
+  width: min(100%, 980px);
+  padding: var(--s-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+}
+
+.consent-copy {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+.consent-copy h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0 0 var(--s-2);
+  font-family: var(--font-text);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+
+.consent-copy p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.consent-copy a {
+  color: var(--saffron-ink);
+}
+
+.consent-options {
+  display: grid;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+.consent-option {
+  display: flex;
+  gap: var(--s-2);
+  align-items: flex-start;
+  font-size: var(--fs-sm);
+}
+
+.consent-option input {
+  margin-top: 3px;
+}
+
+.consent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+@media (max-width: 480px) {
+  .consent-actions {
+    width: 100%;
+  }
+
+  .consent-actions .button {
+    flex: 1 1 auto;
+  }
 }
