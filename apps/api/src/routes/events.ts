@@ -5,24 +5,30 @@ import { app, prisma } from "../context.js";
 import { env } from "../env.js";
 import { paginated, paginationQuery, toSkipTake } from "../pagination.js";
 import { auth, currentId, optionalAuth } from "../services/auth.js";
-import { publicEvent } from "../services/events.js";
+import { publicEvent, viewerStatuses } from "../services/events.js";
 
+// Corrections web 2026-09-24 (§5) : uniquement les événements à venir, du plus proche au plus éloigné
+// (tri SQL sur la colonne startsAt, un vrai horodatage), avec le statut du visiteur connecté.
 app.get("/events", { preHandler: optionalAuth }, async (request) => {
   const query = z.object({ category: z.string().optional(), q: z.string().optional() }).merge(paginationQuery).parse(request.query);
-  const where = { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" as const } }, { description: { contains: query.q, mode: "insensitive" as const } }] : undefined };
-  const viewerCategory = request.user ? (await prisma.profile.findUnique({ where: { userId: currentId(request) } }))?.quotaCategory ?? null : null;
+  const where = { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, startsAt: { gt: new Date() }, category: query.category ? query.category : undefined, OR: query.q ? [{ title: { contains: query.q, mode: "insensitive" as const } }, { description: { contains: query.q, mode: "insensitive" as const } }, { district: { contains: query.q, mode: "insensitive" as const } }] : undefined };
+  const viewerId = request.user ? currentId(request) : null;
+  const viewerCategory = viewerId ? (await prisma.profile.findUnique({ where: { userId: viewerId } }))?.quotaCategory ?? null : null;
   const [events, total] = await Promise.all([
-    prisma.event.findMany({ where, include: { controllerRestaurant: { include: { subscription: { include: { plan: true } } } }, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" }, ...toSkipTake(query) }),
+    prisma.event.findMany({ where, include: { controllerRestaurant: { include: { subscription: { include: { plan: true } } } }, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: [{ startsAt: "asc" }, { id: "asc" }], ...toSkipTake(query) }),
     prisma.event.count({ where })
   ]);
-  return paginated(events.map(e => publicEvent(e, false, viewerCategory)), total, query);
+  const statuses = await viewerStatuses(viewerId, events.map(e => e.id));
+  return paginated(events.map(e => ({ ...publicEvent(e, false, viewerCategory), viewerStatus: statuses.get(e.id) ?? null })), total, query);
 });
 
 app.get("/events/:id", { preHandler: optionalAuth }, async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const event = await prisma.event.findFirstOrThrow({ where: { OR: [{ id }, { slug: id }] }, include: { controllerRestaurant: true, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } } });
-  const viewerCategory = request.user ? (await prisma.profile.findUnique({ where: { userId: currentId(request) } }))?.quotaCategory ?? null : null;
-  return publicEvent(event, false, viewerCategory);
+  const viewerId = request.user ? currentId(request) : null;
+  const viewerCategory = viewerId ? (await prisma.profile.findUnique({ where: { userId: viewerId } }))?.quotaCategory ?? null : null;
+  const statuses = await viewerStatuses(viewerId, [event.id]);
+  return { ...publicEvent(event, false, viewerCategory), viewerStatus: statuses.get(event.id) ?? null };
 });
 
 app.get("/events/:id/my-application", { preHandler: auth }, async (request, reply) => {

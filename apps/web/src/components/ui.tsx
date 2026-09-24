@@ -1,5 +1,6 @@
-import type { PublicEvent } from "@nour/shared";
-import { ArrowRight, BadgeCheck, Bell, CalendarDays, Heart, MapPin, Share2, Users } from "lucide-react";
+import { EVENT_VIEWER_STATUS_LABEL } from "@nour/shared";
+import type { EventViewerStatus, PublicEvent } from "@nour/shared";
+import { ArrowRight, BadgeCheck, Bell, CalendarDays, CircleCheck, Heart, Hourglass, MapPin, Share2, Users } from "lucide-react";
 import { ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
@@ -78,6 +79,13 @@ export function CategoryBadge({ category, className }: {category: string; classN
   return <span className={`category-badge${className ? ` ${className}` : ""}`} data-category={category}>{CATEGORY_ICON[category] ?? null}{category}</span>;
 }
 
+// §5.2 (corrections web 2026-09-24) : « Participe déjà » ou « Liste d'attente », rien d'autre — un
+// événement sans lien avec le visiteur n'affiche aucun statut.
+export function ViewerStatusBadge({ status }: { status: EventViewerStatus | undefined }) {
+  if (!status) return null;
+  return <span className={`viewer-badge ${status === "CONFIRMED" ? "confirmed" : "waitlist"}`} data-testid="viewer-status">{status === "CONFIRMED" ? <CircleCheck size={14} aria-hidden="true"/> : <Hourglass size={14} aria-hidden="true"/>}{EVENT_VIEWER_STATUS_LABEL[status]}</span>;
+}
+
 // C24 : jamais de chiffre brut de capacité/quota — seulement ce que la disponibilité calculée
 // côté serveur autorise à dire pour CE visiteur.
 export const availabilityLabel=(a:PublicEvent["availability"])=>a.kind==="unknown"?"Places selon catégorie":a.full?"Complet":`${a.remaining} place${a.remaining>1?"s":""} restante${a.remaining>1?"s":""}`;
@@ -96,7 +104,7 @@ export function EventCard({ event, priority = false, headingLevel = 3 }: {event:
       {full&&<span className="full-badge">Complet</span>}
     </div>
     <div className="event-copy">
-      <p className="event-date"><CalendarDays size={16} aria-hidden="true"/>{shortDate(event.startsAt)}</p>
+      <p className="event-date"><CalendarDays size={16} aria-hidden="true"/>{shortDate(event.startsAt)}<ViewerStatusBadge status={event.viewerStatus}/></p>
       <Title className="event-title"><Link to={`/events/${event.slug}`} className="stretched">{event.title}</Link></Title>
       <p className="event-place"><MapPin size={16} aria-hidden="true"/>{event.district}<span aria-hidden="true">·</span>{availabilityLabel(event.availability)}</p>
       <div className="event-foot"><strong>{priceLabel}</strong><span className="event-more" aria-hidden="true">Voir la soirée<ArrowRight size={16}/></span></div>

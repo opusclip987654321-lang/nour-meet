@@ -15,14 +15,29 @@ export function Events() {
   const [q,setQ]=useState("");
   const [debouncedQ,setDebouncedQ]=useState("");
   const [events,setEvents]=useState<PublicEvent[]|null>(null);
+  const [page,setPage]=useState(1);
+  const [totalPages,setTotalPages]=useState(1);
+  const [total,setTotal]=useState(0);
+  const [loadingMore,setLoadingMore]=useState(false);
   // Recherche : une requête après 300 ms sans frappe, jamais une requête par caractère saisi.
   useEffect(()=>{const t=setTimeout(()=>setDebouncedQ(q.trim()),300);return()=>clearTimeout(t)},[q]);
+  // L'API ne renvoie que les soirées à venir, déjà triées de la plus proche à la plus éloignée (§5.1) :
+  // les pages suivantes s'ajoutent à la suite, jamais retriées côté navigateur sur une date formatée.
+  const query=(p:number)=>`/events?${new URLSearchParams({...(debouncedQ?{q:debouncedQ}:{}),...(category?{category}:{}),page:String(p),pageSize:"24"})}`;
   useEffect(()=>{
     let ignore=false;
-    api<Paginated<PublicEvent>>(`/events?${new URLSearchParams({...(debouncedQ?{q:debouncedQ}:{}),...(category?{category}:{})})}`)
-      .then(r=>{if(!ignore)setEvents(r.items)}).catch(()=>{if(!ignore)setEvents([])});
+    setPage(1);
+    api<Paginated<PublicEvent>>(query(1))
+      .then(r=>{if(!ignore){setEvents(r.items);setTotalPages(r.totalPages);setTotal(r.total)}}).catch(()=>{if(!ignore)setEvents([])});
     return()=>{ignore=true};
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query dérive de ces deux valeurs
   },[debouncedQ,category]);
+  const loadMore=async()=>{
+    setLoadingMore(true);
+    try{const r=await api<Paginated<PublicEvent>>(query(page+1));setEvents(prev=>[...(prev??[]),...r.items]);setPage(page+1);setTotalPages(r.totalPages)}
+    catch{/* le bouton reste disponible pour réessayer */}
+    finally{setLoadingMore(false)}
+  };
   const setCategory=(c:string)=>{const next=new URLSearchParams(searchParams);if(c)next.set("category",c);else next.delete("category");setSearchParams(next,{replace:true})};
   return <Layout><section className="page">
     <h1>Les prochaines soirées</h1>
@@ -37,7 +52,7 @@ export function Events() {
     {events===null
       ?<div className="event-grid" aria-busy="true">{[0,1,2].map(i=><div key={i} className="event-card skeleton-card"><div className="skeleton" style={{aspectRatio:"4 / 3"}}/><div className="event-copy"><div className="skeleton" style={{height:18,width:"50%"}}/><div className="skeleton" style={{height:26,width:"85%"}}/></div></div>)}</div>
       :events.length
-        ?<><p className="results-count" aria-live="polite">{events.length} soirée{events.length>1?"s":""}</p><div className="event-grid">{events.map((e,i)=><EventCard key={e.id} event={e} priority={i<3} headingLevel={2}/>)}</div></>
+        ?<><p className="results-count" aria-live="polite">{total} soirée{total>1?"s":""} à venir</p><div className="event-grid">{events.map((e,i)=><EventCard key={e.id} event={e} priority={i<3} headingLevel={2}/>)}</div>{page<totalPages&&<div className="load-more"><button type="button" className="button secondary" disabled={loadingMore} onClick={loadMore}>{loadingMore?"Chargement…":"Afficher plus de soirées"}</button></div>}</>
         :<div className="empty"><CalendarDays size={24} aria-hidden="true"/><h2>Aucune soirée ne correspond</h2><p>Essayez un autre mot-clé ou un autre format — de nouvelles dates sont publiées régulièrement.</p></div>}
   </section></Layout>;
 }
