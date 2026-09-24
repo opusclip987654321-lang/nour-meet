@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import { z } from "zod";
 import { app, prisma, stripe } from "../context.js";
-import { paymentLockExpiry, resolvePriceCents } from "../domain.js";
+import { NOT_BOOKABLE_MESSAGE, isEventBookable, paymentLockExpiry, resolvePriceCents } from "../domain.js";
 import { env } from "../env.js";
 import { ADULT_ONLY_ERROR, hasAcceptedCurrent, recordAcceptance } from "../services/account.js";
 import { audit } from "../services/audit.js";
@@ -27,6 +27,10 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
   const userId = currentId(request);
   const application = await prisma.application.findFirstOrThrow({ where: { id, userId }, include: { event: { include: { priceTiers: true } }, reservation: true } });
   if (application.status !== ApplicationStatus.PAYMENT_PENDING) return reply.code(409).send({ error: "Cette candidature n’est pas en attente de paiement" });
+  // §8 (corrections web 2026-09-24) : un événement de démonstration peut être découvert et le parcours
+  // commencé, mais aucune transaction n'est jamais possible — ni PaymentIntent, ni verrou de place, ni
+  // billet gratuit. Refus côté serveur, quel que soit le client (site, application mobile, appel direct).
+  if (application.event && isEventBookable(application.event) === false) return reply.code(409).send({ error: NOT_BOOKABLE_MESSAGE, notBookable: true });
   // CGV A3 : la réservation ne devient ferme qu'après acceptation des CGV. Exigée avant de poser le
   // moindre verrou ou PaymentIntent, y compris pour une soirée gratuite.
   const { acceptCgv } = z.object({ acceptCgv: z.boolean().optional() }).parse(request.body ?? {});

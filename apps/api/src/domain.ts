@@ -56,3 +56,10 @@ export function resolvePriceCents(event: { priceCents: number; priceTiers?: Pric
 export function eventsOverlap(a: { startsAt: Date; endsAt: Date }, b: { startsAt: Date; endsAt: Date }) {
   return a.startsAt < b.endsAt && b.startsAt < a.endsAt;
 }
+
+// Données de démonstration (§8, corrections web 2026-09-24) : un événement isDemo n'est jamais
+// réservable. Fonction pure, partagée par la route de paiement et les propositions d'alternatives.
+export const NOT_BOOKABLE_MESSAGE = "Cet événement n’est actuellement pas réservable. Découvrez nos autres soirées à venir.";
+export function isEventBookable(event: { isDemo: boolean }) {
+  return !event.isDemo;
+}

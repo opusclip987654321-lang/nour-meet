@@ -32,7 +32,7 @@ function PaymentForm({ amountCents, onSuccess, onCancel }: { amountCents: number
 export function PaymentModal({ applicationId, eventId, amountCents, onClose, onConfirmed, onWaitlisted }: { applicationId: string; eventId: string; amountCents: number; onClose: () => void; onConfirmed: () => void; onWaitlisted: () => void }) {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [phase, setPhase] = useState<"terms" | "loading" | "ready" | "confirming" | "success" | "timeout">("terms");
+  const [phase, setPhase] = useState<"terms" | "loading" | "ready" | "confirming" | "success" | "timeout" | "notBookable">("terms");
   const [acceptCgv, setAcceptCgv] = useState(false);
   const free = amountCents === 0;
 
@@ -48,7 +48,13 @@ export function PaymentModal({ applicationId, eventId, amountCents, onClose, onC
         if (r.free) { setPhase("success"); setTimeout(onConfirmed, 1200); return; }
         setClientSecret(r.clientSecret!); setPhase("ready");
       })
-      .catch((err: any) => { if (err?.waitlisted) { onWaitlisted(); onClose(); } else { setError((err as Error).message); setPhase("terms"); } });
+      .catch((err: any) => {
+        if (err?.waitlisted) { onWaitlisted(); onClose(); return; }
+        // §8 (corrections web 2026-09-24) : événement non réservable, refusé par l'API avant toute
+        // transaction — message dédié plutôt qu'une erreur de paiement générique.
+        if (err?.notBookable) { setError(""); setPhase("notBookable"); return; }
+        setError((err as Error).message); setPhase("terms");
+      });
   };
 
   const handleSuccess = async () => {
@@ -83,6 +89,10 @@ export function PaymentModal({ applicationId, eventId, amountCents, onClose, onC
       {phase === "loading" && <div className="calendar-state"><div className="spinner small"/><span>{free ? "Confirmation de votre place…" : "Chargement du module de paiement…"}</span></div>}
       {phase === "confirming" && <div className="calendar-state"><div className="spinner small"/><span>Confirmation du paiement…</span></div>}
       {phase === "success" && <Notice kind="success">{free ? "Place confirmée ! Votre billet est prêt." : "Paiement confirmé ! Votre billet est prêt."}</Notice>}
+      {phase === "notBookable" && <div className="stack">
+        <Notice kind="info">Cet événement n’est actuellement pas réservable. Aucun paiement n’a été effectué.</Notice>
+        <div className="decision-buttons"><Link className="button" to="/events" onClick={onClose}>Voir les autres soirées</Link><button type="button" className="button secondary" onClick={onClose}>Fermer</button></div>
+      </div>}
       {phase === "timeout" && <><Notice kind="error">Le paiement est en cours de confirmation. Actualisez la page dans un instant.</Notice><button className="button full" onClick={onClose}>Fermer</button></>}
       {phase === "ready" && clientSecret && <Elements stripe={getStripe()} options={{ clientSecret, appearance: { theme: "stripe", variables: { colorPrimary: "#1c2653", colorText: "#15171c", colorDanger: "#b3261e", borderRadius: "8px", fontSizeBase: "16px" } } }}>
         <PaymentForm amountCents={amountCents} onSuccess={handleSuccess} onCancel={onClose}/>

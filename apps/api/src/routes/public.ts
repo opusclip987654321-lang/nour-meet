@@ -12,7 +12,7 @@ app.get("/health", async () => ({ status: "ok", service: "nour-api", smsMode: sm
 // <domaine>/sitemap.xml ici via le reverse proxy si le web et l'API ne partagent pas déjà l'origine.
 app.get("/sitemap.xml", async (_request, reply) => {
   const [events, articles] = await Promise.all([
-    prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] } }, select: { slug: true, updatedAt: true } }),
+    prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, isDemo: false }, select: { slug: true, updatedAt: true } }),
     prisma.article.findMany({ where: { status: "PUBLISHED" }, select: { slug: true, updatedAt: true } })
   ]);
   const staticUrls = ["/", "/events", "/concept", "/blog"];

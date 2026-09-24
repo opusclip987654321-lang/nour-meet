@@ -112,7 +112,8 @@ export const createAlternativeOfferIfPossible = async (userId: string, originalE
   const candidates = await prisma.event.findMany({
     where: {
       id: { not: originalEvent.id }, category: originalEvent.category, zone: { in: zonesInRegion },
-      status: EventStatus.PUBLISHED, startsAt: { gt: new Date() }, applications: { none: { userId } },
+      // Jamais un événement de démonstration (§8) : proposé en alternative, il ne serait pas réservable.
+      status: EventStatus.PUBLISHED, isDemo: false, startsAt: { gt: new Date() }, applications: { none: { userId } },
       alternativeOffers: { none: { userId, originalEventId: originalEvent.id, status: AlternativeOfferStatus.DECLINED } }
     },
     orderBy: { startsAt: "asc" },

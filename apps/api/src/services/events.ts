@@ -40,7 +40,10 @@ export const publicEvent = (event: any, revealAddress = false, viewerQuotaCatego
   // le tri chronologique de la page Événements — seulement un badge visuel, jamais un ré-ordonnancement.
   highlightTier: event.controllerRestaurant?.subscription?.status === "ACTIVE" || event.controllerRestaurant?.subscription?.status === "TRIALING" ? event.controllerRestaurant.subscription.plan.highlightTier ?? null : null,
   venue: event.venueRestaurant ? { id: event.venueRestaurant.id, name: event.venueRestaurant.name } : null,
-  hasQuotas: (event.quotas ?? []).length > 0
+  hasQuotas: (event.quotas ?? []).length > 0,
+  // §8 : jamais affiché comme tel ; sert uniquement à ne pas déclarer aux moteurs de recherche un
+  // événement qui ne peut pas être réservé (noindex, pas de données structurées Event).
+  bookable: !event.isDemo
 });
 
 // Statut du visiteur connecté pour une liste d'événements (§5.2 des corrections web 2026-09-24), en

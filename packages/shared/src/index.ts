@@ -129,6 +129,9 @@ export interface PublicEvent {
   // Statut du visiteur connecté sur cet événement (null pour un visiteur anonyme ou sans lien avec
   // l'événement) — voir eventViewerStatus.
   viewerStatus: EventViewerStatus;
+  // false pour un événement qui ne peut pas être réservé (données de démonstration) : jamais affiché,
+  // utilisé seulement pour ne pas l'annoncer aux moteurs de recherche.
+  bookable: boolean;
 }
 
 // Corrections web 2026-09-24 (§5.2) : seuls deux états sont signalés sur une carte d'événement —
