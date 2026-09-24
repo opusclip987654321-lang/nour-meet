@@ -76,3 +76,26 @@ test("abonnement restaurateur : cartes de tarifs côte à côte, sans la mention
   await page.goto("/admin/finance");
   await expect(page).not.toHaveURL(/\/admin\/finance/);
 });
+
+test("inscription par SMS (mode simulé), choix participant, puis déconnexion", async ({ page, isMobile }) => {
+  const phone = `+3361${String(Date.now()).slice(-8)}`;
+  try {
+    await page.goto("/login");
+    await page.getByLabel("Numéro de téléphone").fill(phone);
+    await page.getByRole("button", { name: /Recevoir|Continuer|Envoyer/ }).click();
+    await page.getByLabel("Code à six chiffres").fill("123456");
+    await page.getByRole("button", { name: "Vérifier le code" }).click();
+    await page.getByRole("button", { name: /Participer aux événements/ }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+    await expect(page.getByTestId("notification-bell")).toBeVisible();
+    if (isMobile) await page.getByRole("button", { name: "Ouvrir le menu" }).click();
+    await page.getByRole("button", { name: "Se déconnecter" }).first().click();
+    await expect(page.getByTestId("notification-bell")).toHaveCount(0);
+    if (isMobile) await page.getByRole("button", { name: /Ouvrir le menu|Fermer le menu/ }).click().catch(() => {});
+    await expect(page.getByRole("link", { name: /Se connecter/ }).first()).toBeAttached();
+  } finally {
+    const { prisma } = await import("./helpers.js");
+    const user = await prisma.user.findUnique({ where: { phone } });
+    if (user) { await prisma.legalAcceptance.deleteMany({ where: { userId: user.id } }); await prisma.user.delete({ where: { id: user.id } }).catch(() => {}); }
+  }
+});
