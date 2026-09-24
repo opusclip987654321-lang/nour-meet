@@ -3,7 +3,9 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../api";
 import { Layout } from "../../components/Layout";
-import { Loading, Notice, renderArticleParagraph } from "../../components/ui";
+import { ArticleBody, articleCoverPhoto } from "../../components/ArticleBody";
+import { Picture } from "../../components/brand";
+import { Loading, Notice } from "../../components/ui";
 import { imgUrl } from "../../lib/format";
 import { BLOG_CATEGORIES } from "../../lib/labels";
 import { AdminNav } from "./AdminNav";
@@ -38,7 +40,7 @@ export function AdminBlog() {
     finally{setBusy(false)}
   };
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Blog</h1><p className="fine left">Aucun article — écrit à la main ou généré par IA — n’est jamais publié sans validation humaine explicite.</p>
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Blog</h1><p className="fine left">En production, un article est rédigé par l’IA (avec recherche web et sources vérifiées) puis publié automatiquement chaque jour, sans validation préalable. Vous pouvez consulter chaque article publié et le supprimer. Les articles écrits ici à la main suivent toujours le circuit de validation ci-dessous.</p>
     
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="admin-grid">
@@ -58,7 +60,7 @@ export function AdminBlog() {
     <div className="filters"><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tous les statuts</option>{Object.entries(ARTICLE_STATUS_LABEL).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
     {items.length===0?<div className="empty"><Inbox size={24} aria-hidden="true"/><h2>Aucun article</h2></div>:<div className="panel table">
       <div className="table-row head"><span>Titre</span><span>Thème</span><span>Statut</span></div>
-      {items.map(a=><Link key={a.id} to={`/admin/blog/${a.id}`} className="table-row"><span><b>{a.title}</b>{a.aiGenerated&&<small>Généré par IA</small>}</span><span>{a.category}</span><span>{ARTICLE_STATUS_LABEL[a.status]}</span></Link>)}
+      {items.map(a=><Link key={a.id} to={`/admin/blog/${a.id}`} className="table-row"><span><b>{a.title}</b>{a.autoPublishDay?<small>Publié automatiquement le {new Date(`${a.autoPublishDay}T12:00:00`).toLocaleDateString("fr-FR")}</small>:a.aiGenerated&&<small>Généré par IA</small>}</span><span>{a.category}</span><span>{ARTICLE_STATUS_LABEL[a.status]}</span></Link>)}
     </div>}
   {queue&&queue.count>0&&<Notice kind="info">{queue.count} article{queue.count>1?"s":""} en réserve, proposé{queue.count>1?"s":""} ici à raison d’un par jour une fois en production. Prochain : « {queue.next[0]?.title} » ({queue.next[0]?.category}).</Notice>}</div></section></Layout>;
 }
@@ -101,6 +103,7 @@ export function AdminArticleEditor() {
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(null)}
   };
+  const [confirmDelete,setConfirmDelete]=useState(false);
   const remove=async()=>{setBusy("delete");try{await api(`/admin/articles/${id}`,{method:"DELETE"});navigate("/admin/blog")}catch(err){setNotice({kind:"error",text:(err as Error).message});setBusy(null)}};
 
   if(!article)return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><Loading/></div></section></Layout>;
@@ -108,29 +111,31 @@ export function AdminArticleEditor() {
     <div className="admin-heading"><div><h1>{article.title}</h1><p className="fine left">Statut : <b>{ARTICLE_STATUS_LABEL[article.status]}</b>{article.aiGenerated&&" · généré par IA"}</p></div><button type="button" className="button small secondary" onClick={()=>setPreview(!preview)}>{preview?"Modifier":"Aperçu"}</button></div>
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     {preview?<div className="panel" style={{maxWidth:760}}>
-      <span className="eyebrow">{form.category}</span><h2 style={{fontFamily:"'Playfair Display',serif"}}>{form.title}</h2>
-      {article.imageUrl&&<img src={imgUrl(article.imageUrl)} alt="" style={{width:"100%",borderRadius:14,margin:"20px 0"}}/>}
-      <div className="article-body">{form.content.split("\n\n").map((p,i)=><p key={i}>{renderArticleParagraph(p)}</p>)}</div>
+      <p className="article-meta">{form.category}</p><h2>{form.title}</h2>
+      {article.imageUrl&&<div className="article-cover">{articleCoverPhoto(article.imageUrl)?<Picture name={articleCoverPhoto(article.imageUrl)!} alt="" sizes="760px"/>:<img src={imgUrl(article.imageUrl)} alt=""/>}</div>}
+      <ArticleBody content={form.content}/>
     </div>:<form className="panel form-grid" onSubmit={save}>
       <label>Titre<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
       <label>Identifiant (slug)<input required pattern="[a-z0-9-]+" value={form.slug} onChange={e=>setForm({...form,slug:e.target.value})}/></label>
       <label>Thème<select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>{BLOG_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
       <label>Mots-clés (séparés par des virgules)<input value={form.keywords} onChange={e=>setForm({...form,keywords:e.target.value})}/></label>
       <label className="wide">Extrait<textarea value={form.excerpt} onChange={e=>setForm({...form,excerpt:e.target.value})}/></label>
-      <label className="wide">Contenu (un paragraphe par ligne vide)<textarea required style={{minHeight:260}} value={form.content} onChange={e=>setForm({...form,content:e.target.value})}/></label>
+      <label className="wide">Contenu (blocs séparés par une ligne vide : « ## » intertitre, « - » liste, ![alt](photo:nom) image, [[cta:/events|Libellé]] bouton)<textarea required style={{minHeight:260}} value={form.content} onChange={e=>setForm({...form,content:e.target.value})}/></label>
       <label>Titre SEO (facultatif)<input value={form.metaTitle} onChange={e=>setForm({...form,metaTitle:e.target.value})}/></label>
       <label>Méta-description SEO (facultatif)<input value={form.metaDescription} onChange={e=>setForm({...form,metaDescription:e.target.value})}/></label>
-      <label className="fine wide">Image principale{article.imageUrl&&<img src={imgUrl(article.imageUrl)} alt="" style={{width:220,borderRadius:8,display:"block",margin:"8px 0"}}/>}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>e.target.files?.[0]&&uploadImage(e.target.files[0])}/></label>
+      <label className="fine wide">Image principale{article.imageUrl&&!articleCoverPhoto(article.imageUrl)&&<img src={imgUrl(article.imageUrl)} alt="" style={{width:220,borderRadius:8,display:"block",margin:"8px 0"}}/>}{articleCoverPhoto(article.imageUrl)&&<span className="fine"> (photo de la photothèque : {articleCoverPhoto(article.imageUrl)})</span>}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>e.target.files?.[0]&&uploadImage(e.target.files[0])}/></label>
       <button className="button" disabled={busy==="save"}>Enregistrer</button>
     </form>}
     <div className="panel" style={{marginTop:20}}>
-      <div className="panel-title"><h2>Circuit de validation</h2></div>
+      <div className="panel-title"><h2>{article.status==="PUBLISHED"?"Article publié":"Circuit de validation"}</h2>{article.status==="PUBLISHED"&&<Link className="link-button" to={`/blog/${article.slug}`}>Voir en ligne</Link>}</div>
       <div className="decision-buttons">
         {article.status==="DRAFT"&&<button className="button" disabled={!!busy} onClick={()=>action("submit-for-review")}>Soumettre à validation</button>}
         {article.status==="IN_REVIEW"&&<><button className="button" disabled={!!busy} onClick={()=>action("decision",{accept:true})}>Valider</button><div className="reject-note"><input value={rejectNote} onChange={e=>setRejectNote(e.target.value)} placeholder="Motif du renvoi (optionnel)"/><button className="button danger" disabled={!!busy} onClick={()=>action("decision",{accept:false,note:rejectNote})}>Renvoyer en brouillon</button></div></>}
         {article.status==="APPROVED"&&<><button className="button" disabled={!!busy} onClick={()=>action("publish")}>Publier maintenant</button><div className="time-row"><input type="datetime-local" value={scheduleAt} onChange={e=>setScheduleAt(e.target.value)}/><button className="button secondary" disabled={!!busy||!scheduleAt} onClick={()=>action("schedule",{publishAt:new Date(scheduleAt).toISOString()})}>Programmer</button></div></>}
         {article.status==="PUBLISHED"&&<button className="button secondary" disabled={!!busy} onClick={()=>action("archive")}>Archiver</button>}
-        <button className="button danger" disabled={!!busy} onClick={remove}>Supprimer</button>
+        {confirmDelete
+          ?<><button className="button danger" disabled={!!busy} onClick={remove}>{busy==="delete"?"Suppression…":"Confirmer la suppression définitive"}</button><button className="button secondary" disabled={!!busy} onClick={()=>setConfirmDelete(false)}>Annuler</button></>
+          :<button className="button danger" disabled={!!busy} onClick={()=>setConfirmDelete(true)}>{article.status==="PUBLISHED"?"Supprimer cet article publié":"Supprimer"}</button>}
       </div>
       {article.scheduledAt&&<p className="fine left">Publication programmée le {new Date(article.scheduledAt).toLocaleString("fr-FR")}.</p>}
     </div>

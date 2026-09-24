@@ -176,3 +176,4 @@ export const ageInYears = (birthDate: Date | string, now: Date = new Date()): nu
 };
 export const isAdult = (birthDate: Date | string | null | undefined, now: Date = new Date()): boolean =>
   !!birthDate && !Number.isNaN(new Date(birthDate).getTime()) && ageInYears(birthDate, now) >= MINIMUM_AGE;
+export * from "./article.js";

@@ -26,6 +26,12 @@ const QUICK_LOGIN_GROUPS: {title:string; items:{label:string; phone:string}[]}[]
     { label: "Refusé (délai de 3 mois en cours)", phone: "+33600000024" },
     { label: "Entretien demandé, aucun créneau réservé", phone: "+33600000025" },
   ] },
+  { title: "Parcours participants (données de test)", items: [
+    { label: "Participation confirmée (soirée gratuite)", phone: "+33600000040" },
+    { label: "Sur liste d’attente, soirées similaires proposées", phone: "+33600000041" },
+    { label: "Paiement en attente", phone: "+33600000042" },
+    { label: "Paiement effectué, participation confirmée", phone: "+33600000043" },
+  ] },
   { title: "Comptes de démonstration réels", items: [
     { label: "Sofia (participante, historique complet)", phone: "+33612345678" },
     { label: "Karim (participant, historique complet)", phone: "+33687654321" },

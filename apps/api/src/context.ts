@@ -65,7 +65,7 @@ export const smsVerification = createSmsVerificationProvider({
   serviceSid: env.TWILIO_VERIFY_SERVICE_SID
 });
 export const emailProvider = createEmailProvider({ apiKey: env.RESEND_API_KEY, from: env.RESEND_FROM_EMAIL, fromName: env.RESEND_FROM_NAME });
-export const aiProvider = createAIProvider();
+export const aiProvider = createAIProvider(env.ANTHROPIC_API_KEY);
 
 export const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode });
 // Un champ optionnel envoyé comme chaîne vide par un formulaire (nom non renseigné) doit être traité

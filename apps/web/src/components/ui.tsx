@@ -93,17 +93,3 @@ export function EventCard({ event, priority = false, headingLevel = 3 }: {event:
     </div>
   </article>;
 }
-
-// §5 (cahier des charges 2026-09) : les articles doivent pouvoir renvoyer vers d'autres parties
-// du site (ex. réserver une soirée), pas seulement exister pour le SEO. Convention légère de type
-// Markdown "[libellé](/chemin)" dans le texte : un chemin commençant par "/" devient un lien interne
-// (react-router, jamais de rechargement de page), tout le reste un lien externe classique.
-export const renderArticleParagraph = (text: string) => {
-  const parts = text.split(/(\[[^\]]+\]\([^)]+\))/g);
-  return parts.map((part, i) => {
-    const match = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-    if (!match) return part;
-    const [, label, url] = match;
-    return url.startsWith("/") ? <Link key={i} to={url} className="link-button" style={{display:"inline"}}>{label}</Link> : <a key={i} href={url} target="_blank" rel="noreferrer">{label}</a>;
-  });
-};
