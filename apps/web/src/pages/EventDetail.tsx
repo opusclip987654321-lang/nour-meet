@@ -56,7 +56,7 @@ function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { 
     <button className="button full" onClick={() => setShowPayment(true)}>{event.priceCents === 0 ? "Confirmer ma place (gratuit)" : `Payer par carte · ${money(event.priceCents)}`}</button>
     {showPayment && <Suspense fallback={null}><PaymentModal applicationId={application.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }} onWaitlisted={onWaitlisted}/></Suspense>}
   </div>;
-  if (application.call) return <div className="call-scheduled"><span className="eyebrow">Entretien programmé</span><strong>{dateTime(application.call.startsAt)}</strong><p>L’organisateur vous appellera à cette heure, puis vous serez informé(e) de sa décision.</p></div>;
+  if (application.call) return <div className="call-scheduled"><span className="eyebrow">Entretien programmé</span><strong>{dateTime(application.call.startsAt)}</strong><p>L’équipe Nūr Meet vous appellera à cette heure, puis vous serez informé(e) de sa décision.</p></div>;
   return null;
 }
 
@@ -242,7 +242,7 @@ export function EventDetail() {
         {event.photos.length>0&&<section aria-labelledby="photos" className="event-block"><h2 id="photos">Le lieu</h2><div className="event-gallery">{event.photos.map((url,i)=><img key={i} src={imgUrl(url)} alt={`Photo ${i+1} du lieu`} loading="lazy" width={480} height={360}/>)}</div></section>}
         <section aria-labelledby="annulation" className="event-block cancellation-policy">
           <h2 id="annulation"><Info size={20} aria-hidden="true"/>Annulation</h2>
-          <p>Annulation gratuite jusqu’à 24 heures avant le début de la soirée : remboursement intégral automatique. Passé ce délai, ou en cas d’absence, aucun remboursement n’est dû. Si la soirée est annulée par l’organisateur, vous êtes intégralement remboursé. <Link className="text-link" to="/legal/cgv">Conditions de vente</Link></p>
+          <p>Annulation gratuite jusqu’à 24 heures avant le début de la soirée : remboursement intégral automatique. Passé ce délai, ou en cas d’absence, aucun remboursement n’est dû. Si la soirée est annulée par l’organisateur, vous êtes intégralement remboursé(e). <Link className="text-link" to="/legal/cgv">Conditions de vente</Link></p>
         </section>
       </article>
       <aside className="booking" id="reserver" aria-labelledby="booking-title">
@@ -260,10 +260,10 @@ export function EventDetail() {
       {canCancel&&<button className="button danger full" disabled={busy} onClick={cancelApplication}>Annuler mon inscription</button>}
     </>
     :user.hasRestaurant?<Notice kind="info">Votre compte restaurateur vous permet de découvrir les événements proposés, mais ne permet pas d’y participer.</Notice>
-    :requiresScreening&&!profileValidated?<Notice kind="error">Votre profil doit d’abord être validé lors d’un entretien avec Nour Meet avant de vous inscrire à un speed dating. <Link to="/dashboard">Demander mon entretien →</Link></Notice>
+    :requiresScreening&&!profileValidated?<Notice kind="error">Votre profil doit d’abord être validé lors d’un entretien avec Nūr Meet avant de vous inscrire à un speed dating. <Link to="/dashboard">Demander mon entretien →</Link></Notice>
     :categoryUnknown?<Notice kind="error">Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement.</Notice>
     :requiresScreening&&showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>
-    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même candidater : une liste d’attente et une éventuelle proposition alternative vous seront proposées au moment de payer.</Notice>}<button className="button full" disabled={busy} onClick={()=>requiresScreening?setShowQuestionnaire(true):apply()}>{requiresScreening?"Candidater":busy?"…":"S’inscrire"}</button></>}
+    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même vous inscrire : au moment de payer, vous serez placé(e) sur liste d’attente et, si possible, une soirée comparable vous sera proposée.</Notice>}<button className="button full" disabled={busy} onClick={()=>requiresScreening?setShowQuestionnaire(true):apply()}>{requiresScreening?"Candidater":busy?"…":"S’inscrire"}</button></>}
     <p className="fine">{requiresScreening?"Le paiement est proposé immédiatement après le questionnaire ; la place n’est acquise qu’une fois le paiement confirmé.":"Le paiement est proposé immédiatement après l’inscription ; la place n’est acquise qu’une fois le paiement confirmé."}</p>
         <ShareButton event={event}/>
       </aside>

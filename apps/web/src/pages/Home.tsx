@@ -29,7 +29,7 @@ const shortDate=(value:string)=>new Intl.DateTimeFormat("fr-FR",{weekday:"long",
 // Carte « prochaine soirée » du premier écran : un vrai événement publié, jamais un exemple
 // inventé (G2) — sans événement, une invitation neutre à revenir.
 function NextEventCard({ event }: { event?: PublicEvent }) {
-  if(!event) return <div className="next-card empty-next"><CalendarDays size={22} aria-hidden="true"/><div><b>Prochaines soirées bientôt annoncées</b><span>Créez votre compte pour être prévenu.</span></div></div>;
+  if(!event) return <div className="next-card empty-next"><CalendarDays size={22} aria-hidden="true"/><div><b>Prochaines soirées bientôt annoncées</b><span>Créez votre compte pour être prévenu(e).</span></div></div>;
   const price=event.priceTiers.length>0?`dès ${money(Math.min(...event.priceTiers.map(t=>t.amountCents)))}`:event.priceCents===0?"Gratuit":money(event.priceCents);
   return <Link to={`/events/${event.slug}`} className="next-card">
     <img src={imgUrl(event.imageUrl)} alt="" width={96} height={96}/>
@@ -39,12 +39,12 @@ function NextEventCard({ event }: { event?: PublicEvent }) {
 }
 
 const FAQ: { q: string; a: string }[] = [
-  { q: "À qui s’adressent les soirées Nour Meet ?", a: "Aux adultes (18 ans et plus) qui cherchent à rencontrer des personnes partageant leurs valeurs, dans un cadre respectueux : pour une relation sérieuse lors des soirées de rencontre, ou pour élargir son réseau lors des soirées networking." },
+  { q: "À qui s’adressent les soirées Nūr Meet ?", a: "Aux adultes (18 ans et plus) qui cherchent à rencontrer des personnes partageant leurs valeurs, dans un cadre respectueux : pour une relation sérieuse lors des soirées de rencontre, ou pour élargir son réseau lors des soirées networking." },
   { q: "Pourquoi un entretien avant les soirées de rencontre ?", a: "Pour que chaque participant vienne avec la même intention. L’entretien est court, se fait une seule fois, et vaut pour toutes les soirées de rencontre suivantes. Les soirées networking, elles, sont en inscription directe." },
   { q: "Que se passe-t-il après la soirée ?", a: "Si vous souhaitez revoir quelqu’un, vous lui envoyez une demande depuis votre espace. L’échange ne s’ouvre que si la personne accepte : personne ne reçoit vos coordonnées sans votre accord." },
-  { q: "Puis-je annuler ma place ?", a: "Oui, gratuitement jusqu’à 24 heures avant le début de la soirée : le remboursement est intégral et automatique. Passé ce délai, ou en cas d’absence, la place n’est pas remboursée. Si l’organisateur annule, vous êtes intégralement remboursé." },
-  { q: "Qui organise les soirées ?", a: "Des restaurants et établissements partenaires, dont le nom figure sur chaque fiche. Nour Meet gère les inscriptions, la sélection, le paiement et le suivi ; le restaurant accueille la soirée. Il ne reçoit que les informations nécessaires à l’accueil, jamais vos coordonnées complètes ni vos réponses au questionnaire de rencontre." },
-  { q: "Comment se passe le paiement ?", a: "En ligne, par carte bancaire, via Stripe. Nour Meet ne conserve jamais vos coordonnées bancaires. Votre place n’est acquise qu’une fois le paiement confirmé ; votre billet avec QR code arrive alors dans votre espace." }
+  { q: "Puis-je annuler ma place ?", a: "Oui, gratuitement jusqu’à 24 heures avant le début de la soirée : le remboursement est intégral et automatique. Passé ce délai, ou en cas d’absence, la place n’est pas remboursée. Si l’organisateur annule, vous êtes intégralement remboursé(e)." },
+  { q: "Qui organise les soirées ?", a: "Des restaurants et établissements partenaires, dont le nom figure sur chaque fiche. Nūr Meet gère les inscriptions, la sélection, le paiement et le suivi ; le restaurant accueille la soirée. Il ne reçoit que les informations nécessaires à l’accueil, jamais vos coordonnées complètes ni vos réponses au questionnaire de rencontre." },
+  { q: "Comment se passe le paiement ?", a: "En ligne, par carte bancaire, via Stripe. Nūr Meet ne conserve jamais vos coordonnées bancaires. Votre place n’est acquise qu’une fois le paiement confirmé ; votre billet avec QR code arrive alors dans votre espace." }
 ];
 
 export function Home() {
@@ -61,7 +61,7 @@ export function Home() {
       <div className="home-hero-inner">
         <div className="home-hero-copy">
           <h1 id="hero-title" className="display">Rencontrer quelqu’un de sérieux, autour d’une vraie table.</h1>
-          <p className="hero-lead">Nour Meet organise à Paris des soirées en petit comité, dans des restaurants partenaires, entre personnes qui partagent vos valeurs. Speed dating sur sélection, networking en accès direct.</p>
+          <p className="hero-lead">Nūr Meet organise à Paris des soirées en petit comité, dans des restaurants partenaires, entre personnes qui partagent vos valeurs. Speed dating sur sélection, networking en accès direct.</p>
           <div className="hero-actions">
             <Link className="button accent" to="/events">Voir les prochaines soirées<ArrowRight size={18} aria-hidden="true"/></Link>
             <a className="button on-night" href="#comment">Comment ça marche</a>
@@ -119,7 +119,7 @@ export function Home() {
       <div className="trust-inner">
         <div className="trust-intro">
           <h2 id="trust-title">Un cadre sérieux, et des règles claires</h2>
-          <p>La confiance ne se décrète pas : voici ce qui est réellement en place sur Nour Meet.</p>
+          <p>La confiance ne se décrète pas : voici ce qui est réellement en place sur Nūr Meet.</p>
           <Picture name="portrait-woman" className="trust-photo" sizes="(max-width: 900px) 60vw, 26vw"/>
         </div>
         <ul className="trust-list">
@@ -142,7 +142,7 @@ export function Home() {
         ?<div className="event-grid" aria-busy="true">{[0,1,2].map(i=><div key={i} className="event-card skeleton-card"><div className="skeleton" style={{aspectRatio:"4 / 3"}}/><div className="event-copy"><div className="skeleton" style={{height:18,width:"50%"}}/><div className="skeleton" style={{height:26,width:"85%"}}/><div className="skeleton" style={{height:18,width:"60%"}}/></div></div>)}</div>
         :events.length>0
           ?<div className="event-grid">{events.slice(0,3).map(e=><EventCard key={e.id} event={e}/>)}</div>
-          :<div className="empty"><CalendarDays size={24} aria-hidden="true"/><h3>Aucune soirée publiée pour le moment</h3><p>Les prochaines dates arrivent bientôt. Créez votre compte pour être prévenu.</p><Link className="button" to="/login">Créer mon compte</Link></div>}
+          :<div className="empty"><CalendarDays size={24} aria-hidden="true"/><h3>Aucune soirée publiée pour le moment</h3><p>Les prochaines dates arrivent bientôt. Créez votre compte pour être prévenu(e).</p><Link className="button" to="/login">Créer mon compte</Link></div>}
     </section>
 
     <section className="section venues" aria-labelledby="lieux">
@@ -153,7 +153,7 @@ export function Home() {
           <p>Chaque soirée se tient dans un établissement parisien partenaire, qui l’accueille et la co-organise. Son nom figure sur la fiche de la soirée avant toute réservation, et vous savez à l’avance ce qui est compris dans le prix.</p>
           <div className="venues-pro">
             <Store size={22} aria-hidden="true"/>
-            <div><b>Vous êtes restaurateur ?</b><span>Accueillez des soirées Nour Meet et faites découvrir votre établissement à de nouveaux clients.</span><Link className="text-link" to="/restaurant">Proposer mon établissement</Link></div>
+            <div><b>Vous êtes restaurateur ?</b><span>Accueillez des soirées Nūr Meet et faites découvrir votre établissement à de nouveaux clients.</span><Link className="text-link" to="/restaurant">Proposer mon établissement</Link></div>
           </div>
         </div>
       </div>

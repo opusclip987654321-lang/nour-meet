@@ -45,13 +45,13 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
       <label>Quartier / ville<input required value={form.district} onChange={e=>setForm({...form,district:e.target.value})}/></label>
       <label>Adresse<input required value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></label>
       <div className="time-row"><label>Capacité totale<input required type="number" min={5} max={500} value={form.capacity} onChange={e=>setForm({...form,capacity:Number(e.target.value)})}/></label><label>Prix (centimes)<input required type="number" min={0} value={form.priceCents} onChange={e=>setForm({...form,priceCents:Number(e.target.value)})}/></label></div>
-      <div className="wide"><small>PRESTATIONS RÉELLEMENT INCLUSES</small><div className="perks-checks">
+      <div className="wide"><small>Prestations réellement incluses</small><div className="perks-checks">
         <label><input type="checkbox" checked={form.includesDrink} onChange={e=>setForm({...form,includesDrink:e.target.checked})}/> Boisson</label>
         <label><input type="checkbox" checked={form.includesStarter} onChange={e=>setForm({...form,includesStarter:e.target.checked})}/> Entrée</label>
         <label><input type="checkbox" checked={form.includesMain} onChange={e=>setForm({...form,includesMain:e.target.checked})}/> Plat</label>
         <label><input type="checkbox" checked={form.includesDessert} onChange={e=>setForm({...form,includesDessert:e.target.checked})}/> Dessert</label>
       </div></div>
-      <label className="wide">Précisions sur les prestations<textarea value={form.perksDescription} onChange={e=>setForm({...form,perksDescription:e.target.value})} placeholder="Ex. : coupe de champagne à l’arrivée, buffet salé…"/></label>
+      <label className="wide">Précisions sur les prestations<textarea value={form.perksDescription} onChange={e=>setForm({...form,perksDescription:e.target.value})} placeholder="Ex. : cocktail sans alcool à l’arrivée, buffet salé…"/></label>
       <div className="time-row"><label>Minimum de participants (facultatif)<input type="number" min={1} value={form.minParticipants} onChange={e=>setForm({...form,minParticipants:e.target.value})}/></label>{form.minParticipants&&<label>Date limite de décision<input required type="datetime-local" value={form.minParticipantsDeadline} onChange={e=>setForm({...form,minParticipantsDeadline:e.target.value})}/></label>}</div>
       <p className="fine wide">Les quotas hommes/femmes (Speed dating), les tarifs différenciés et la galerie photo se règlent après création, depuis « Mes événements ».</p>
       <button className="button" disabled={submitting}>{submitting?"Création…":"Créer la soirée"}</button>
@@ -212,14 +212,14 @@ export function AdminEventPhotos() {
         <div className="time-row"><label>Capacité<input type="number" min={5} value={editForm.capacity} onChange={e=>setEditForm({...editForm,capacity:Number(e.target.value)})}/></label></div>
         <div className="time-row"><label>Début<input type="datetime-local" disabled={ev.status==="PUBLISHED"||ev.status==="FULL"} value={editForm.startsAt} onChange={e=>setEditForm({...editForm,startsAt:e.target.value})}/></label><label>Fin<input type="datetime-local" disabled={ev.status==="PUBLISHED"||ev.status==="FULL"} value={editForm.endsAt} onChange={e=>setEditForm({...editForm,endsAt:e.target.value})}/></label></div>
         {(ev.status==="PUBLISHED"||ev.status==="FULL")&&<p className="fine left">Une soirée publiée ne peut plus être déplacée : annulez-la puis créez-en une nouvelle à la date souhaitée.</p>}
-        <small>PRESTATIONS RÉELLEMENT INCLUSES</small>
+        <small>Prestations réellement incluses</small>
         <div className="perks-checks">
           <label><input type="checkbox" checked={editForm.includesDrink} onChange={e=>setEditForm({...editForm,includesDrink:e.target.checked})}/> Boisson</label>
           <label><input type="checkbox" checked={editForm.includesStarter} onChange={e=>setEditForm({...editForm,includesStarter:e.target.checked})}/> Entrée</label>
           <label><input type="checkbox" checked={editForm.includesMain} onChange={e=>setEditForm({...editForm,includesMain:e.target.checked})}/> Plat</label>
           <label><input type="checkbox" checked={editForm.includesDessert} onChange={e=>setEditForm({...editForm,includesDessert:e.target.checked})}/> Dessert</label>
         </div>
-        <label>Précisions sur les prestations<textarea value={editForm.perksDescription} onChange={e=>setEditForm({...editForm,perksDescription:e.target.value})} placeholder="Ex. : coupe de champagne à l’arrivée, buffet salé…"/></label>
+        <label>Précisions sur les prestations<textarea value={editForm.perksDescription} onChange={e=>setEditForm({...editForm,perksDescription:e.target.value})} placeholder="Ex. : cocktail sans alcool à l’arrivée, buffet salé…"/></label>
         <div className="decision-buttons"><button className="button small" disabled={actingOn===ev.id} onClick={()=>saveEdit(ev.id)}>Enregistrer</button><button className="button small secondary" onClick={()=>setEditFor(null)}>Annuler</button></div>
       </div>:<button className="button small secondary" onClick={()=>openEditor(ev)}>Modifier les informations</button>}
 

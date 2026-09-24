@@ -1,4 +1,4 @@
-import { CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, XCircle, Video } from "lucide-react";
 import jsQR from "jsqr";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
@@ -71,7 +71,7 @@ export function Scanner() {
     <div className="scan-frame">
       {cameraError?<div className="camera-fallback"><span>QR</span><p>{cameraError}</p></div>
       :<video ref={videoRef} muted playsInline/>}
-      {scanning&&<span className="camera-live">● Caméra active</span>}
+      {scanning&&<span className="camera-live"><Video size={14} aria-hidden="true"/>Caméra active</span>}
     </div>
     <canvas ref={canvasRef} style={{display:"none"}}/>
     <form className="manual-fallback" onSubmit={submitManual}><label>Saisie manuelle (secours)<input value={code} onChange={e=>setCode(e.target.value)} placeholder="Code du billet"/></label><button className="button full">Vérifier et valider l’entrée</button></form>

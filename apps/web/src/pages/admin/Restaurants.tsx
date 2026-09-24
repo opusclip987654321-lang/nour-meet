@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../api";
+import { SUBSCRIPTION_STATUS_LABEL } from "../../lib/labels";
 import { Layout } from "../../components/Layout";
 import { Notice } from "../../components/ui";
 import { imgUrl, money } from "../../lib/format";
@@ -61,7 +62,7 @@ export function AdminRestaurants() {
 
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Demandes restaurateurs</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="panel" style={{marginBottom:20}}>
-      <div className="panel-title"><h2>Formules d’abonnement</h2><span>Prix mensuel HT · quota vide = illimité · tarif annuel = mensuel × 12 × 0,8</span></div>
+      <div className="panel-title"><h2>Formules d’abonnement</h2><span>Prix HT · quota vide = illimité · le prix annuel se fixe séparément (2 mois offerts)</span></div>
       <div className="stack">{plans===null&&[0,1].map(i=><div key={i} className="skeleton" style={{height:76}}/>)}{(plans??[]).map(p=><div key={p.id} className="time-row" style={{alignItems:"center"}}>
         <span>{p.name}{!p.active&&" (désactivée)"}</span>
         <label>€/mois<input type="number" min={0} step="1" value={planEdits[p.id]?.monthlyPriceCents??""} onChange={e=>setPlanEdits({...planEdits,[p.id]:{...planEdits[p.id],monthlyPriceCents:e.target.value}})}/></label>
@@ -90,7 +91,7 @@ export function AdminRestaurants() {
         {r.specialConditions&&<p className="fine left">Conditions particulières : {r.specialConditions}</p>}
         {r.photos?.length>0&&<div className="event-photo-grid">{r.photos.map((p:any)=><img key={p.id} src={imgUrl(p.url)} alt="" style={{height:100,borderRadius:8,objectFit:"cover"}}/>)}</div>}
         <small>{RESTAURANT_STATUS_LABEL[r.status]}</small>
-        {r.status==="APPROVED"&&<p className="fine left">Abonnement : {r.subscription?`${r.subscription.plan.name} (${(r.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois) — ${r.subscription.status}`:"aucun"} <button type="button" className="link-button" onClick={()=>{setSubFor(r.id);setSubForm({planId:r.subscription?.planId??plans?.[0]?.id??"",status:r.subscription?.status??"ACTIVE"})}}>modifier</button></p>}
+        {r.status==="APPROVED"&&<p className="fine left">Abonnement : {r.subscription?`${r.subscription.plan.name} (${(r.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois) — ${SUBSCRIPTION_STATUS_LABEL[r.subscription.status]??r.subscription.status}`:"aucun"} <button type="button" className="link-button" onClick={()=>{setSubFor(r.id);setSubForm({planId:r.subscription?.planId??plans?.[0]?.id??"",status:r.subscription?.status??"ACTIVE"})}}>modifier</button></p>}
         {subFor===r.id&&<div className="time-row"><select value={subForm.planId} onChange={e=>setSubForm({...subForm,planId:e.target.value})}>{(plans??[]).map(p=><option key={p.id} value={p.id}>{p.name} ({(p.monthlyPriceCents/100).toFixed(0)} €/mois, {p.monthlyEventQuota==null?"illimité":`${p.monthlyEventQuota} évt.`})</option>)}</select><select value={subForm.status} onChange={e=>setSubForm({...subForm,status:e.target.value})}><option value="TRIALING">Essai</option><option value="ACTIVE">Actif</option><option value="PAST_DUE">Impayé</option><option value="CANCELLED">Résilié</option><option value="INCOMPLETE">Incomplet</option></select><button className="button small" disabled={actingOn===r.id} onClick={()=>saveSubscription(r.id)}>Enregistrer</button></div>}
         <p className="fine left">Notes internes : {r.adminNotes||"—"} <button type="button" className="link-button" onClick={()=>{setNotesFor(r.id);setNotes(r.adminNotes??"")}}>modifier</button></p>
         {notesFor===r.id&&<div className="time-row"><textarea value={notes} onChange={e=>setNotes(e.target.value)}/><button className="button small" disabled={actingOn===r.id} onClick={()=>saveNotes(r.id)}>Enregistrer</button></div>}

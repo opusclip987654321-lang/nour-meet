@@ -17,7 +17,7 @@ export function Concept() {
   return <Layout>
     <section className="page concept-intro">
       <div className="concept-intro-copy">
-        <h1>Comment fonctionne Nour Meet</h1>
+        <h1>Comment fonctionne Nūr Meet</h1>
         <p className="page-lead">Des soirées en petit comité, dans des restaurants partenaires à Paris. Vous choisissez une soirée, vous réservez votre place, l’équipe s’occupe du reste — et après, c’est vous qui décidez qui vous revoyez.</p>
         <div className="hero-actions"><Link className="button" to="/events">Voir les prochaines soirées<ArrowRight size={18} aria-hidden="true"/></Link><Link className="button secondary" to="/login">Créer mon compte</Link></div>
       </div>

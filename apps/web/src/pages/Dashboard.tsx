@@ -134,7 +134,7 @@ function GlobalInterviewPanel() {
 
   if(status===undefined) return <Loading/>;
   return <div className="panel form-grid">
-    <div className="panel-title"><h2>Entretien de validation du profil</h2><span>Obligatoire une fois avant de pouvoir vous inscrire à un événement</span></div>
+    <div className="panel-title"><h2>Entretien de validation du profil</h2><span>Obligatoire une seule fois, avant votre première soirée de rencontre (speed dating)</span></div>
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     {user?.profile?.validatedAt?<Notice kind="success">Votre profil est validé : vous pouvez vous inscrire directement aux événements.</Notice>
     :!status||status.status==null?requestForm
@@ -144,12 +144,12 @@ function GlobalInterviewPanel() {
         : <>{status.notes&&<Notice kind="error">{status.notes}</Notice>}{requestForm}</>
     )
     :status.status==="PENDING_CALL"&&!status.call?<><CallCalendar slots={slots} loading={loadingSlots} onSelect={schedule} schedulingId={schedulingId}/><button type="button" className="button secondary small" disabled={busy} onClick={cancel}>Annuler ma demande</button></>
-    :status.call?<div className="call-scheduled"><span className="eyebrow">Entretien programmé</span><strong>{dateTime(status.call.startsAt)}</strong><p>Nour Meet vous appellera à cette heure, puis vous serez informé(e) de la décision.</p><button type="button" className="button secondary small" disabled={busy} onClick={cancel}>Annuler</button></div>
+    :status.call?<div className="call-scheduled"><span className="eyebrow">Entretien programmé</span><strong>{dateTime(status.call.startsAt)}</strong><p>Nūr Meet vous appellera à cette heure, puis vous serez informé(e) de la décision.</p><button type="button" className="button secondary small" disabled={busy} onClick={cancel}>Annuler</button></div>
     :null}
   </div>;
 }
 
-// Signalement (CGU §8) : une personne rencontrée via Nour Meet — demande de contact envoyée ou
+// Signalement (CGU §8) : une personne rencontrée via Nūr Meet — demande de contact envoyée ou
 // reçue, ou conversation — peut être signalée à l'équipe de modération. Le blocage (activé par
 // défaut) ferme aussi toute conversation commune, dans les deux sens.
 const REPORT_REASONS=["Comportement irrespectueux ou harcèlement","Propos ou contenus déplacés","Faux profil ou usurpation d’identité","Demande d’argent ou arnaque","Comportement inapproprié lors d’une soirée","Autre"];
@@ -180,7 +180,7 @@ function ReportPanel() {
     <p className="fine left wide">La personne n’est pas informée de votre signalement. En cas d’urgence ou de danger, contactez le 17. Vous pouvez aussi écrire à <a className="text-link" href="mailto:contact@nourmeet.com">contact@nourmeet.com</a>.</p>
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     {people===null?<div className="skeleton wide" style={{height:48}}/>:people.length===0
-      ?<p className="wide" style={{margin:0,color:"var(--ink-2)"}}>Vous n’avez encore été en contact avec personne via Nour Meet. Pour un problème survenu lors d’une soirée, écrivez-nous à contact@nourmeet.com.</p>
+      ?<p className="wide" style={{margin:0,color:"var(--ink-2)"}}>Vous n’avez encore été en contact avec personne via Nūr Meet. Pour un problème survenu lors d’une soirée, écrivez-nous à contact@nourmeet.com.</p>
       :<>
         <label>Personne concernée<select value={form.reportedId} onChange={e=>setForm({...form,reportedId:e.target.value})} required><option value="">Choisir…</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
         <label>Motif<select value={form.reason} onChange={e=>setForm({...form,reason:e.target.value})} required><option value="">Choisir…</option>{REPORT_REASONS.map(r=><option key={r}>{r}</option>)}</select></label>

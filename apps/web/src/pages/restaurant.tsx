@@ -82,7 +82,7 @@ function RestaurantApplication() {
     <label>Adresse<input value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></label>
     <label className="wide">Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
     {priceFields(form,setForm)}
-    <p className="fine wide">Le SIRET est déclaratif : Nour ne réalise pas de vérification officielle auprès d’un registre. La galerie de photos se complète après approbation.</p>
+    <p className="fine wide">Le SIRET est déclaratif : Nūr Meet ne réalise pas de vérification officielle auprès d’un registre. La galerie de photos se complète après approbation.</p>
     <button className="button" disabled={submitting}>{submitting?"Envoi…":"Envoyer ma demande"}</button>
   </form>;
 }

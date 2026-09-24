@@ -29,7 +29,7 @@ export function AdminFinance() {
       {summary.nourOwnRevenueCents!=null&&<Stat label="CA propre Nūr (événements en direct)" value={money(summary.nourOwnRevenueCents)}/>}
       {summary.subscriptionMonthlyRevenueCents!=null&&<Stat label="Abonnements restaurateurs (mensuel)" value={`${money(summary.subscriptionMonthlyRevenueCents)} · ${summary.activeSubscriptionsCount} actifs`}/>}
       <Stat label="Volume brut billets restaurateurs" value={money(summary.grossTicketVolumeCents)}/>
-      <Stat label="Commission Nour (héritée 30/70)" value={money(summary.commissionCents)}/>
+      <Stat label="Commission Nūr (héritée 30/70)" value={money(summary.commissionCents)}/>
       <Stat label="Dû au(x) restaurant(s) (modèle 30/70)" value={money(summary.restaurantDueCents)}/>
       <Stat label="Déjà reversé (modèle 30/70)" value={money(summary.paidOutCents)}/>
       <Stat label="Remboursé (modèle 30/70)" value={money(summary.refundedCents)}/>

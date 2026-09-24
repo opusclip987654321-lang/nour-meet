@@ -1039,6 +1039,9 @@
 }
 
 .camera-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   position: absolute;
   bottom: var(--s-3);
   left: 50%;
