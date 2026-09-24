@@ -45,7 +45,9 @@ app.get("/admin/events/:id/reservations", { preHandler: roles(UserRole.ADMIN, Us
   const event = await assertEventAccess(request, id);
   const token = request.user as TokenUser;
   const isAdmin = token.role === UserRole.ADMIN;
-  return prisma.reservation.findMany({ where: { eventId: event.id }, include: { user: { select: isAdmin ? { id: true, displayName: true, phone: true, email: true } : { id: true, displayName: true } }, payment: true, ticket: true }, orderBy: { createdAt: "desc" } });
+  // §6 (corrections web 2026-09-24) : le restaurateur ne voit que le statut du paiement, jamais les
+  // références Stripe ni les champs de remboursement internes à Nūr Meet.
+  return prisma.reservation.findMany({ where: { eventId: event.id }, include: { user: { select: isAdmin ? { id: true, displayName: true, phone: true, email: true } : { id: true, displayName: true } }, payment: isAdmin ? true : { select: { id: true, status: true } }, ticket: true }, orderBy: { createdAt: "desc" } });
 });
 
 app.post("/admin/events/:id/cancel", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {

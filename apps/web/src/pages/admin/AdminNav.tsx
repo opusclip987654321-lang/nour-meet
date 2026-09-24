@@ -31,7 +31,7 @@ export function AdminNav(){
     {to:"/admin/events/new",label:"Créer une soirée",icon:<CalendarPlus size={18}/>,show:manages,end:true},
     {to:"/admin/events",label:"Mes événements",icon:<PartyPopper size={18}/>,show:manages,end:true},
     {to:"/admin/attendees",label:"Participants",icon:<Users size={18}/>,show:manages},
-    {to:"/admin/finance",label:"Finances",icon:<Wallet size={18}/>,show:manages},
+    {to:"/admin/finance",label:"Finances",icon:<Wallet size={18}/>,show:role==="ADMIN"},
     {to:"/admin/staff",label:"Personnel d’accueil",icon:<UsersRound size={18}/>,show:manages},
     {to:"/restaurant?tab=subscription",label:"Abonnement",icon:<CreditCard size={18}/>,show:role==="ORGANIZER",plain:true,active:onRestaurant&&restaurantTab==="subscription"},
     {to:"/restaurant?tab=notifications",label:"Notifications",icon:<Bell size={18}/>,show:role==="ORGANIZER",plain:true,active:onRestaurant&&restaurantTab==="notifications",count:unread},

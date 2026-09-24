@@ -15,7 +15,10 @@ app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
   const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) }, include: { photos: { orderBy: { position: "asc" } }, subscription: { include: { plan: true } }, connectedAccount: true } });
   if (!restaurant) return reply.code(404).send({ error: "Aucune demande restaurateur" });
   const usage = await prisma.restaurantMonthlyUsage.findUnique({ where: { restaurantId_yearMonth: { restaurantId: restaurant.id, yearMonth: currentYearMonth() } } });
-  return { ...restaurant, currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
+  // Jamais les notes internes de l'administration, le taux de commission ni l'auteur de la décision :
+  // informations internes de Nūr Meet (§6.2 des corrections web 2026-09-24).
+  const { adminNotes: _adminNotes, commissionRate: _commissionRate, reviewedBy: _reviewedBy, isDemo: _isDemo, ...visible } = restaurant;
+  return { ...visible, currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
 });
 // §19/§20 : formulaire explicitement cité comme devant être protégé contre un abus automatisé,
 // au même titre que l'authentification et la génération IA.
