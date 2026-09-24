@@ -104,3 +104,21 @@ describe("légende Instagram de l'article du jour", () => {
     expect(sanitizeInstagramCaption("   ")).toBeNull();
   });
 });
+
+describe("retour de la connexion Google vers l'application mobile", () => {
+  it("n'accepte que le schéma de l'application en production, et Expo Go seulement en développement", async () => {
+    const { isAllowedAppRedirect } = await import("./services/app-redirect.js");
+    expect(isAllowedAppRedirect("nourmeet://auth", true)).toBe(true);
+    expect(isAllowedAppRedirect("exp://192.168.1.10:8081/--/auth", true)).toBe(false);
+    expect(isAllowedAppRedirect("exp://192.168.1.10:8081/--/auth", false)).toBe(true);
+    expect(isAllowedAppRedirect("https://pirate.example/vol", false)).toBe(false);
+    expect(isAllowedAppRedirect("nourmeet://auth?next=https://pirate.example", true)).toBe(false);
+  });
+  it("vérifie le secret PKCE (S256, empreinte calculée indépendamment)", async () => {
+    const { pkceChallenge, PKCE_CHALLENGE, PKCE_VERIFIER } = await import("./services/app-redirect.js");
+    const verifier = "a".repeat(43);
+    expect(pkceChallenge(verifier)).toBe("ZtNPunH49FD35FWYhT5Tv8I7vRKQJ8uxMaL0_9eHjNA");
+    expect(PKCE_VERIFIER.test(verifier)).toBe(true);
+    expect(PKCE_CHALLENGE.test(pkceChallenge(verifier))).toBe(true);
+  });
+});

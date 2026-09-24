@@ -1,15 +1,60 @@
-import { Platform, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 
-export const C={bg:"#0B0B0C",panel:"#171718",line:"#34322E",gold:"#C9A765",cream:"#F6F0E5",muted:"#918C82",green:"#62D89A",red:"#F0747C"};
+// Design system de l'application, aligné sur le site (apps/web/DESIGN.md et src/styles/tokens.css) :
+// bleu nuit + safran sur fond clair, Bricolage Grotesque pour les titres, Hanken Grotesk pour le
+// texte. Toujours un jeton, jamais une couleur ou une taille en dur dans un écran.
+export const T = {
+  night: "#1c2653", night2: "#2a3670", night3: "#121a3d",
+  saffron: "#f2a33a", saffron2: "#f7b85c", saffronInk: "#8a4b00", saffronSoft: "#fdf1de",
+  canvas: "#f6f6f8", surface: "#ffffff", surface2: "#eff0f3",
+  ink: "#15171c", ink2: "#474c58", ink3: "#687080",
+  line: "#e1e3e8", lineStrong: "#c9cdd5",
+  onNight: "#ffffff", onNight2: "#c8cde4", onNightLine: "#3a4579",
+  success: "#1d7a4c", successBg: "#e7f4ec", warning: "#9a5b00", warningBg: "#fff3dd", danger: "#b3261e", dangerBg: "#fce9e7", infoBg: "#eaedf7",
+  rencontre: "#b0406a", rencontreBg: "#fbeaf0", networking: "#1f6f8b", networkingBg: "#e6f2f6",
+  chart: "#4a5bb0"
+};
 
-export const s=StyleSheet.create({
-  safe:{flex:1,backgroundColor:C.bg},app:{flex:1,paddingBottom:74},center:{alignItems:"center",justifyContent:"center"},content:{padding:20,paddingBottom:40},logo:{flexDirection:"row",alignItems:"center",gap:10},logoMark:{width:38,height:38,borderRadius:19,borderWidth:1,borderColor:C.gold,alignItems:"center",justifyContent:"center"},logoN:{color:C.gold,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:22},logoText:{color:C.cream,fontWeight:"700",letterSpacing:2},login:{flex:1,padding:26,justifyContent:"space-between"},loginHero:{marginTop:70},eyebrow:{color:C.gold,fontWeight:"800",fontSize:10,letterSpacing:1.2},loginTitle:{color:C.cream,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:39,lineHeight:44,marginTop:14},paragraph:{color:C.muted,fontSize:15,lineHeight:23},label:{color:C.muted,fontWeight:"700",fontSize:10,letterSpacing:1,marginTop:15,marginBottom:7},input:{backgroundColor:"#121213",borderWidth:1,borderColor:C.line,borderRadius:8,color:C.cream,paddingHorizontal:15,height:52},otp:{fontSize:25,letterSpacing:9,textAlign:"center"},button:{minHeight:50,backgroundColor:C.gold,borderRadius:8,alignItems:"center",justifyContent:"center",paddingHorizontal:17,marginVertical:6},buttonSecondary:{backgroundColor:C.panel,borderWidth:1,borderColor:C.line},buttonText:{color:"#111",fontWeight:"900"},notice:{borderLeftWidth:3,borderLeftColor:C.green,backgroundColor:C.panel,padding:13,borderRadius:6,marginVertical:9},noticeText:{color:C.cream,fontSize:13},demo:{backgroundColor:C.panel,borderWidth:1,borderColor:C.line,borderRadius:8,padding:14,marginTop:12,gap:4},demoTitle:{color:C.gold,fontWeight:"800",fontSize:10},meta:{color:C.muted,fontSize:12},titleRow:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-end",marginBottom:18},screenTitle:{color:C.cream,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:30,marginTop:4},hello:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start",marginTop:10},homeTitle:{color:C.cream,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:30,lineHeight:35,marginTop:9},avatar:{backgroundColor:"#A37D40",alignItems:"center",justifyContent:"center"},avatarText:{color:"#111",fontWeight:"900"},verifiedBadge:{position:"absolute",bottom:-2,right:-2,backgroundColor:C.green,borderRadius:9,width:18,height:18,alignItems:"center",justifyContent:"center",borderWidth:2,borderColor:C.bg},verifiedBadgeText:{color:"#111",fontWeight:"900",fontSize:10},ticketMini:{backgroundColor:"#251C10",borderColor:"#705833",borderWidth:1,borderRadius:11,padding:17,marginVertical:25,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},ticketTitle:{color:C.cream,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:20,marginVertical:6},miniQr:{width:80,height:80,borderRadius:5},link:{color:C.gold,fontSize:13,fontWeight:"700"},eventCard:{backgroundColor:C.panel,borderColor:C.line,borderWidth:1,borderRadius:11,overflow:"hidden",flexDirection:"row",minHeight:145,marginBottom:13},eventArt:{width:125,backgroundColor:"#392B18",alignItems:"center",justifyContent:"center"},eventDay:{color:C.cream,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:38},eventMonth:{color:C.gold,fontWeight:"800",fontSize:10},eventCopy:{flex:1,padding:15},eventTitle:{color:C.cream,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:18,marginVertical:8},price:{color:C.cream,fontWeight:"800",marginTop:10},chips:{flexDirection:"row",flexWrap:"wrap",gap:8,marginVertical:10},chip:{color:C.cream,backgroundColor:"#232325",paddingHorizontal:12,paddingVertical:8,borderRadius:18,fontSize:11},chipGold:{color:C.gold,backgroundColor:"#302719",paddingHorizontal:12,paddingVertical:8,borderRadius:18,fontSize:11,fontWeight:"800"},search:{backgroundColor:C.panel,borderColor:C.line,borderWidth:1,borderRadius:8,color:C.cream,padding:13,marginBottom:18},back:{color:C.cream,fontSize:17,marginVertical:14},detailArt:{height:300,backgroundColor:"#3A2B18",borderColor:"#745B35",borderWidth:1,borderRadius:13,justifyContent:"flex-end",padding:24},detailTitle:{color:C.cream,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:37,marginTop:10},detailFacts:{flexDirection:"row",gap:30,borderBottomColor:C.line,borderBottomWidth:1,paddingVertical:22},bodyStrong:{color:C.cream,fontWeight:"700",fontSize:14},sectionTitle:{color:C.cream,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:22,marginTop:22,marginBottom:8},bookingBar:{backgroundColor:C.panel,borderColor:C.line,borderWidth:1,borderRadius:10,padding:13,flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginTop:25},bookingPrice:{color:C.cream,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:22},cameraWrap:{height:480,borderRadius:14,overflow:"hidden",marginBottom:15},scanGuide:{position:"absolute",width:240,height:240,borderWidth:3,borderColor:C.gold,top:120,left:"50%",marginLeft:-120},scanPlaceholder:{height:380,backgroundColor:C.panel,borderWidth:1,borderColor:C.line,borderRadius:12,alignItems:"center",justifyContent:"center",marginBottom:15},scanIcon:{color:C.gold,fontSize:70},profilePreview:{alignItems:"center",paddingVertical:25},profileName:{color:C.cream,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:30,marginTop:12},validated:{color:C.green,fontWeight:"800",fontSize:9,letterSpacing:1,marginTop:7},tabs:{flexDirection:"row",gap:28,borderBottomWidth:1,borderBottomColor:C.line,marginBottom:5},tabActive:{color:C.cream,borderBottomWidth:2,borderBottomColor:C.gold,paddingVertical:12,fontWeight:"700"},tabText:{color:C.muted,paddingVertical:12},conversation:{flexDirection:"row",alignItems:"center",gap:12,paddingVertical:14,borderBottomWidth:1,borderBottomColor:C.line},chatHead:{height:76,flexDirection:"row",alignItems:"center",gap:12,paddingHorizontal:16,borderBottomWidth:1,borderBottomColor:C.line},chatBody:{padding:16,gap:9},bubble:{alignSelf:"flex-start",maxWidth:"80%",backgroundColor:"#242426",padding:12,borderRadius:13},bubbleMine:{alignSelf:"flex-end",backgroundColor:"#5A4729"},bubbleText:{color:C.cream,fontSize:14,lineHeight:20},bubbleTime:{color:"#AAA",fontSize:8,textAlign:"right",marginTop:5},chatInput:{flexDirection:"row",alignItems:"center",padding:10,borderTopWidth:1,borderTopColor:C.line,gap:10},chatText:{flex:1,backgroundColor:"#242426",color:C.cream,borderRadius:22,paddingHorizontal:15,height:44},send:{color:C.gold,fontWeight:"800"},profileStats:{backgroundColor:C.panel,borderColor:C.line,borderWidth:1,borderRadius:9,flexDirection:"row",justifyContent:"space-around",padding:16},statValue:{color:C.gold,fontFamily:Platform.OS==="ios"?"Georgia":"serif",fontSize:23,textAlign:"center"},personalQr:{backgroundColor:"#F3EBDD",borderRadius:13,padding:20,alignItems:"center",marginTop:20},qr:{width:210,height:210,margin:18},qrCode:{color:"#111",fontWeight:"800",fontFamily:Platform.OS==="ios"?"Menlo":"monospace"},tabBar:{height:78,position:"absolute",bottom:0,left:0,right:0,backgroundColor:"#111113",borderTopWidth:1,borderTopColor:C.line,flexDirection:"row",paddingBottom:8},tabItem:{flex:1,alignItems:"center",justifyContent:"center",gap:4},scanTab:{backgroundColor:C.gold,borderRadius:30,width:56,height:56,flex:0,marginHorizontal:9,marginTop:-14},tabIcon:{color:C.muted,fontSize:22},tabLabel:{color:C.muted,fontSize:8},
-  categoryChip:{flexDirection:"row",alignItems:"center",gap:6},categoryDot:{width:8,height:8,borderRadius:4},categoryChipText:{fontSize:11,fontWeight:"800",letterSpacing:.5,textTransform:"uppercase"},
-  espaceTabs:{flexGrow:0,marginBottom:16,marginTop:6},
-  choiceChip:{borderWidth:1,borderColor:C.line,borderRadius:18,paddingHorizontal:16,paddingVertical:9,backgroundColor:C.panel},choiceChipActive:{backgroundColor:C.gold,borderColor:C.gold},choiceChipText:{color:C.cream,fontSize:12,fontWeight:"700"},
-  reservationCard:{backgroundColor:C.panel,borderColor:C.line,borderWidth:1,borderRadius:11,padding:16,marginBottom:14,gap:4},
-  ticketCard:{backgroundColor:"#251C10",borderColor:"#705833",borderWidth:1,borderRadius:13,padding:20,marginBottom:16,alignItems:"center"},
-  ticketCode:{color:C.gold,fontWeight:"800",fontFamily:Platform.OS==="ios"?"Menlo":"monospace",marginTop:4},
-  altOffer:{backgroundColor:"#171310",borderColor:"#5A482F",borderWidth:1,borderRadius:9,padding:14,marginVertical:10},
-  notification:{backgroundColor:C.panel,borderColor:C.line,borderWidth:1,borderRadius:9,padding:14,marginBottom:10},notificationUnread:{borderColor:C.gold}
+export const F = {
+  display: "BricolageGrotesque_700Bold", displaySemi: "BricolageGrotesque_600SemiBold",
+  text: "HankenGrotesk_400Regular", textMedium: "HankenGrotesk_500Medium", textSemi: "HankenGrotesk_600SemiBold", textBold: "HankenGrotesk_700Bold"
+};
+
+export const S = { 1: 4, 2: 8, 3: 12, 4: 16, 5: 24, 6: 32, 7: 48 } as const;
+export const R = { sm: 8, md: 14, lg: 22, pill: 999 } as const;
+const shadow = { shadowColor: "#1c2653", shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 3 };
+
+export const s = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: T.canvas },
+  center: { alignItems: "center", justifyContent: "center" },
+  content: { padding: S[5], paddingBottom: 120, gap: S[4] },
+  row: { flexDirection: "row", alignItems: "center", gap: S[2] },
+  // Typographie
+  display: { fontFamily: F.display, fontSize: 34, lineHeight: 38, color: T.ink, letterSpacing: -0.6 },
+  h1: { fontFamily: F.display, fontSize: 28, lineHeight: 33, color: T.ink, letterSpacing: -0.4 },
+  h2: { fontFamily: F.display, fontSize: 22, lineHeight: 27, color: T.ink },
+  h3: { fontFamily: F.displaySemi, fontSize: 18, lineHeight: 23, color: T.ink },
+  body: { fontFamily: F.text, fontSize: 16, lineHeight: 24, color: T.ink2 },
+  bodyStrong: { fontFamily: F.textSemi, fontSize: 16, lineHeight: 22, color: T.ink },
+  small: { fontFamily: F.text, fontSize: 14, lineHeight: 20, color: T.ink2 },
+  meta: { fontFamily: F.text, fontSize: 13, lineHeight: 18, color: T.ink3 },
+  label: { fontFamily: F.textSemi, fontSize: 13, color: T.ink, marginBottom: S[1] },
+  link: { fontFamily: F.textSemi, fontSize: 15, color: T.saffronInk },
+  // Surfaces
+  card: { backgroundColor: T.surface, borderRadius: R.md, borderWidth: 1, borderColor: T.line, padding: S[4], gap: S[2], ...shadow, shadowOpacity: 0.05 },
+  panel: { backgroundColor: T.surface, borderRadius: R.md, borderWidth: 1, borderColor: T.line, padding: S[5], gap: S[3] },
+  nightPanel: { backgroundColor: T.night, borderRadius: R.lg, padding: S[5], gap: S[3], ...shadow },
+  // Champs
+  input: { minHeight: 50, borderWidth: 1, borderColor: T.lineStrong, borderRadius: R.sm, backgroundColor: T.surface, paddingHorizontal: S[4], fontFamily: F.text, fontSize: 16, color: T.ink },
+  otp: { fontFamily: F.textSemi, fontSize: 24, letterSpacing: 8, textAlign: "center" },
+  // En-tête et barre d'onglets
+  header: { height: 60, paddingHorizontal: S[5], flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: T.surface, borderBottomWidth: 1, borderBottomColor: T.line },
+  tabBar: { position: "absolute", left: 0, right: 0, bottom: 0, flexDirection: "row", backgroundColor: T.surface, borderTopWidth: 1, borderTopColor: T.line, paddingBottom: 18, paddingTop: 8 },
+  tabItem: { flex: 1, alignItems: "center", gap: 3, minHeight: 48, justifyContent: "center" },
+  tabLabel: { fontFamily: F.textSemi, fontSize: 11, color: T.ink3 },
+  // Divers
+  chip: { minHeight: 40, paddingHorizontal: S[4], borderRadius: R.pill, borderWidth: 1, borderColor: T.line, backgroundColor: T.surface, alignItems: "center", justifyContent: "center" },
+  chipActive: { backgroundColor: T.night, borderColor: T.night },
+  chipText: { fontFamily: F.textSemi, fontSize: 14, color: T.ink2 },
+  divider: { height: 1, backgroundColor: T.line, marginVertical: S[2] }
 });
