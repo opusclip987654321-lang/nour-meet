@@ -21,7 +21,7 @@ export const renderInline = (text: string): ReactNode[] => text.split(/(\[[^\]]+
 // disponibles en tableau pour les lecteurs d'écran.
 function ArticleBarChart({ chart }: { chart: ArticleChart }) {
   const max = Math.max(...chart.data.map(d => d.value), 0) || 1;
-  const format = (v: number) => `${v.toLocaleString("fr-FR")}${chart.unit ? ` ${chart.unit}` : ""}`;
+  const format = (v: number) => `${v.toLocaleString("fr-FR")}${chart.unit ? `\u202f${chart.unit}` : ""}`;
   return <figure className="article-chart">
     <figcaption>{chart.title}</figcaption>
     <div className="article-chart-rows" role="img" aria-label={`${chart.title} : ${chart.data.map(d => `${d.label} ${format(d.value)}`).join(", ")}`}>

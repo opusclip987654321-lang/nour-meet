@@ -1,5 +1,5 @@
 import { ARTICLE_PHOTOS, ArticleBlock, INLINE_LINK, isAllowedInternalPath, parseArticleContent, serializeArticleBlocks } from "@nour/shared";
-import type { AIProvider, GeneratedArticle } from "../ai-provider.js";
+import type { GeneratedArticle } from "../ai-provider.js";
 
 // Contrôle automatique des articles générés (corrections web 2026-09-24, §3.3/§3.4). Fonctions pures,
 // sans accès à la base : testées unitairement (blog-content.test.ts).
