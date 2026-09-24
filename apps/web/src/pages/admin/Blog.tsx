@@ -1,5 +1,5 @@
 import { Inbox } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../api";
 import { Layout } from "../../components/Layout";
@@ -21,8 +21,8 @@ export function AdminBlog() {
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [queue,setQueue]=useState<{count:number;next:{title:string;category:string}[]}|null>(null);
   const navigate=useNavigate();
-  const load=()=>api<any[]>(`/admin/articles${status?`?status=${status}`:""}`).then(setItems);
-  useEffect(()=>{load();api<{count:number;next:{title:string;category:string}[]}>("/admin/articles/queue").then(setQueue).catch(()=>{})},[status]);
+  const load=useCallback(()=>api<any[]>(`/admin/articles${status?`?status=${status}`:""}`).then(setItems),[status]);
+  useEffect(()=>{load();api<{count:number;next:{title:string;category:string}[]}>("/admin/articles/queue").then(setQueue).catch(()=>{})},[load]);
   const slugify=(t:string)=>t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
 
   const generate=async(e:FormEvent)=>{
@@ -77,8 +77,8 @@ export function AdminArticleEditor() {
   const [scheduleAt,setScheduleAt]=useState("");
   const [rejectNote,setRejectNote]=useState("");
 
-  const load=()=>api<any>(`/admin/articles/${id}`).then(a=>{setArticle(a);setForm({title:a.title,slug:a.slug,excerpt:a.excerpt??"",content:a.content,category:a.category,keywords:(a.keywords??[]).join(", "),metaTitle:a.metaTitle??"",metaDescription:a.metaDescription??""})});
-  useEffect(()=>{load()},[id]);
+  const load=useCallback(()=>api<any>(`/admin/articles/${id}`).then(a=>{setArticle(a);setForm({title:a.title,slug:a.slug,excerpt:a.excerpt??"",content:a.content,category:a.category,keywords:(a.keywords??[]).join(", "),metaTitle:a.metaTitle??"",metaDescription:a.metaDescription??""})}),[id]);
+  useEffect(()=>{load()},[load]);
 
   const save=async(e:FormEvent)=>{
     e.preventDefault();setBusy("save");setNotice(null);

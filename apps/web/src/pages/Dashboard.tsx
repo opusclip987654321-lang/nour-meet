@@ -105,12 +105,13 @@ function GlobalInterviewPanel() {
   const load=()=>api<any>("/me/global-interview").then(setStatus).catch(()=>setStatus(null));
   useEffect(()=>{load()},[]);
 
+  const needsSlots=!!status&&status.status==="PENDING_CALL"&&!status.call;
   useEffect(()=>{
-    if(!status||status.status!=="PENDING_CALL"||status.call){setSlots([]);return}
+    if(!needsSlots){setSlots([]);return}
     let ignore=false; setLoadingSlots(true);
     api<any[]>("/interview-slots").then(s=>!ignore&&setSlots(s)).catch(()=>!ignore&&setSlots([])).finally(()=>!ignore&&setLoadingSlots(false));
     return ()=>{ignore=true};
-  },[status?.status,status?.call]);
+  },[needsSlots]);
 
   const request=async(e:FormEvent)=>{
     e.preventDefault();setBusy(true);setNotice(null);

@@ -44,7 +44,7 @@ export function Notice({ kind = "info", children }: { kind?: "info" | "success" 
 export function Field({ label, hint, ...props }: TextInputProps & { label: string; hint?: string }) {
   return <View style={{ gap: S[1] }}>
     <Text style={s.label}>{label}</Text>
-    <TextInput placeholderTextColor={T.ink3} {...props} style={[s.input, props.multiline && { minHeight: 96, paddingTop: S[3], textAlignVertical: "top" }, props.style]} />
+    <TextInput placeholderTextColor={T.ink3} accessibilityLabel={label} {...props} style={[s.input, props.multiline && { minHeight: 96, paddingTop: S[3], textAlignVertical: "top" }, props.style]} />
     {hint && <Text style={s.meta}>{hint}</Text>}
   </View>;
 }

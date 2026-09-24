@@ -1,4 +1,5 @@
 import { app, emailProvider, prisma } from "../context.js";
+import { sendPushSafely } from "./push.js";
 
 // SMS hors connexion (Twilio Verify n'est utilisé que pour le code de connexion) : reste simulé
 // pour l'instant, jamais présenté comme envoyé. L'e-mail est réellement envoyé via Resend dès que
@@ -10,6 +11,8 @@ export const notify = async (userId: string, title: string, body: string, linkPa
   // rien à envoyer vers le numéro/e-mail de substitution posé par la suppression RGPD.
   if (user.deletedAt) return;
   await prisma.notification.create({ data: { userId, title, body, linkPath } });
+  // Compte suspendu : la notification reste consultable, mais rien n'est poussé vers ses appareils.
+  if (!user.suspendedAt) sendPushSafely(userId, linkPath);
   if (user.phone) await prisma.outboxMessage.create({ data: { channel: "SMS", recipient: user.phone, body: `${title} — ${body}` } });
   if (user.email) {
     const outboxEmail = await prisma.outboxMessage.create({ data: { channel: "EMAIL", recipient: user.email, subject: title, body } });

@@ -140,6 +140,7 @@ model User {
   articles         Article[]
   legalAcceptances LegalAcceptance[]
   authIdentities   AuthIdentity[]
+  pushTokens       PushToken[]
 }
 
 // Compte externe relié (Google) : identifiant stable du fournisseur (« sub »), jamais l'adresse e-mail
@@ -967,4 +968,18 @@ model LoginHandoff {
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
+}
+
+// Notifications push de l'application mobile (2026-09-24) : un jeton Expo par appareil. Un même
+// appareil passant d'un compte à l'autre est réattribué (token unique) ; supprimé à la déconnexion,
+// à l'anonymisation du compte, ou quand Expo signale que l'application a été désinstallée.
+model PushToken {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token      String   @unique
+  platform   String
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  @@index([userId])
 }

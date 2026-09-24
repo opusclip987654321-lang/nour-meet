@@ -12,6 +12,12 @@ if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
 const prisma = new PrismaClient();
 try {
   const user = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" }, deletedAt: null } });
+  // Seule une adresse vérifiée (code reçu ou Google) identifie la personne : une adresse simplement
+  // saisie dans un profil ne prouve rien.
+  if (user && !user.emailVerifiedAt) {
+    console.error(`L’adresse ${email} n’a jamais été vérifiée sur ce compte. Connectez-vous d’abord avec Google ou un code reçu par e-mail.`);
+    process.exit(1);
+  }
   if (!user) {
     console.error(`Aucun compte actif avec l’e-mail ${email}. Connectez-vous d’abord une fois sur le site avec cette adresse.`);
     process.exit(1);

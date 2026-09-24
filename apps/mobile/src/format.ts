@@ -22,3 +22,14 @@ export const relativeTime = (value: string, now = Date.now()) => {
   if (days < 7) return `il y a ${days} j`;
   return new Date(value).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 };
+
+// Billets gardés hors connexion : une soirée reste utile jusqu'au lendemain de son début (retard,
+// soirée qui se prolonge), ensuite la copie locale n'a plus de raison d'être.
+export const ticketsStillUseful = <T extends { reservation?: { event?: { startsAt?: string } } }>(tickets: T[], now = Date.now()) =>
+  tickets.filter(t => new Date(t.reservation?.event?.startsAt ?? 0).getTime() > now - 24 * 3600_000);
+
+// Saisie des prix en euros (virgule ou point) côté restaurateur ; l'API reste en centimes.
+export const eurosToCents = (value: string) => { const n = Number(value.replace(",", ".").replace(/\s/g, "")); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null; };
+export const centsToEuros = (cents: number) => (cents / 100).toFixed(2).replace(".", ",").replace(",00", "");
+// Adresse de la page d'une soirée, dérivée du titre (même règle que le site).
+export const slugify = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");

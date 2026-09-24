@@ -6,13 +6,16 @@ import { HankenGrotesk_500Medium } from "@expo-google-fonts/hanken-grotesk/500Me
 import { HankenGrotesk_600SemiBold } from "@expo-google-fonts/hanken-grotesk/600SemiBold";
 import { HankenGrotesk_700Bold } from "@expo-google-fonts/hanken-grotesk/700Bold";
 import { useFonts } from "expo-font";
+import * as PushNotifications from "expo-notifications";
 import { StatusBar } from "expo-status-bar";
 import { Bell, CalendarDays, Home as HomeIcon, MessageCircle, QrCode, Store, UserRound } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, AppState, BackHandler, Pressable, SafeAreaView, Text, View } from "react-native";
+import { ActivityIndicator, AppState, BackHandler, Platform, Pressable, SafeAreaView, Text, View } from "react-native";
 import { api, getToken, setToken, type ApiError } from "./src/api";
 import { Logo, openWeb } from "./src/components/ui";
 import { Navigate, Route, routeFromPath } from "./src/links";
+import { linkPathOf, registerForPush, unregisterPush } from "./src/push";
+import { cachedSessionUser, clearTicketCache, saveSessionUser } from "./src/ticket-cache";
 import { Blog } from "./src/screens/Blog";
 import { Espace } from "./src/screens/Espace";
 import { Events } from "./src/screens/Events";
@@ -46,11 +49,14 @@ export default function App() {
       // Session glissante : jeton neuf de 90 jours renvoyé au plus une fois par jour.
       if (me.refreshedToken) await setToken(me.refreshedToken);
       setUser(me);
+      saveSessionUser(me);
     } catch (err) {
       // Seul un refus réel de l'API efface la session : une coupure réseau ne déconnecte jamais
       // (sinon chaque incident obligerait à redemander un code).
       const status = (err as ApiError).status;
-      if (status === 401 || status === 403) { await setToken(null); setUser(null); }
+      if (status === 401 || status === 403) { await setToken(null); await clearTicketCache(); setUser(null); }
+      // Hors connexion : l'application s'ouvre quand même (billets enregistrés, cloche indisponible).
+      else if ((err as ApiError).network) { const cached = await cachedSessionUser(); setUser((current: any) => current ?? cached); }
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -70,9 +76,21 @@ export default function App() {
   }, []);
   const goBack = useCallback(() => { setHistory(h => h.length > 1 ? h.slice(0, -1) : h); return history.length > 1; }, [history.length]);
   const goTab = (next: Route) => setHistory([next]);
-  useEffect(() => { const sub = BackHandler.addEventListener("hardwareBackPress", goBack); return () => sub.remove(); }, [goBack]);
+  useEffect(() => { if (Platform.OS === "web") return; const sub = BackHandler.addEventListener("hardwareBackPress", goBack); return () => sub.remove(); }, [goBack]);
 
-  const logout = async () => { await setToken(null); setUser(null); setForceRestaurantSpace(false); setHistory([{ name: "home" }]); };
+  // Notification push touchée : ouvre l'objet concerné, y compris au démarrage de l'application
+  // (le lien attend alors que la session soit chargée).
+  const [pendingLink, setPendingLink] = useState<string | null>(null);
+  useEffect(() => {
+    PushNotifications.getLastNotificationResponseAsync().then(r => setPendingLink(linkPathOf(r))).catch(() => {});
+    const tapped = PushNotifications.addNotificationResponseReceivedListener(r => setPendingLink(linkPathOf(r)));
+    const received = PushNotifications.addNotificationReceivedListener(() => refreshUnread());
+    return () => { tapped.remove(); received.remove(); };
+  }, [refreshUnread]);
+  useEffect(() => { if (user && pendingLink) { navigate(pendingLink); setPendingLink(null); refreshUnread(); } }, [user, pendingLink, navigate, refreshUnread]);
+  useEffect(() => { if (user?.id) registerForPush().catch(() => { /* notifications facultatives */ }); }, [user?.id]);
+
+  const logout = async () => { await unregisterPush().catch(() => { /* retiré à la prochaine connexion */ }); await setToken(null); await clearTicketCache(); setUser(null); setForceRestaurantSpace(false); setHistory([{ name: "home" }]); };
 
   if (!fontsLoaded || loading) return <SafeAreaView style={[s.safe, s.center]}><ActivityIndicator color={T.night} /></SafeAreaView>;
   if (!user) return <Login onLogin={opts => { if (opts?.restaurateur) { setForceRestaurantSpace(true); setHistory([{ name: "restaurant", tab: "establishment" }]); } load(); }} />;
@@ -97,7 +115,7 @@ export default function App() {
       case "scan": return <Scanner />;
       case "messages": return <Messages user={user} />;
       case "notifications": return <Notifications user={user} navigate={navigate} onChanged={refreshUnread} />;
-      case "restaurant": return <RestaurantSpace key={route.tab} tab={route.tab} navigate={navigate} onLogout={logout} />;
+      case "restaurant": return <RestaurantSpace key={`${route.tab}|${route.focus ?? ""}`} tab={route.tab} focus={route.focus} navigate={navigate} onLogout={logout} />;
       case "espace": return isRestaurant ? <RestaurantSpace tab="establishment" navigate={navigate} onLogout={logout} /> : <Espace key={`${route.tab}|${route.focus ?? ""}`} user={user} tab={route.tab} focus={route.focus} navigate={navigate} onUserChanged={load} onLogout={logout} />;
       default: return null;
     }

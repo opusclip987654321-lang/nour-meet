@@ -39,6 +39,20 @@ app.post("/auth/verify-otp", { config: { rateLimit: { max: smsVerification.mode 
 
 // Connexion par e-mail (2026-09-24) : code à usage unique de 6 chiffres, valable 10 minutes. Quasi
 // gratuit (Resend), contrairement au SMS. Crée le compte à la première connexion.
+// Compte existant pour une adresse dont la personne vient de prouver qu'elle la possède (code reçu
+// ou Google). Une adresse seulement SAISIE dans un profil (jamais vérifiée) ne rattache jamais la
+// connexion à ce compte : sinon n'importe qui pourrait inscrire l'adresse d'un autre dans son propre
+// profil et récupérer ensuite sa connexion. L'adresse est alors retirée de ce compte, et la personne
+// qui l'a réellement prouvée obtient son propre compte.
+const verifiedAccountFor = async (email: string) => {
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) return null;
+  if (user.emailVerifiedAt) return user;
+  await prisma.user.update({ where: { id: user.id }, data: { email: null } });
+  await audit(user.id, "DETACH_UNVERIFIED_EMAIL", "User", user.id);
+  return null;
+};
+
 app.post("/auth/email/request-code", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 5, timeWindow: "10 minutes" } } }, async (request) => {
   const { email } = z.object({ email: z.string().email().max(200) }).parse(request.body);
   const result = await sendEmailLoginCode(email);
@@ -48,10 +62,9 @@ app.post("/auth/email/verify", { config: { rateLimit: { max: smsVerification.mod
   const input = z.object({ email: z.string().email().max(200), code: z.string().regex(/^\d{6}$/), displayName: z.string().min(2).max(80).optional() }).parse(request.body);
   if (!await checkEmailLoginCode(input.email, input.code)) return reply.code(401).send({ error: "Code incorrect ou expiré" });
   const email = normalizeEmail(input.email);
-  let user = await prisma.user.findUnique({ where: { email } });
+  let user = await verifiedAccountFor(email);
   let isNewUser = false;
   if (!user) { user = await prisma.user.create({ data: { email, emailVerifiedAt: new Date(), displayName: input.displayName ?? "Nouveau membre", profile: { create: { interests: [] } } } }); isNewUser = true; }
-  else if (!user.emailVerifiedAt) await prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
   await audit(user.id, "LOGIN_EMAIL", "User", user.id);
   return loginResponse(user.id, isNewUser);
 });
@@ -65,7 +78,7 @@ app.post("/auth/google", { config: { rateLimit: { max: smsVerification.mode === 
   let userId = identity?.userId;
   let isNewUser = false;
   if (!userId) {
-    const existing = google.email && google.emailVerified ? await prisma.user.findUnique({ where: { email: google.email } }) : null;
+    const existing = google.email && google.emailVerified ? await verifiedAccountFor(google.email) : null;
     if (existing) userId = existing.id;
     else {
       const created = await prisma.user.create({ data: { email: google.email && google.emailVerified ? google.email : null, emailVerifiedAt: google.emailVerified ? new Date() : null, displayName: google.name?.slice(0, 80) || "Nouveau membre", profile: { create: { interests: [] } } } });

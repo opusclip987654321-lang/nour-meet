@@ -1,20 +1,21 @@
 import * as ImagePicker from "expo-image-picker";
 import * as WebBrowser from "expo-web-browser";
-import { CalendarClock, Check, ExternalLink, LogOut, Minus } from "lucide-react-native";
+import { CalendarClock, Check, LogOut, Minus } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Image, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { api } from "../api";
-import { Badge, Button, Chip, Field, Loading, Notice, Skeleton, openWeb } from "../components/ui";
+import { Badge, Button, Chip, Field, Loading, Notice, Skeleton } from "../components/ui";
 import { imgUrl, longDate, money } from "../format";
 import { SUBSCRIPTION_STATUS_LABEL } from "../labels";
-import { Navigate } from "../links";
+import { Navigate, RestaurantTab } from "../links";
 import { F, R, S, T, s } from "../theme";
+import { RestaurantEvents } from "./RestaurantEvents";
 import { TicketScanner } from "./Scanner";
 
 // Espace restaurateur, même organisation que /restaurant sur le site : candidature, fiche et galerie
 // une fois approuvé, onglet Abonnement (cartes de formules). Aucune donnée financière ni remboursement
 // ici (corrections web 2026-09-24, §6) ; la gestion des soirées reste sur le site.
-type Tab = "establishment" | "subscription";
+type Tab = RestaurantTab;
 const emptyForm = { name: "", managerName: "", siret: "", description: "", district: "", address: "", phone: "", desiredCapacity: "", desiredSchedule: "", averagePricePerPersonCents: "", defaultMinParticipants: "", priceIncludesDrink: false, priceIncludesStarter: false, priceIncludesMain: false, priceIncludesDessert: false, priceNotes: "", proposesCategoryPricing: false, allowsPrivatization: false, specialConditions: "" };
 type Form = typeof emptyForm;
 const formFrom = (r: any): Form => ({ ...emptyForm, name: r.name ?? "", managerName: r.managerName ?? "", siret: r.siret ?? "", description: r.description ?? "", district: r.district ?? "", address: r.address ?? "", phone: r.phone ?? "", desiredCapacity: r.desiredCapacity ? String(r.desiredCapacity) : "", desiredSchedule: r.desiredSchedule ?? "", averagePricePerPersonCents: r.averagePricePerPersonCents != null ? String(r.averagePricePerPersonCents / 100) : "", defaultMinParticipants: r.defaultMinParticipants ? String(r.defaultMinParticipants) : "", priceIncludesDrink: !!r.priceIncludesDrink, priceIncludesStarter: !!r.priceIncludesStarter, priceIncludesMain: !!r.priceIncludesMain, priceIncludesDessert: !!r.priceIncludesDessert, priceNotes: r.priceNotes ?? "", proposesCategoryPricing: !!r.proposesCategoryPricing, allowsPrivatization: !!r.allowsPrivatization, specialConditions: r.specialConditions ?? "" });
@@ -23,22 +24,23 @@ const payload = (f: Form) => ({ ...f, desiredCapacity: f.desiredCapacity ? Numbe
 const Toggle = ({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) =>
   <View style={[s.row, { justifyContent: "space-between", minHeight: 44 }]}><Text style={[s.small, { flex: 1, color: T.ink }]}>{label}</Text><Switch value={value} onValueChange={onChange} trackColor={{ true: T.night, false: T.lineStrong }} accessibilityLabel={label} /></View>;
 
-export function RestaurantSpace({ tab: initialTab, navigate, onLogout }: { tab: Tab | string; navigate: Navigate; onLogout: () => void }) {
+export function RestaurantSpace({ tab: initialTab, focus, navigate, onLogout }: { tab: Tab | string; focus?: string; navigate: Navigate; onLogout: () => void }) {
   const [restaurant, setRestaurant] = useState<any>(undefined);
-  const [tab, setTab] = useState<Tab>(initialTab === "subscription" ? "subscription" : "establishment");
+  const [tab, setTab] = useState<Tab>(initialTab === "subscription" || initialTab === "events" ? initialTab : "establishment");
   const load = useCallback(() => api<any>("/restaurants/me").then(setRestaurant).catch(() => setRestaurant(null)), []);
   useEffect(() => { load(); }, [load]);
   if (restaurant === undefined) return <Loading />;
   const hasTabs = restaurant && (restaurant.status === "PENDING" || restaurant.status === "APPROVED");
+  const approved = restaurant?.status === "APPROVED";
   return <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
     <Text style={s.h1} accessibilityRole="header">Mon établissement</Text>
-    {hasTabs && <View style={s.row}><Chip label="Mon établissement" active={tab === "establishment"} onPress={() => setTab("establishment")} /><Chip label="Abonnement" active={tab === "subscription"} onPress={() => setTab("subscription")} /></View>}
-    {hasTabs && tab === "subscription" ? <Subscription restaurant={restaurant} onChanged={load} /> : <Establishment restaurant={restaurant} onChanged={load} />}
-    {restaurant?.status === "APPROVED" && tab === "establishment" && <>
+    {hasTabs && <View style={[s.row, { flexWrap: "wrap" }]}><Chip label="Établissement" active={tab === "establishment"} onPress={() => setTab("establishment")} />{approved && <Chip label="Mes soirées" active={tab === "events"} onPress={() => setTab("events")} />}<Chip label="Abonnement" active={tab === "subscription"} onPress={() => setTab("subscription")} /></View>}
+    {hasTabs && tab === "subscription" ? <Subscription restaurant={restaurant} onChanged={load} />
+      : approved && tab === "events" ? <RestaurantEvents restaurant={restaurant} focus={focus} />
+        : <Establishment restaurant={restaurant} onChanged={load} />}
+    {approved && tab === "establishment" && <>
       <View style={s.divider} />
       <TicketScanner />
-      <Text style={s.small}>La création et la gestion de vos soirées se font depuis le site.</Text>
-      <Button variant="secondary" title="Gérer mes soirées sur le site" icon={<ExternalLink size={18} color={T.ink} />} onPress={() => openWeb("/admin")} />
     </>}
     <Button variant="ghost" title="Voir les soirées" onPress={() => navigate({ name: "events" })} />
     <Button variant="ghost" title="Se déconnecter" icon={<LogOut size={18} color={T.ink} />} onPress={onLogout} />

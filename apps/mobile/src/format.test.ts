@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { categoryColor, money, when, dayLabel, timeLabel, imgUrl } from "./format";
+import { categoryColor, money, when, dayLabel, timeLabel, imgUrl, ticketsStillUseful, eurosToCents, centsToEuros, slugify } from "./format";
 
 describe("money", () => {
   it("formats cents as euros with a comma decimal separator", () => {
@@ -43,5 +43,28 @@ describe("imgUrl", () => {
   });
   it("leaves an absolute URL untouched", () => {
     expect(imgUrl("https://example.com/foo.jpg")).toBe("https://example.com/foo.jpg");
+  });
+});
+
+describe("ticketsStillUseful", () => {
+  const at = (iso: string) => ({ reservation: { event: { startsAt: iso } } });
+  it("keeps upcoming tickets and those that started less than a day ago, drops older ones", () => {
+    const now = new Date("2026-10-10T12:00:00Z").getTime();
+    const kept = ticketsStillUseful([at("2026-10-12T19:00:00Z"), at("2026-10-09T19:00:00Z"), at("2026-10-08T19:00:00Z")], now);
+    expect(kept.map(t => t.reservation.event.startsAt)).toEqual(["2026-10-12T19:00:00Z", "2026-10-09T19:00:00Z"]);
+  });
+});
+
+describe("prix et adresses des soirées", () => {
+  it("convertit les euros saisis en centimes et inversement", () => {
+    expect(eurosToCents("12,50")).toBe(1250);
+    expect(eurosToCents("30")).toBe(3000);
+    expect(eurosToCents("abc")).toBeNull();
+    expect(eurosToCents("-3")).toBeNull();
+    expect(centsToEuros(3000)).toBe("30");
+    expect(centsToEuros(1250)).toBe("12,50");
+  });
+  it("dérive une adresse de page sans accents ni ponctuation", () => {
+    expect(slugify("Soirée Nūr × Maison Amana !")).toBe("soiree-nur-maison-amana");
   });
 });

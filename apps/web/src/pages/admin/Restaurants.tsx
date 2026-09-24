@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "../../api";
 import { SUBSCRIPTION_STATUS_LABEL } from "../../lib/labels";
 import { Layout } from "../../components/Layout";
@@ -23,9 +23,9 @@ export function AdminRestaurants() {
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [planEdits,setPlanEdits]=useState<Record<string,{monthlyPriceCents:string;monthlyEventQuota:string}>>({});
   const [newPlan,setNewPlan]=useState({name:"",monthlyPriceCents:"",monthlyEventQuota:""});
-  const load=()=>api<any[]>(`/admin/restaurants?status=${filter}`).then(setItems);
-  const loadPlans=()=>api<any[]>("/admin/plans").then(v=>{setPlans(v);setPlanEdits(Object.fromEntries(v.map(p=>[p.id,{monthlyPriceCents:String(p.monthlyPriceCents/100),monthlyEventQuota:p.monthlyEventQuota==null?"":String(p.monthlyEventQuota)}])))});
-  useEffect(()=>{load();loadPlans().catch(()=>{})},[filter]);
+  const load=useCallback(()=>api<any[]>(`/admin/restaurants?status=${filter}`).then(setItems),[filter]);
+  const loadPlans=useCallback(()=>api<any[]>("/admin/plans").then(v=>{setPlans(v);setPlanEdits(Object.fromEntries(v.map(p=>[p.id,{monthlyPriceCents:String(p.monthlyPriceCents/100),monthlyEventQuota:p.monthlyEventQuota==null?"":String(p.monthlyEventQuota)}])))}),[]);
+  useEffect(()=>{load();loadPlans().catch(()=>{})},[load,loadPlans]);
   const savePlan=async(id:string)=>{
     const edit=planEdits[id];setNotice(null);
     try{await api(`/admin/plans/${id}`,{method:"PATCH",body:JSON.stringify({monthlyPriceCents:Math.round(Number(edit.monthlyPriceCents)*100),monthlyEventQuota:edit.monthlyEventQuota===""?null:Number(edit.monthlyEventQuota)})});setNotice({kind:"success",text:"Formule mise à jour."});await loadPlans()}

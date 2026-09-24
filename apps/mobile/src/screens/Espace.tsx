@@ -9,6 +9,7 @@ import { APPLICATION_STATUS_LABEL } from "../labels";
 import { EspaceTab, Navigate } from "../links";
 import { payByCard } from "../payment";
 import { R, S, T, s } from "../theme";
+import { loadTickets } from "../ticket-cache";
 import { EspaceProfile } from "./EspaceProfile";
 
 // « Mon espace » participant, aligné sur le tableau de bord du site : réservations (avec liste d'attente
@@ -94,11 +95,13 @@ function Reservations({ user, focus, navigate, onUserChanged }: { user: any; foc
 }
 
 function Tickets({ focus, navigate }: { focus?: string; navigate: Navigate }) {
-  const [tickets, setTickets] = useState<any[] | null>(null);
-  useEffect(() => { api<any[]>("/me/tickets").then(setTickets).catch(() => setTickets([])); }, []);
+  const [tickets, setTickets] = useState<any[] | null>(null), [offlineSince, setOfflineSince] = useState<string>(), [error, setError] = useState("");
+  useEffect(() => { loadTickets().then(r => { setTickets(r.tickets); setOfflineSince(r.offlineSince); }).catch(e => { setError((e as Error).message); setTickets([]); }); }, []);
   const { scrollRef, register } = useFocusScroll(tickets !== null, focus);
   return <ScrollView ref={scrollRef} contentContainerStyle={s.content}>
     <Text style={s.h1} accessibilityRole="header">{tickets?.length === 1 ? "Mon billet" : "Mes billets"}</Text>
+    {offlineSince && <Notice>Hors connexion : billets enregistrés sur ce téléphone le {shortDate(offlineSince)}. Ils restent valables à l’entrée.</Notice>}
+    {error ? <Notice kind="error">{error}</Notice> : null}
     {tickets === null ? <Skeleton height={380} /> : tickets.length === 0
       ? <Empty icon={<Ticket size={24} color={T.ink3} />} title="Aucun billet pour le moment" text="Il apparaît ici dès que votre place est confirmée." />
       : tickets.map(t => {

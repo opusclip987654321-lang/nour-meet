@@ -44,3 +44,4 @@ apps/api/public/uploads/*
 # Réglages Claude personnels (non partagés)
 .claude/settings.local.json
 tests/e2e/.consent-state.json
+.e2e-dist

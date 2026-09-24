@@ -102,14 +102,15 @@ export function EventDetail() {
     api(`/share-links/${shareCode}/click`,{method:"POST"}).catch(()=>{});
   },[shareCode,id]);
 
+  const eventId=event?.id;
   useEffect(()=>{
-    if(!user||!event){setLoadingApplication(false);return}
+    if(!user||!eventId){setLoadingApplication(false);return}
     let ignore=false; setLoadingApplication(true);
-    api<any>(`/events/${event.id}/my-application`).then(a=>!ignore&&setApplication(a)).catch(()=>!ignore&&setApplication(null)).finally(()=>!ignore&&setLoadingApplication(false));
-    api<any>(`/events/${event.id}/waitlist/me`).then(w=>!ignore&&setWaitlistEntry(w)).catch(()=>!ignore&&setWaitlistEntry(null));
-    api<any[]>("/me/alternative-offers").then(list=>{if(ignore)return;setAltOffer(list.find(o=>o.originalEventId===event.id&&o.status==="PENDING")??null)}).catch(()=>{});
+    api<any>(`/events/${eventId}/my-application`).then(a=>!ignore&&setApplication(a)).catch(()=>!ignore&&setApplication(null)).finally(()=>!ignore&&setLoadingApplication(false));
+    api<any>(`/events/${eventId}/waitlist/me`).then(w=>!ignore&&setWaitlistEntry(w)).catch(()=>!ignore&&setWaitlistEntry(null));
+    api<any[]>("/me/alternative-offers").then(list=>{if(ignore)return;setAltOffer(list.find(o=>o.originalEventId===eventId&&o.status==="PENDING")??null)}).catch(()=>{});
     return ()=>{ignore=true};
-  },[user,event?.id]);
+  },[user,eventId]);
 
   // §19/§20 (corrections web 2026-09-24) : données structurées Event fidèles à la fiche affichée ; un
   // événement non réservable (données de démonstration) n'est ni indexé ni déclaré aux moteurs.

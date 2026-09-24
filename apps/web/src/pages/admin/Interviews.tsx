@@ -1,5 +1,5 @@
 import { Inbox, X } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
 import { Layout } from "../../components/Layout";
 import { Avatar, Notice } from "../../components/ui";
@@ -8,7 +8,7 @@ import { APPLICATION_STATUS_LABEL } from "../../lib/labels";
 import { AdminNav } from "./AdminNav";
 
 export function AdminGlobalInterviews() {
-  const [items,setItems]=useState<any[]|null>(null),[selected,setSelected]=useState<any>(null),[message,setMessage]=useState(""); const load=()=>api<any[]>("/admin/global-interviews").then(v=>{setItems(v);if(selected)setSelected(v.find(x=>x.id===selected.id))});useEffect(()=>{load()},[]);
+  const [items,setItems]=useState<any[]|null>(null),[selected,setSelected]=useState<any>(null),[message,setMessage]=useState(""); const load=useCallback(()=>api<any[]>("/admin/global-interviews").then(v=>{setItems(v);setSelected((cur:any)=>cur?v.find(x=>x.id===cur.id):cur)}),[]);useEffect(()=>{load()},[load]);
   const decide=async(accept:boolean)=>{await api(`/admin/global-interviews/${selected.id}/decision`,{method:"POST",body:JSON.stringify({accept,notes:accept?undefined:"Profil non retenu pour le moment."})});setMessage(accept?"Profil validé.":"Profil non validé.");await load()};
   const revokeValidation=async()=>{await api(`/admin/profiles/${selected.user.id}/revoke-validation`,{method:"POST"});setMessage("Validation retirée.");await load()};
   const [rescheduling,setRescheduling]=useState(false),[slots,setSlots]=useState<any[]>([]);

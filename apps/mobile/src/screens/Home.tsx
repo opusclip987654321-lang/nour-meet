@@ -7,6 +7,7 @@ import { Button, EventCard, Skeleton } from "../components/ui";
 import { shortDate } from "../format";
 import { Navigate } from "../links";
 import { F, R, S, T, s } from "../theme";
+import { loadTickets } from "../ticket-cache";
 
 // Accueil de l'application, aligné sur celui du site (pages/Home.tsx) : mêmes promesses, uniquement des
 // mécanismes réellement en place dans le produit.
@@ -21,7 +22,7 @@ export function Home({ user, navigate }: { user: any; navigate: Navigate }) {
   const [events, setEvents] = useState<any[] | null>(null), [tickets, setTickets] = useState<any[]>([]);
   useEffect(() => {
     api<{ items: any[] }>("/events?pageSize=3").then(r => setEvents(r.items)).catch(() => setEvents([]));
-    api<any[]>("/me/tickets").then(setTickets).catch(() => {});
+    loadTickets().then(r => setTickets(r.tickets)).catch(() => {});
   }, []);
   const next = tickets.find(t => new Date(t.reservation.event.startsAt) > new Date());
   return <ScrollView contentContainerStyle={[s.content, { paddingTop: 0, paddingHorizontal: 0 }]}>
