@@ -109,6 +109,10 @@ model User {
   // Suppression RGPD (§20) : jamais une ligne supprimée (cascaderait sur Payment/LedgerEntry, dont la
   // conservation est légalement obligatoire), seulement anonymisée — voir anonymizeUser() côté API.
   deletedAt        DateTime?
+  // Données de démonstration (lancement) : compte propriétaire d'un restaurant de démonstration,
+  // jamais signalé comme tel à l'écran mais identifiable sans ambiguïté pour une suppression
+  // ultérieure (voir aussi Restaurant.isDemo et Event.isDemo).
+  isDemo           Boolean          @default(false)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   profile          Profile?
@@ -192,6 +196,9 @@ model Restaurant {
   specialConditions        String?
   // Notes internes visibles uniquement par l'administration, jamais par le restaurateur.
   adminNotes               String?
+  // Restaurant de démonstration (lancement) : présenté exactement comme un vrai restaurant, mais
+  // aucun paiement n'est jamais possible sur ses événements (voir Event.isDemo, contrôlé côté API).
+  isDemo                   Boolean  @default(false)
   photos                   RestaurantPhoto[]
   subscription             RestaurantSubscription?
   connectedAccount         ConnectedAccount?
@@ -259,6 +266,10 @@ model Event {
   minParticipantsOutcome    MinParticipantsOutcome?
   minParticipantsDecidedAt  DateTime?
   minParticipantsDecidedBy  String?
+  // Événement de démonstration (lancement) : consultable et le parcours peut commencer, mais toute
+  // tentative de paiement est refusée côté serveur (POST /applications/:id/payment-intent), jamais
+  // seulement masquée dans l'interface. Aucune mention « démo » n'est affichée publiquement.
+  isDemo                  Boolean     @default(false)
   applications            Application[]
   callSlots               ScreeningCall[]
   reservations            Reservation[]
@@ -743,6 +754,13 @@ model RestaurantSubscription {
   // l'abonnement. Comparé à currentPeriodStart (pas seulement non-null) pour redevenir envoyable dès
   // qu'une nouvelle période démarre.
   expiryReminderSentAt DateTime?
+  // Changement de formule vers une formule inférieure (Premium → Standard) : la formule actuelle reste
+  // acquise jusqu'à la fin de la période déjà payée, la nouvelle s'applique à l'échéance via un
+  // calendrier d'abonnement Stripe (stripeScheduleId). pendingPlanId/pendingChangeAt ne servent qu'à
+  // l'affichage et sont effacés par le webhook dès que Stripe a réellement basculé la formule.
+  pendingPlanId        String?
+  pendingChangeAt      DateTime?
+  stripeScheduleId     String?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 }
@@ -814,6 +832,10 @@ model Article {
   archivedAt      DateTime?
   aiGenerated     Boolean           @default(false)
   aiPrompt        String?
+  // Publication automatique quotidienne (production) : jour calendaire (Europe/Paris, "AAAA-MM-JJ")
+  // de l'article généré par la tâche de fond. L'unicité garantit au niveau de la base qu'un seul
+  // article automatique existe par jour, même si deux passages de la tâche se chevauchent.
+  autoPublishDay  String?           @unique
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   reviewLogs      ArticleReviewLog[]

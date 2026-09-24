@@ -1490,3 +1490,211 @@
   text-align: left;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- Abonnement restaurateur : cartes de tarifs (corrections web 2026-09-24, §1.2) ---------- */
+.subscription-summary .subscription-line {
+  margin: 0 0 var(--s-2);
+  color: var(--ink-2);
+}
+
+.pricing-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-top: var(--s-4);
+}
+
+.pricing-head > div {
+  min-width: 0;
+}
+
+.pricing-head h2 {
+  margin: 0 0 var(--s-1);
+  font-size: var(--fs-h3);
+}
+
+.segmented {
+  display: inline-flex;
+  padding: var(--s-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+}
+
+.segmented button {
+  min-height: 40px;
+  padding: 0 var(--s-4);
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink-2);
+  font: 600 var(--fs-sm) / 1 var(--font-text);
+  cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.segmented button.active {
+  background: var(--night);
+  color: var(--on-night);
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: var(--s-5);
+  align-items: stretch;
+}
+
+.pricing-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  min-width: 0;
+  padding: var(--s-6);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.pricing-card.featured {
+  border-color: var(--night);
+  background: var(--night);
+  color: var(--on-night);
+  box-shadow: var(--shadow-lg);
+}
+
+.pricing-card.current:not(.featured) {
+  border-color: var(--saffron);
+  box-shadow: 0 0 0 1px var(--saffron), var(--shadow-md);
+}
+
+.pricing-card.featured.current {
+  box-shadow: 0 0 0 3px var(--saffron), var(--shadow-lg);
+}
+
+.pricing-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-width: 0;
+}
+
+.pricing-card h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
+}
+
+.pricing-tag {
+  flex: 0 0 auto;
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--r-pill);
+  background: var(--saffron);
+  color: var(--ink);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+
+.pricing-tag.muted {
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.pricing-price {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin: 0;
+}
+
+.pricing-price strong {
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.pricing-price span,
+.pricing-note {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.pricing-card.featured .pricing-price span,
+.pricing-card.featured .pricing-note {
+  color: var(--on-night-2);
+}
+
+.pricing-note {
+  margin: calc(-1 * var(--s-3)) 0 0;
+}
+
+.pricing-unavailable {
+  font-size: var(--fs-md);
+}
+
+.pricing-features {
+  display: grid;
+  gap: var(--s-3);
+  margin: 0;
+  padding: var(--s-4) 0 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.pricing-card.featured .pricing-features {
+  border-top-color: var(--on-night-line);
+}
+
+.pricing-features li {
+  display: flex;
+  gap: var(--s-3);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.pricing-features li > span {
+  min-width: 0;
+}
+
+.pricing-features svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--success);
+}
+
+.pricing-card.featured .pricing-features svg {
+  color: var(--saffron);
+}
+
+.pricing-features li.excluded {
+  color: var(--ink-3);
+}
+
+.pricing-features li.excluded svg {
+  color: var(--ink-3);
+}
+
+.pricing-card.featured .pricing-features li.excluded,
+.pricing-card.featured .pricing-features li.excluded svg {
+  color: var(--on-night-2);
+}
+
+.pricing-action {
+  margin-top: auto;
+  padding-top: var(--s-2);
+}
+
+.pricing-confirm p {
+  margin: 0 0 var(--s-3);
+  font-size: var(--fs-sm);
+}
+
+.pricing-card.featured .fine {
+  color: var(--on-night-2);
+}
