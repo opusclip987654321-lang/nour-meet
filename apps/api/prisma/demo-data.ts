@@ -13,11 +13,14 @@ import { EventFlow, EventStatus, PrismaClient, UserRole } from "@prisma/client";
 // numéros de téléphone pris dans la plage 06 39 98 xx xx que l'ARCEP réserve aux œuvres de fiction.
 // Idempotent : rejouer ce script met à jour les mêmes lignes (clé = téléphone ou slug), jamais de doublon.
 
+// Heure murale de Paris, quel que soit le fuseau du serveur (les conteneurs de production sont en
+// UTC : sans cette conversion, une soirée prévue à 19h30 s'afficherait à 21h30).
 const at = (daysFromNow: number, hours: number, minutes = 0) => {
-  const d = new Date();
-  d.setDate(d.getDate() + daysFromNow);
-  d.setHours(hours, minutes, 0, 0);
-  return d;
+  const day = new Date(Date.now() + daysFromNow * 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
+  const guess = new Date(`${day}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00Z`);
+  const parisHour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Paris", hour: "2-digit", hourCycle: "h23" }).format(guess));
+  const offsetHours = (parisHour - guess.getUTCHours() + 24) % 24;
+  return new Date(guess.getTime() - offsetHours * 3_600_000);
 };
 
 const RESTAURANTS = [
