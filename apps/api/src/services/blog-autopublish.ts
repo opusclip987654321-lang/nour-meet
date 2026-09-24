@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient, UserRole } from "@prisma/client";
 import type { AIProvider } from "../ai-provider.js";
-import type { Illustration } from "./article-image.js";
+import { defaultImagePrompt, type Illustration } from "./article-image.js";
 import { BLOG_CATEGORIES, MAX_AI_ATTEMPTS_PER_DAY, parisDay, sanitizeGeneratedArticle, sanitizeInstagramCaption, slugifyTitle } from "./blog-content.js";
 
 // Publication automatique quotidienne du blog (corrections web 2026-09-24, §3) — remplace la
@@ -55,10 +55,12 @@ export async function publishDailyArticle(deps: Deps, now: Date = new Date()): P
     if (!created) {
       const next = await prisma.articleQueueEntry.findFirst({ orderBy: { position: "asc" } });
       if (!next) { deps.log.info({ day }, "Aucun article à publier aujourd’hui (IA indisponible, réserve vide)"); return "NOTHING_TO_PUBLISH"; }
+      // Illustration IA aussi pour un article de la réserve : la photothèque n'est qu'un dernier recours.
+      const illustration = deps.illustrate ? await deps.illustrate({ title: next.title, imagePrompt: defaultImagePrompt(next) }).catch(() => null) : null;
       try {
         created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
           const caption = sanitizeInstagramCaption(`${next.title}\n\n${next.excerpt}\n\nArticle complet : lien en bio\n\n#nurmeet #paris #rencontres #vieSociale`);
-          const article = await tx.article.create({ data: { title: next.title, slug: next.slug, excerpt: next.excerpt, content: next.content, category: next.category, keywords: next.keywords, metaTitle: next.metaTitle, metaDescription: next.metaDescription, imageUrl: next.imageUrl, status: "PUBLISHED", publishedAt: now, autoPublishDay: day, instagramCaption: caption } });
+          const article = await tx.article.create({ data: { title: next.title, slug: next.slug, excerpt: next.excerpt, content: next.content, category: next.category, keywords: next.keywords, metaTitle: next.metaTitle, metaDescription: next.metaDescription, imageUrl: illustration?.imageUrl ?? next.imageUrl, imageAiGenerated: !!illustration, status: "PUBLISHED", publishedAt: now, autoPublishDay: day, instagramCaption: caption } });
           await tx.articleQueueEntry.delete({ where: { id: next.id } });
           return article;
         });
