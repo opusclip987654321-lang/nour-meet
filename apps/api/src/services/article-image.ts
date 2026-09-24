@@ -13,13 +13,16 @@ export type IllustrationConfig = { apiKey: string; model: string; uploadsDir: st
 export type Illustration = { imageUrl: string; instagramImageUrl: string; altText: string };
 
 const OPENAI_TIMEOUT_MS = 180_000;
+// Garde-fou ajouté à chaque description, indépendamment de ce que propose Claude : charte « aucun alcool
+// à l'image » — y compris ce qui pourrait y ressembler (un thé glacé à la menthe passe pour un mojito).
+const IMAGE_GUARDRAILS = " Strict rules: absolutely no alcohol and nothing that could be mistaken for alcohol — no cocktails, no tall glasses with ice or straws, no wine or champagne glasses, no bottles. If drinks appear, they are hot mint tea in small traditional tea glasses or coffee cups. No text, letters, logos or watermarks. No religious symbols or places.";
 
 async function generateImage(config: IllustrationConfig, prompt: string): Promise<Buffer> {
   const response = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS),
     headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: config.model, prompt, size: "1536x1024", quality: "medium", n: 1 })
+    body: JSON.stringify({ model: config.model, prompt: `${prompt}${IMAGE_GUARDRAILS}`, size: "1536x1024", quality: "medium", n: 1 })
   });
   const data = await response.json().catch(() => ({})) as { data?: { b64_json?: string; url?: string }[]; error?: { message?: string } };
   if (!response.ok) throw new Error(`OpenAI Images a refusé la génération (${response.status}) : ${data.error?.message ?? "sans détail"}`);
