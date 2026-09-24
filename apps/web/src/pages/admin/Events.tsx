@@ -1,6 +1,6 @@
 import { Inbox, X } from "lucide-react";
 import { EVENT_CATEGORIES, EVENT_ZONES } from "@nour/shared";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../api";
 import { useAuth } from "../../auth";
@@ -258,12 +258,12 @@ export function AdminAttendees() {
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
 
   useEffect(()=>{api<any[]>("/admin/events").then(evts=>{setEvents(evts);if(evts[0])setEventId(evts[0].id)})},[]);
-  const load=()=>{
+  const load=useCallback(()=>{
     if(!eventId)return;
     setLoading(true);
     api<any[]>(`/admin/events/${eventId}/reservations`).then(setReservations).catch(()=>setReservations([])).finally(()=>setLoading(false));
-  };
-  useEffect(()=>{load()},[eventId]);
+  },[eventId]);
+  useEffect(()=>{load()},[load]);
 
   // Corrections web 2026-09-24 (§6.1) : seul le super-admin rembourse (le restaurateur n'a plus aucun
   // bouton de remboursement) ; un motif est exigé par l'API pour une exception à 24h ou moins.

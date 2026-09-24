@@ -27,6 +27,8 @@ export const anonymizeUser = async (userId: string) => {
     prisma.testimonial.updateMany({ where: { submittedByUserId: userId }, data: { displayName: "Ancien membre" } }),
     // Comptes Google reliés : identifiant et e-mail du fournisseur, données personnelles à effacer.
     prisma.authIdentity.deleteMany({ where: { userId } }),
+    // Appareils enregistrés pour les notifications push : plus rien ne doit y être envoyé.
+    prisma.pushToken.deleteMany({ where: { userId } }),
     prisma.emailLoginCode.deleteMany({ where: { email: existingEmail ?? "" } })
   ]);
   // La photo de profil est une vraie donnée personnelle (image de la personne) : nullifier la

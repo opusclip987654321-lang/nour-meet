@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { API_URL, api, getToken } from "../../api";
 import { Layout } from "../../components/Layout";
 import { Loading, Notice } from "../../components/ui";
@@ -28,8 +28,8 @@ export function AdminStats() {
   const [stats,setStats]=useState<any>(null);
   const [range,setRange]=useState(STATS_PRESETS[3][1]());
   const [scope,setScope]=useState<"all"|"participants"|"restaurants">("all");
-  const load=()=>api<any>(`/admin/stats?since=${range.since}&until=${range.until}&compareSince=${range.compareSince}&compareUntil=${range.compareUntil}`).then(setStats);
-  useEffect(()=>{load()},[range]);
+  const load=useCallback(()=>api<any>(`/admin/stats?since=${range.since}&until=${range.until}&compareSince=${range.compareSince}&compareUntil=${range.compareUntil}`).then(setStats),[range]);
+  useEffect(()=>{load()},[load]);
   const exportFile=async(ext:"csv"|"xlsx")=>{
     const response=await fetch(`${API_URL}/admin/stats/export.${ext}?since=${range.since}&until=${range.until}`,{headers:{Authorization:`Bearer ${getToken()}`}});
     const blob=await response.blob();

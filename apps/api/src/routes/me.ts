@@ -7,6 +7,7 @@ import { z } from "zod";
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, app, deleteUploadedFile, prisma, profileUploadsDir } from "../context.js";
 import { anonymizeUser, hasAcceptedCurrent, profileAge, recordAcceptance } from "../services/account.js";
 import { audit } from "../services/audit.js";
+import { EXPO_PUSH_TOKEN, MAX_PUSH_TOKENS_PER_USER } from "../services/push.js";
 import { TokenUser, auth, currentId } from "../services/auth.js";
 import { SESSION_RENEW_AFTER_SECONDS, signSession } from "../services/session.js";
 
@@ -77,7 +78,7 @@ app.delete("/me/profile-photo", { preHandler: auth }, async (request, reply) => 
 app.get("/me/export", { preHandler: auth }, async (request) => {
   const userId = currentId(request);
   const [user, applications, reservations, tickets, payments, waitlistEntries, alternativeOffers, notifications, loyaltyEntries, shareLinks, testimonials, contactRequestsSent, contactRequestsReceived] = await Promise.all([
-    prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { profile: true, authIdentities: { select: { provider: true, email: true, createdAt: true } } } }),
+    prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { profile: true, authIdentities: { select: { provider: true, email: true, createdAt: true } }, pushTokens: { select: { platform: true, createdAt: true, lastSeenAt: true } } } }),
     prisma.application.findMany({ where: { userId }, include: { screeningAnswer: true, networkingAnswer: true, event: { select: { title: true, slug: true } } } }),
     prisma.reservation.findMany({ where: { userId }, include: { event: { select: { title: true, slug: true } } } }),
     prisma.ticket.findMany({ where: { reservation: { userId } } }),
@@ -94,7 +95,7 @@ app.get("/me/export", { preHandler: auth }, async (request) => {
   await audit(userId, "EXPORT_PERSONAL_DATA", "User", userId);
   return {
     exportedAt: new Date().toISOString(),
-    account: { id: user.id, phone: user.phone, phoneVerifiedAt: user.phoneVerifiedAt, email: user.email, displayName: user.displayName, role: user.role, createdAt: user.createdAt, linkedAccounts: user.authIdentities },
+    account: { id: user.id, phone: user.phone, phoneVerifiedAt: user.phoneVerifiedAt, email: user.email, displayName: user.displayName, role: user.role, createdAt: user.createdAt, linkedAccounts: user.authIdentities, pushDevices: user.pushTokens },
     profile: user.profile,
     applications, reservations, tickets, payments, waitlistEntries, alternativeOffers, notifications, loyaltyEntries, shareLinks, testimonials,
     contactRequests: { sent: contactRequestsSent, received: contactRequestsReceived }
@@ -111,4 +112,20 @@ app.post("/me/request-deletion", { preHandler: auth }, async (request, reply) =>
   await anonymizeUser(userId);
   await audit(userId, "SELF_DELETE_ACCOUNT", "User", userId);
   return { deleted: true };
+});
+
+// Notifications push (2026-09-24) : l'application enregistre le jeton Expo de l'appareil après la
+// connexion et le retire à la déconnexion. Un appareil passé sur un autre compte est réattribué.
+app.post("/me/push-tokens", { preHandler: auth, config: { rateLimit: { max: 30, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const { token, platform } = z.object({ token: z.string().max(200).regex(EXPO_PUSH_TOKEN), platform: z.enum(["ios", "android"]) }).parse(request.body);
+  const userId = currentId(request);
+  await prisma.pushToken.upsert({ where: { token }, create: { token, platform, userId }, update: { userId, platform, lastSeenAt: new Date() } });
+  const stale = await prisma.pushToken.findMany({ where: { userId }, orderBy: { lastSeenAt: "desc" }, skip: MAX_PUSH_TOKENS_PER_USER, select: { id: true } });
+  if (stale.length) await prisma.pushToken.deleteMany({ where: { id: { in: stale.map(t => t.id) } } });
+  return reply.code(204).send();
+});
+app.delete("/me/push-tokens", { preHandler: auth }, async (request, reply) => {
+  const { token } = z.object({ token: z.string().max(200) }).parse(request.body);
+  await prisma.pushToken.deleteMany({ where: { token, userId: currentId(request) } });
+  return reply.code(204).send();
 });

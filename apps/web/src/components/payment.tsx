@@ -124,6 +124,7 @@ export function PayStandalone(){
     api<{ token: string }>("/auth/payment-session-exchange", { method: "POST", body: JSON.stringify({ token: session }) })
       .then(r => { setToken(r.token); setReady(true); })
       .catch(() => { setError(true); setReady(true); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- jeton à usage unique : échangé une seule fois au montage
   }, []);
   if (!ready) return <div className="state-page"><div className="spinner"/></div>;
   if (error) return <div className="state-page"><h2>Lien de paiement invalide ou expiré.</h2><p>Retournez dans l’application et réessayez.</p></div>;

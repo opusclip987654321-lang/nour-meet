@@ -125,6 +125,7 @@ Nour Meet prévoit notamment d'utiliser :
 - **Twilio** : vérification du numéro de téléphone par SMS ;
 - **Google** : connexion avec un compte Google, à la demande de l'utilisateur (Google transmet l'identifiant du compte, le nom et l'adresse e-mail) ;
 - **Resend** : envoi d'e-mails transactionnels et, selon consentement, marketing ;
+- **Expo** (application mobile), puis **Apple** et **Google** : acheminement des notifications push, uniquement si l'utilisateur les autorise sur son téléphone. Le contenu transmis reste générique, sans détail de la demande ni de la soirée ; l'autorisation se retire à tout moment dans les réglages du téléphone ;
 - **Google Maps** : fonctionnalités cartographiques et d'adresses ;
 - **Mesure d'audience interne** (hébergée par Nour Meet, sans transmission à un tiers) : après consentement de l'utilisateur ;
 - **Meta Pixel** : mesure et publicité, après consentement ;

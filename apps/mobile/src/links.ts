@@ -3,6 +3,7 @@
 // pour que chaque lien mène au même objet que sur le web ; un chemin sans équivalent mobile s'ouvre
 // dans le navigateur plutôt que de ne rien faire.
 export type EspaceTab = "reservations" | "tickets" | "interview" | "profile";
+export type RestaurantTab = "establishment" | "events" | "subscription";
 export type Route =
   | { name: "home" }
   | { name: "events"; slug?: string; category?: string }
@@ -10,7 +11,7 @@ export type Route =
   | { name: "messages" }
   | { name: "scan" }
   | { name: "notifications" }
-  | { name: "restaurant"; tab: "establishment" | "subscription" }
+  | { name: "restaurant"; tab: RestaurantTab; focus?: string }
   | { name: "blog"; slug?: string }
   | { name: "concept" }
   | { name: "web"; path: string };
@@ -29,6 +30,8 @@ export function routeFromPath(path: string | null | undefined): Route {
     case "concept": return { name: "concept" };
     case "notifications": return { name: "notifications" };
     case "restaurant": return { name: "restaurant", tab: params.get("tab") === "subscription" ? "subscription" : "establishment" };
+    // Soirées d'un restaurateur (création, validation, participants) : onglet « Mes soirées ».
+    case "admin": return parts[1] === "events" || parts[1] === "attendees" ? { name: "restaurant", tab: "events", focus: params.get("highlight") ?? undefined } : { name: "web", path };
     case "dashboard": {
       const tab = params.get("tab");
       if (tab === "contacts") return { name: "messages" };

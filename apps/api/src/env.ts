@@ -43,6 +43,8 @@ const envSchema = z.object({
   // Illustrations générées par IA pour l'article du jour (OpenAI Images). Facultatif : sans clé, la
   // photothèque du site est utilisée. Modèle modifiable sans changer le code.
   OPENAI_API_KEY: optionalEnvironmentSecret,
+  // Facultatif : jeton d'accès Expo, requis seulement si la « sécurité renforcée » des push est activée.
+  EXPO_ACCESS_TOKEN: optionalEnvironmentSecret,
   OPENAI_IMAGE_MODEL: z.string().default("gpt-image-2"),
   // Publication automatique sur Instagram (API Instagram avec connexion Instagram). Facultatif : sans
   // ces deux valeurs, rien n'est publié. Le jeton initial est ensuite renouvelé et conservé en base.

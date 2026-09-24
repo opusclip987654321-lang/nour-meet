@@ -10,10 +10,12 @@ describe("liens des notifications et des articles vers les écrans de l'applicat
     expect(routeFromPath("/dashboard?tab=interview")).toEqual({ name: "espace", tab: "interview" });
     expect(routeFromPath("/dashboard?tab=contacts")).toEqual({ name: "messages" });
     expect(routeFromPath("/restaurant?tab=subscription")).toEqual({ name: "restaurant", tab: "subscription" });
+    expect(routeFromPath("/admin/events?highlight=ev1")).toEqual({ name: "restaurant", tab: "events", focus: "ev1" });
+    expect(routeFromPath("/admin/finance")).toEqual({ name: "web", path: "/admin/finance" });
     expect(routeFromPath("/blog/un-article")).toEqual({ name: "blog", slug: "un-article" });
   });
   it("ouvre dans le navigateur un chemin sans écran mobile, et retombe sur l'accueil sans chemin", () => {
-    expect(routeFromPath("/admin/events?highlight=e1")).toEqual({ name: "web", path: "/admin/events?highlight=e1" });
+    expect(routeFromPath("/admin/stats")).toEqual({ name: "web", path: "/admin/stats" });
     expect(routeFromPath(null)).toEqual({ name: "home" });
     expect(routeFromPath("https://exemple.com")).toEqual({ name: "home" });
   });
