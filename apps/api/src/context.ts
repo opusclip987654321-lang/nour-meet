@@ -11,6 +11,7 @@ import { workerCount } from "./cluster-config.js";
 import { createEmailProvider } from "./email-provider.js";
 import { env } from "./env.js";
 import { initSentry } from "./sentry.js";
+import "./validation-fr.js";
 import { createSmsVerificationProvider } from "./sms-verification.js";
 
 initSentry();

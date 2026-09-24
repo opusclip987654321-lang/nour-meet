@@ -5,6 +5,7 @@ import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { ZodError } from "zod";
+import { describeZodError } from "./validation-fr.js";
 import { MAX_IMAGE_BYTES, app, publicDir } from "./context.js";
 import { env } from "./env.js";
 import { Sentry } from "./sentry.js";
@@ -26,12 +27,16 @@ await app.register(jwt, { secret: env.JWT_SECRET });
 // per-route limit (below); routes that need a stricter one keep their own override.
 // Tunable via env because the right ceiling depends on deployment shape (behind a
 // CDN/LB, per-IP traffic looks different than hitting the origin directly).
-await app.register(rateLimit, { global: true, max: env.RATE_LIMIT_MAX, timeWindow: env.RATE_LIMIT_WINDOW });
+await app.register(rateLimit, {
+  global: true, max: env.RATE_LIMIT_MAX, timeWindow: env.RATE_LIMIT_WINDOW,
+  // Message affiché tel quel dans les formulaires : en français, avec le délai d'attente réel.
+  errorResponseBuilder: (_request, context) => Object.assign(new Error(`Trop de tentatives. Réessayez dans ${context.after.replace(/(\d+) seconds?/, "$1 s").replace(/(\d+) minutes?/, "$1 min")}.`), { statusCode: 429 })
+});
 await app.register(multipart, { limits: { fileSize: MAX_IMAGE_BYTES, files: 1 } });
 await app.register(fastifyStatic, { root: publicDir, prefix: "/static/" });
 
 app.setErrorHandler((error, _request, reply) => {
-  if (error instanceof ZodError) return reply.code(400).send({ error: "Données invalides", details: error.flatten() });
+  if (error instanceof ZodError) return reply.code(400).send({ error: describeZodError(error), details: error.flatten() });
   // Un findUniqueOrThrow/findFirstOrThrow qui échoue (ex. assertEventAccess sur l'événement d'un
   // autre restaurateur) lève une erreur Prisma "P2025" sans statusCode : sans ce cas, elle finissait
   // en 500 « Erreur interne », masquant une simple restriction d'accès légitime derrière une fausse
