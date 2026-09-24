@@ -50,13 +50,18 @@ app.setErrorHandler((error, _request, reply) => {
   // identifiants), y compris en 4xx — sans cela, une erreur de configuration restait invisible.
   const provider = error as { providerStatus?: number; providerCode?: number; providerMessage?: string };
   if (provider.providerStatus) app.log.warn({ providerStatus: provider.providerStatus, providerCode: provider.providerCode, providerMessage: provider.providerMessage }, "refus du fournisseur SMS");
-  if (status >= 500) {
+  if (status >= 500 && (error as { expose?: boolean }).expose !== true) {
     app.log.error(error);
     // Seules les vraies pannes serveur (5xx) partent vers Sentry — jamais une simple erreur de
     // saisie ou d'autorisation (400/401/403/404/409), qui ne relève pas d'une surveillance de panne.
     if (env.SENTRY_DSN) Sentry.captureException(error);
+  } else if (status >= 500) {
+    app.log.warn({ err: (error as Error).message }, "Service tiers indisponible");
   }
   // clientFlags : indications destinées à l'interface (ex. phoneVerificationRequired), jamais pour une 5xx.
   const flags = status < 500 ? (error as { clientFlags?: Record<string, unknown> }).clientFlags ?? {} : {};
-  return reply.code(status).send({ error: status >= 500 ? "Erreur interne" : (error as Error).message, ...flags });
+  // Un service tiers indisponible (503 marqué expose) garde son message clair ; toute autre 5xx reste
+  // « Erreur interne », sans jamais révéler de détail technique.
+  const exposed = status < 500 || (error as { expose?: boolean }).expose === true;
+  return reply.code(status).send({ error: exposed ? (error as Error).message : "Erreur interne", ...flags });
 });
