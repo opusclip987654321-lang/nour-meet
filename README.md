@@ -38,14 +38,18 @@ En configuration locale par défaut (`SMS_MODE=mock`), aucun SMS n’est envoyé
 
 ## Paiement (Stripe, mode test)
 
-Le paiement utilise Stripe (PaymentIntents + Elements) en mode test — voir `.env.example` pour les variables `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` et `VITE_STRIPE_PUBLISHABLE_KEY`. En local, les webhooks doivent être relayés avec `stripe listen --forward-to localhost:4000/webhooks/stripe`.
+Paiement des places et abonnements restaurateurs par le **vrai mode test Stripe** : variables,
+préparation des formules (`npm run stripe:setup-test-plans -w @nour/api`), relais des webhooks
+(`stripe listen --forward-to localhost:4000/webhooks/stripe`), cartes de test et parcours à vérifier
+dans [`docs/stripe-test-local.md`](docs/stripe-test-local.md). Le billet et le QR code ne sont
+générés qu'après confirmation du paiement par le webhook Stripe.
 
-Cartes de test Stripe (date d'expiration future quelconque, CVC à 3 chiffres quelconque) :
+## Documentation complémentaire
 
-- Paiement réussi : `4242 4242 4242 4242`.
-- Paiement refusé : `4000 0000 0000 0002`.
-
-Le billet et le QR code ne sont générés qu'après confirmation du paiement par le webhook Stripe.
+- [`docs/dependances-externes.md`](docs/dependances-externes.md) — inventaire des services externes, délais, repli en cas de panne
+- [`docs/analytics-rgpd.md`](docs/analytics-rgpd.md) — mesure d'audience et consentement
+- [`docs/donnees-demonstration.md`](docs/donnees-demonstration.md) — restaurants et soirées de démonstration (`isDemo`)
+- [`docs/securite-https-secrets.md`](docs/securite-https-secrets.md) — HTTPS, cookies, secrets
 
 ## Application mobile
 

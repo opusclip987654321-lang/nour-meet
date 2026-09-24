@@ -1,11 +1,28 @@
 import { EventStatus } from "@prisma/client";
 import { z } from "zod";
-import { app, prisma, smsVerification } from "../context.js";
+import { aiProvider, app, emailProvider, prisma, smsVerification, stripe } from "../context.js";
 import { env } from "../env.js";
 import { TokenUser, optionalAuth } from "../services/auth.js";
 import { getSetting } from "../settings.js";
 
 app.get("/health", async () => ({ status: "ok", service: "nour-api", smsMode: smsVerification.mode, now: new Date().toISOString() }));
+// §21 (corrections web 2026-09-24) : état des dépendances pour la surveillance (base joignable en moins
+// de 2 s, fournisseurs configurés ou non) — jamais une clé ni un identifiant, seulement des états.
+// /health reste une simple sonde de vie : une panne d'un service secondaire ne rend jamais l'API
+// « morte » aux yeux de Docker.
+app.get("/health/ready", async (_request, reply) => {
+  const database = await Promise.race([
+    prisma.$queryRaw`SELECT 1`.then(() => "ok" as const),
+    new Promise<"timeout">(resolve => setTimeout(() => resolve("timeout"), 2000))
+  ]).catch(() => "error" as const);
+  const body = {
+    status: database === "ok" ? "ok" : "degraded",
+    database,
+    providers: { stripe: stripe ? "configured" : "absent", sms: smsVerification.mode, email: emailProvider.mode, blogAi: aiProvider.mode, sentry: env.SENTRY_DSN ? "configured" : "absent" },
+    now: new Date().toISOString()
+  };
+  return reply.code(database === "ok" ? 200 : 503).send(body);
+});
 
 // C31 puis corrections web 2026-09-24 (§19/§20) : sitemap réel généré depuis les pages publiques, les
 // événements réservables à venir et les articles publiés — jamais une liste statique périmée, jamais

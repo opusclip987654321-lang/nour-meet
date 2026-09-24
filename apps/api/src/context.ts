@@ -55,7 +55,10 @@ export const app = Fastify({ logger: true, trustProxy: (_address: string, hop: n
 // cluster-entry.ts) — without this guard, each of the setInterval(...) background
 // jobs below would fire once per worker every minute instead of once total.
 export const ownsBackgroundJobs = !cluster.isWorker || cluster.worker?.id === 1;
-export const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
+// §21 (corrections web 2026-09-24) : version d'API figée par le SDK installé (mise à jour délibérée
+// seulement, jamais implicite), délai de 20 s et 2 nouvelles tentatives réseau — le SDK pose des clés
+// d'idempotence sur les écritures, une nouvelle tentative ne crée donc jamais un double paiement.
+export const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY, { timeout: 20_000, maxNetworkRetries: 2, appInfo: { name: "nour-meet-api" } }) : null;
 
 export const smsVerification = createSmsVerificationProvider({
   mode: env.SMS_MODE,
