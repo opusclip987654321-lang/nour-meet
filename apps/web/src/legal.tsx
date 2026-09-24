@@ -1,5 +1,5 @@
 import { AlertTriangle } from "lucide-react";
-import { ReactNode } from "react";
+import { Fragment, ReactNode } from "react";
 import { useSeo } from "./lib/seo";
 import mentionsMd from "./legal/mentions-legales.md?raw";
 import cguMd from "./legal/cgu.md?raw";
@@ -21,11 +21,10 @@ const inline = (text: string): ReactNode[] =>
   text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map((part, i) =>
     part.startsWith("**") && part.endsWith("**") ? <b key={i}>{part.slice(2, -2)}</b> : part);
 
+// Chaque ligne est enveloppée dans son propre fragment à clé : sans cela, les morceaux de deux lignes
+// différentes partageaient les mêmes clés (avertissement React, contenu potentiellement omis).
 const withBreaks = (lines: string[]): ReactNode[] =>
-  lines.flatMap((line, i) => {
-    const content = inline(line.replace(/ {2,}$/, ""));
-    return i < lines.length - 1 && / {2,}$/.test(line) ? [...content, <br key={`br${i}`} />] : i < lines.length - 1 ? [...content, " "] : content;
-  });
+  lines.map((line, i) => <Fragment key={i}>{inline(line.replace(/ {2,}$/, ""))}{i < lines.length - 1 ? (/ {2,}$/.test(line) ? <br /> : " ") : null}</Fragment>);
 
 const tableCells = (row: string) => row.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
 
