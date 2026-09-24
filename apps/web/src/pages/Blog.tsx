@@ -42,7 +42,7 @@ export function Blog() {
       : articles.length === 0
         ? <div className="empty"><Inbox size={24} aria-hidden="true" /><h2>Aucun article pour le moment</h2></div>
         : <div className="event-grid">{articles.map((a, i) => <article key={a.id} className="event-card">
-          <div className="event-art"><ArticleCover imageUrl={a.imageUrl} priority={i < 3} sizes="(min-width: 1024px) 380px, (min-width: 640px) 50vw, 100vw" /></div>
+          <div className="event-art"><ArticleCover imageUrl={a.imageUrl} priority={i < 3} sizes="(min-width: 1024px) 380px, (min-width: 640px) 50vw, 100vw" />{a.imageAiGenerated && <span className="ai-image-tag">Illustration générée par IA</span>}</div>
           <div className="event-copy">
             <p className="event-date">{a.category}{a.publishedAt && <> · {publishedDate(a.publishedAt)}</>}</p>
             <h2 className="event-title"><Link to={`/blog/${a.slug}`} className="stretched">{a.title}</Link></h2>
@@ -85,7 +85,7 @@ export function ArticlePage() {
     <p className="article-meta">{article.category}{article.publishedAt && <> · <time dateTime={article.publishedAt}>{publishedDate(article.publishedAt)}</time></>}</p>
     <h1>{article.title}</h1>
     {article.excerpt && <p className="page-lead">{article.excerpt}</p>}
-    {article.imageUrl && <div className="article-cover"><ArticleCover imageUrl={article.imageUrl} priority sizes="(min-width: 800px) 760px, 100vw" /></div>}
+    {article.imageUrl && <figure className="article-cover-figure"><div className="article-cover"><ArticleCover imageUrl={article.imageUrl} priority sizes="(min-width: 800px) 760px, 100vw" /></div>{article.imageAiGenerated && <figcaption>Illustration générée par IA</figcaption>}</figure>}
     <ArticleBody content={article.content} />
     <aside className="article-end">
       <p>Envie de passer de la lecture à la rencontre ?</p>

@@ -56,3 +56,13 @@ export function sanitizeGeneratedArticle(article: GeneratedArticle, searchedUrls
 
 export const slugifyTitle = (title: string) => title.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 80);
 
+
+// Légende Instagram (corrections du 2026-09-24) : jamais d'URL (non cliquables sur Instagram et
+// potentiellement non vérifiées), limite de 2 200 caractères d'Instagram, charte éditoriale respectée.
+// null = ne pas publier cette légende.
+export function sanitizeInstagramCaption(caption: string | null | undefined): string | null {
+  if (!caption?.trim()) return null;
+  if (/musulman/i.test(caption)) return null;
+  const clean = caption.replace(/https?:\/\/\S+/g, "").replace(/\bwww\.\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return clean.length > 2200 ? clean.slice(0, 2200).replace(/\s+\S*$/, "") : clean;
+}

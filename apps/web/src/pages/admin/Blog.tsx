@@ -139,6 +139,7 @@ export function AdminArticleEditor() {
       </div>
       {article.scheduledAt&&<p className="fine left">Publication programmée le {new Date(article.scheduledAt).toLocaleString("fr-FR")}.</p>}
     </div>
+    {article.status==="PUBLISHED"&&<InstagramPanel article={article} onChanged={load}/>}
     <div className="panel" style={{marginTop:20}}>
       <div className="panel-title"><h2>Propositions sociales (IA)</h2><button type="button" className="button small secondary" disabled={busy==="social"} onClick={generateSocial}>Générer</button></div>
       {socialCopy&&<div className="stack">{socialCopy.map((s,i)=><div key={i} className="notice"><b>{s.platform}</b><p>{s.text}</p></div>)}</div>}
@@ -148,4 +149,28 @@ export function AdminArticleEditor() {
       {article.reviewLogs.map((l:any)=><p key={l.id} className="fine left">{new Date(l.createdAt).toLocaleString("fr-FR")} — {ARTICLE_STATUS_LABEL[l.fromStatus]} → {ARTICLE_STATUS_LABEL[l.toStatus]}{l.note?` : ${l.note}`:""}</p>)}
     </div>}
   </div></section></Layout>;
+}
+
+// Publication Instagram (corrections du 2026-09-24) : faite automatiquement pour l'article du jour ;
+// ici, on voit son état et on peut relancer une publication échouée, avec une légende modifiable.
+function InstagramPanel({article,onChanged}:{article:any;onChanged:()=>void}){
+  const [caption,setCaption]=useState(article.instagramCaption??"");
+  const [busy,setBusy]=useState(false);
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const publish=async()=>{
+    setBusy(true);setNotice(null);
+    try{await api(`/admin/articles/${article.id}/instagram`,{method:"POST",body:JSON.stringify(caption.trim()?{caption}:{})});setNotice({kind:"success",text:"Publié sur Instagram."});onChanged()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(false)}
+  };
+  return <div className="panel form-grid" style={{marginTop:20}}>
+    <div className="panel-title"><h2>Instagram</h2><span>{article.instagramMediaId?`Publié le ${new Date(article.instagramPublishedAt).toLocaleString("fr-FR")}`:article.instagramError?"Échec de publication":"Non publié"}</span></div>
+    {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    {article.instagramError&&!article.instagramMediaId&&<Notice kind="error">{article.instagramError}</Notice>}
+    {article.imageAiGenerated&&<p className="fine left wide">Illustration générée par IA et contrôlée automatiquement avant publication.</p>}
+    {!article.instagramMediaId&&<>
+      <label className="wide">Légende (2 200 caractères maximum, liens non cliquables sur Instagram)<textarea maxLength={2200} style={{minHeight:160}} value={caption} onChange={e=>setCaption(e.target.value)}/></label>
+      <button type="button" className="button small" disabled={busy} onClick={publish}>{busy?"Publication…":"Publier sur Instagram"}</button>
+    </>}
+  </div>;
 }

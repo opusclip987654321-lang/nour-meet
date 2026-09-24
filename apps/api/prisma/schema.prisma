@@ -836,6 +836,15 @@ model Article {
   // de l'article généré par la tâche de fond. L'unicité garantit au niveau de la base qu'un seul
   // article automatique existe par jour, même si deux passages de la tâche se chevauchent.
   autoPublishDay  String?           @unique
+  // Couverture générée par IA (OpenAI) après contrôle automatique par Claude : le site affiche alors
+  // « Illustration générée par IA », jamais une image présentée comme une photo réelle.
+  imageAiGenerated Boolean          @default(false)
+  // Publication Instagram automatique de l'article du jour : identifiant du média publié (garantit une
+  // seule publication par article), date, légende utilisée et dernière erreur éventuelle.
+  instagramCaption     String?
+  instagramMediaId     String?
+  instagramPublishedAt DateTime?
+  instagramError       String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   reviewLogs      ArticleReviewLog[]
@@ -901,4 +910,14 @@ model LegalAcceptance {
 enum LegalDocument {
   CGU
   CGV
+}
+
+// Jeton d'accès d'un réseau social (Instagram : valable 60 jours) renouvelé automatiquement par le
+// serveur. La valeur initiale vient de l'environnement (INSTAGRAM_ACCESS_TOKEN) ; chaque jeton renouvelé
+// est conservé ici pour survivre aux redémarrages. Jamais exposé par une route de l'API.
+model SocialCredential {
+  provider    String   @id
+  accessToken String
+  expiresAt   DateTime?
+  refreshedAt DateTime @default(now())
 }

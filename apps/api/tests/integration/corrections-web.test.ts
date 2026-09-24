@@ -228,7 +228,7 @@ describe("abonnement restaurateur : montée immédiate avec prorata, descente à
 describe("publication quotidienne du blog sans doublon (§3.1)", () => {
   const silentLog = { info: () => {}, warn: () => {} };
   const notify = async () => {};
-  const article = { kind: "editorial" as const, title: "Oser aller vers les autres en soirée", excerpt: "Quelques repères simples.", category: "Solitude et vie sociale", keywords: ["soirée"], metaTitle: "Oser aller vers les autres", metaDescription: "Des repères simples.", coverPhoto: "paris-terrace", sources: [], content: Array.from({ length: 12 }, (_, i) => `## Étape ${i + 1}\n\n${"Un conseil concret et bienveillant pour faire le premier pas lors d'une soirée. ".repeat(8)}`).join("\n\n") };
+  const article = { imagePrompt: "A warm Parisian café terrace at dusk", instagramCaption: "Oser aller vers les autres.\n\nArticle complet : lien en bio\n#rencontres", kind: "editorial" as const, title: "Oser aller vers les autres en soirée", excerpt: "Quelques repères simples.", category: "Solitude et vie sociale", keywords: ["soirée"], metaTitle: "Oser aller vers les autres", metaDescription: "Des repères simples.", coverPhoto: "paris-terrace", sources: [], content: Array.from({ length: 12 }, (_, i) => `## Étape ${i + 1}\n\n${"Un conseil concret et bienveillant pour faire le premier pas lors d'une soirée. ".repeat(8)}`).join("\n\n") };
 
   it("publie un seul article par jour, même avec des passages simultanés ou répétés", async () => {
     const now = new Date("2031-03-14T10:00:00Z");
@@ -247,6 +247,29 @@ describe("publication quotidienne du blog sans doublon (§3.1)", () => {
     // Le super-admin peut supprimer l'article publié.
     expect((await api(`/admin/articles/${published[0].id}`, { method: "DELETE" }, await adminToken())).status).toBe(204);
     expect((await api(`/articles/${published[0].slug}`)).status).toBe(404);
+  });
+
+  it("illustre l'article avec l'image IA contrôlée et le partage une fois sur Instagram, sans bloquer le blog si Instagram échoue", async () => {
+    const now = new Date("2031-03-16T10:00:00Z");
+    const aiProvider = { mode: "external", generateDraft: async () => ({ title: "", excerpt: "", content: "", keywords: [] }), generateSocialCopy: async () => [], generateArticle: async () => ({ article, searchedUrls: [] }) } as AIProvider;
+    const shared: string[] = [];
+    const outcome = await publishDailyArticle({
+      prisma, aiProvider, notify, log: silentLog,
+      illustrate: async () => ({ imageUrl: "/static/uploads/articles/test-illustration.webp", instagramImageUrl: "/static/uploads/articles/test-illustration-instagram.jpg", altText: "Une terrasse" }),
+      shareOnInstagram: async id => { shared.push(id); throw new Error("Instagram indisponible (test)"); }
+    }, now);
+    expect(outcome).toBe("PUBLISHED_AI");
+    const published = await prisma.article.findUniqueOrThrow({ where: { autoPublishDay: "2031-03-16" } });
+    createdArticleIds.push(published.id);
+    expect(published.status).toBe("PUBLISHED");
+    expect(published.imageUrl).toBe("/static/uploads/articles/test-illustration.webp");
+    expect(published.imageAiGenerated).toBe(true);
+    expect(published.instagramCaption).toContain("lien en bio");
+    expect(shared).toEqual([published.id]);
+    // La route publique ne révèle jamais le suivi Instagram ni la consigne IA.
+    const { body } = await api<Record<string, unknown>>(`/articles/${published.slug}`);
+    expect(body.imageAiGenerated).toBe(true);
+    for (const key of ["instagramCaption", "instagramError", "instagramMediaId", "aiPrompt"]) expect(body).not.toHaveProperty(key);
   });
 
   it("si l'IA échoue 3 fois dans la journée, publie un article de la réserve plutôt que rien", async () => {

@@ -1829,3 +1829,29 @@ a.next-card:hover {
     grid-row: 2;
   }
 }
+
+/* Mention des illustrations générées par IA (corrections du 2026-09-24) */
+.ai-image-tag {
+  position: absolute;
+  right: var(--s-3);
+  bottom: var(--s-3);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: rgb(21 23 28 / 0.72);
+  color: #fff;
+  font-size: var(--fs-xs);
+}
+
+.article-cover-figure {
+  margin: var(--s-5) 0;
+}
+
+.article-cover-figure .article-cover {
+  margin: 0;
+}
+
+.article-cover-figure figcaption {
+  margin-top: var(--s-2);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}

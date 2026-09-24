@@ -3,7 +3,10 @@ import Stripe from "stripe";
 import { aiProvider, app, ownsBackgroundJobs, prisma, stripe } from "./context.js";
 import { logArticleTransition } from "./services/articles.js";
 import { audit } from "./services/audit.js";
+import { illustrateArticle } from "./services/article-image.js";
 import { publishDailyArticle } from "./services/blog-autopublish.js";
+import { illustrationConfig, instagramConfig } from "./services/social-config.js";
+import { refreshInstagramToken, shareArticleOnInstagram } from "./services/instagram.js";
 import { cancelEventWithRefunds } from "./services/event-cancellation.js";
 import { links } from "./services/links.js";
 import { notify } from "./services/notify.js";
@@ -183,9 +186,17 @@ if (ownsBackgroundJobs) setInterval(() => { checkCancellationSpike().catch(err =
 // rien d'autre que cette tâche (erreurs capturées ici, jamais propagées au reste de l'API).
 const runDailyArticle = async () => {
   if (process.env.NODE_ENV !== "production" || getSetting("AI_BLOG_GENERATION_MODE") !== "AUTO_PUBLISH_DAILY") return;
-  const outcome = await publishDailyArticle({ prisma, aiProvider, notify, log: app.log });
+  const illustration = illustrationConfig, instagram = instagramConfig;
+  const outcome = await publishDailyArticle({ prisma, aiProvider, notify, log: app.log, illustrate: illustration ? article => illustrateArticle(illustration, aiProvider, article, app.log) : undefined, shareOnInstagram: instagram ? articleId => shareArticleOnInstagram(prisma, instagram, articleId) : undefined });
   if (outcome === "PUBLISHED_AI" || outcome === "PUBLISHED_QUEUE") app.log.info({ outcome }, "Article du jour publié");
 };
+// Jeton Instagram (60 jours) renouvelé chaque semaine, indépendamment de la publication du jour.
+const instagramForRefresh = instagramConfig;
+if (ownsBackgroundJobs && instagramForRefresh && process.env.NODE_ENV === "production") {
+  const refresh = () => refreshInstagramToken(prisma, instagramForRefresh).then(done => { if (done) app.log.info("Jeton Instagram renouvelé"); }).catch(err => app.log.warn({ err: (err as Error).message }, "Renouvellement du jeton Instagram échoué"));
+  setTimeout(refresh, 5 * 60_000);
+  setInterval(refresh, 24 * 60 * 60_000);
+}
 if (ownsBackgroundJobs) {
   setTimeout(() => { runDailyArticle().catch(err => app.log.error(err)); }, 60_000);
   setInterval(() => { runDailyArticle().catch(err => app.log.error(err)); }, 30 * 60_000);

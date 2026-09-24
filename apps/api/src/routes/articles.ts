@@ -5,6 +5,9 @@ import path from "node:path";
 import { z } from "zod";
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, aiProvider, app, articleUploadsDir, prisma } from "../context.js";
 import { assertNoForbiddenWord, logArticleTransition } from "../services/articles.js";
+import { sanitizeInstagramCaption } from "../services/blog-content.js";
+import { shareArticleOnInstagram } from "../services/instagram.js";
+import { instagramConfig } from "../services/social-config.js";
 import { audit } from "../services/audit.js";
 import { currentId, roles } from "../services/auth.js";
 
@@ -17,14 +20,16 @@ app.get("/articles", async (request) => {
     },
     orderBy: { publishedAt: "desc" },
     // Liste du journal : jamais le corps complet de chaque article (inutilement lourd), seulement la carte.
-    select: { id: true, slug: true, title: true, excerpt: true, imageUrl: true, category: true, keywords: true, publishedAt: true }
+    select: { id: true, slug: true, title: true, excerpt: true, imageUrl: true, imageAiGenerated: true, category: true, keywords: true, publishedAt: true }
   });
 });
 app.get("/articles/:slug", async (request, reply) => {
   const { slug } = z.object({ slug: z.string() }).parse(request.params);
   const article = await prisma.article.findFirst({ where: { slug, status: "PUBLISHED" }, include: { author: true } });
   if (!article) return reply.code(404).send({ error: "Article introuvable" });
-  return article;
+  // Jamais les informations internes (consigne IA, suivi Instagram, auteur complet) sur la route publique.
+  const { aiPrompt: _aiPrompt, instagramCaption: _caption, instagramMediaId: _media, instagramError: _error, instagramPublishedAt: _publishedAt, author, ...visible } = article;
+  return { ...visible, author: author ? { displayName: author.displayName } : null };
 });
 
 const articleWritableFields = {
@@ -144,4 +149,28 @@ app.get("/admin/articles/queue", { preHandler: roles(UserRole.ADMIN) }, async ()
     prisma.articleQueueEntry.findMany({ orderBy: { position: "asc" }, take: 5, select: { title: true, category: true } })
   ]);
   return { count, next };
+});
+
+// Publication Instagram manuelle d'un article publié (nouvel essai après un échec de la publication
+// automatique, ou article écrit à la main). Jamais deux fois le même article (instagramMediaId).
+app.post("/admin/articles/:id/instagram", { preHandler: roles(UserRole.ADMIN), config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const { caption } = z.object({ caption: z.string().min(10).max(2200).optional() }).parse(request.body ?? {});
+  if (!instagramConfig) return reply.code(503).send({ error: "Instagram n’est pas configuré sur ce serveur." });
+  const article = await prisma.article.findUniqueOrThrow({ where: { id } });
+  if (article.status !== "PUBLISHED") return reply.code(409).send({ error: "Seul un article publié peut être partagé sur Instagram." });
+  if (caption) {
+    const clean = sanitizeInstagramCaption(caption);
+    if (!clean) return reply.code(400).send({ error: "Légende refusée (vide ou contraire à la charte éditoriale)." });
+    await prisma.article.update({ where: { id }, data: { instagramCaption: clean } });
+  } else if (!article.instagramCaption) {
+    await prisma.article.update({ where: { id }, data: { instagramCaption: sanitizeInstagramCaption(`${article.title}\n\n${article.excerpt ?? ""}\n\nArticle complet : lien en bio\n\n#nurmeet #paris #rencontres`) } });
+  }
+  try {
+    const result = await shareArticleOnInstagram(prisma, instagramConfig, id);
+    await audit(currentId(request), "SHARE_ARTICLE_INSTAGRAM", "Article", id, { result });
+    return { result, article: await prisma.article.findUniqueOrThrow({ where: { id } }) };
+  } catch (err) {
+    return reply.code(502).send({ error: `Instagram a refusé la publication : ${(err as Error).message}` });
+  }
 });
