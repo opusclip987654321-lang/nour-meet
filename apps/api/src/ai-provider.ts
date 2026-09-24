@@ -22,7 +22,12 @@ export interface GeneratedArticle extends ArticleDraft {
   metaDescription: string;
   coverPhoto: string;
   sources: { title: string; url: string }[];
+  // Description (en anglais) de l'illustration à générer, et légende de la publication Instagram.
+  imagePrompt: string;
+  instagramCaption: string;
 }
+// Verdict du contrôle visuel d'une illustration générée, avant toute publication.
+export interface ImageReview { approved: boolean; issues: string[]; altText: string }
 export interface ArticleGenerationContext {
   today: string;
   categories: string[];
@@ -35,6 +40,7 @@ export interface AIProvider {
   generateSocialCopy(article: { title: string; excerpt: string | null; slug: string }): Promise<SocialCopyProposal[]>;
   // URLs réellement renvoyées par la recherche web : seules sources que l'article publié pourra citer.
   generateArticle?(context: ArticleGenerationContext): Promise<{ article: GeneratedArticle; searchedUrls: string[] }>;
+  reviewCoverImage?(image: Buffer, context: { title: string; imagePrompt: string }): Promise<ImageReview>;
 }
 
 // Génération locale, sans appel externe ni coût : produit un brouillon structuré à partir du sujet
@@ -94,6 +100,10 @@ Format du champ content (Markdown réduit, blocs séparés par une ligne vide) :
 - Appel à l'action : une ligne seule « [[cta:/chemin|Libellé du bouton]] ».
 - Pas de titre de niveau 1 (le titre de l'article est affiché à part), pas de section « Sources » : elle est ajoutée automatiquement à partir du champ sources.
 
+Illustration de couverture (champ imagePrompt, en anglais) : une scène photographique réaliste, naturelle et chaleureuse qui illustre le sujet. Personnes : adultes français d'origine majoritairement maghrébine et subsaharienne, femmes avec ou sans foulard, dans un décor urbain français reconnaissable (café, restaurant, terrasse ou appartement parisien). Privilégie les scènes, les mains, les silhouettes et les personnes de trois quarts ou de dos plutôt que les gros plans de visages. Interdits : alcool, symboles ou lieux religieux, calligraphie, texte, logos, filigranes. Composition centrée (l'image sera recadrée en carré pour Instagram).
+
+Légende Instagram (champ instagramCaption, en français, 1 200 caractères au plus) : une accroche forte en première ligne, 2 à 4 phrases qui donnent envie de lire, « Article complet : lien en bio », puis 5 à 8 hashtags pertinents en minuscules. Pas d'URL, pas d'emoji en excès, jamais le mot « musulman ».
+
 Photothèque (nom : description) :
 ${Object.entries(ARTICLE_PHOTOS).map(([name, description]) => `- ${name} : ${description}`).join("\n")}`;
 
@@ -104,7 +114,7 @@ const submitArticleTool = (categories: string[]): Anthropic.Beta.BetaTool => ({
   input_schema: {
     type: "object",
     additionalProperties: false,
-    required: ["kind", "title", "excerpt", "category", "keywords", "metaTitle", "metaDescription", "coverPhoto", "content", "sources"],
+    required: ["kind", "title", "excerpt", "category", "keywords", "metaTitle", "metaDescription", "coverPhoto", "content", "sources", "imagePrompt", "instagramCaption"],
     properties: {
       kind: { type: "string", enum: ["factual", "editorial"] },
       title: { type: "string", description: "Titre de l'article, 40 à 90 caractères" },
@@ -115,6 +125,8 @@ const submitArticleTool = (categories: string[]): Anthropic.Beta.BetaTool => ({
       metaDescription: { type: "string", description: "Description SEO, 155 caractères maximum" },
       coverPhoto: { type: "string", enum: Object.keys(ARTICLE_PHOTOS) },
       content: { type: "string", description: "Corps de l'article au format décrit dans les instructions" },
+      imagePrompt: { type: "string", description: "Description en anglais de l'illustration de couverture à générer" },
+      instagramCaption: { type: "string", description: "Légende de la publication Instagram, en français" },
       sources: {
         type: "array",
         description: "Sources réellement consultées via la recherche web et citées dans l'article",
@@ -174,6 +186,33 @@ Fais les recherches web nécessaires, rédige l'article, puis appelle submit_art
       if (response.stop_reason === "end_turn") messages.push({ role: "user", content: "Envoie maintenant l'article complet avec l'outil submit_article." });
     }
     throw new Error("Aucun article envoyé après plusieurs tours");
+  }
+
+  // Contrôle visuel automatique d'une illustration générée (corrections du 2026-09-24) : aucune image
+  // n'est publiée sans être passée par ce contrôle, qui applique la charte visuelle de Nūr Meet.
+  async reviewCoverImage(image: Buffer, context: { title: string; imagePrompt: string }): Promise<ImageReview> {
+    const response = await this.client.messages.create({
+      model: MODEL,
+      max_tokens: 2000,
+      system: "Tu contrôles les illustrations publiées par Nūr Meet (soirées de rencontre et de networking à Paris, public : adultes musulmans français, majoritairement d'origine maghrébine et subsaharienne). Tu refuses une image au moindre doute sérieux.",
+      tools: [{
+        name: "report_review", strict: true,
+        description: "Rend le verdict sur l'illustration.",
+        input_schema: { type: "object", additionalProperties: false, required: ["approved", "issues", "altText"], properties: {
+          approved: { type: "boolean" },
+          issues: { type: "array", items: { type: "string" }, description: "Problèmes constatés, en français (vide si approuvée)" },
+          altText: { type: "string", description: "Texte alternatif en français, une phrase descriptive, sans « image de »" }
+        } }
+      }],
+      tool_choice: { type: "tool", name: "report_review" },
+      messages: [{ role: "user", content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image.toString("base64") } },
+        { type: "text", text: `Illustration de couverture pour l'article « ${context.title} ». Description demandée : ${context.imagePrompt}\n\nRefuse l'image si : défaut visible (mains, doigts, visages déformés, corps incohérents), texte, lettres, logo ou filigrane, alcool ou verre de vin, symbole ou lieu religieux, calligraphie, décor qui ne ressemble pas à la France, personnes qui ne correspondent pas au public décrit (par exemple typées d'Asie du Sud ou du Sud-Est), contenu suggestif ou inapproprié, ou image sans rapport avec le sujet. Sinon approuve-la. Appelle report_review.` }
+      ] }]
+    });
+    const verdict = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+    if (!verdict) throw new Error("Contrôle d'image sans verdict");
+    return verdict.input as ImageReview;
   }
 }
 

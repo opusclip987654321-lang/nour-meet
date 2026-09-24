@@ -38,6 +38,18 @@ const envSchema = z.object({
   // clé, la publication quotidienne retombe sur la réserve d'articles déjà rédigés et le reste du
   // site fonctionne normalement. Clé serveur uniquement, jamais exposée au navigateur.
   ANTHROPIC_API_KEY: optionalEnvironmentSecret,
+  // Illustrations générées par IA pour l'article du jour (OpenAI Images). Facultatif : sans clé, la
+  // photothèque du site est utilisée. Modèle modifiable sans changer le code.
+  OPENAI_API_KEY: optionalEnvironmentSecret,
+  OPENAI_IMAGE_MODEL: z.string().default("gpt-image-2"),
+  // Publication automatique sur Instagram (API Instagram avec connexion Instagram). Facultatif : sans
+  // ces deux valeurs, rien n'est publié. Le jeton initial est ensuite renouvelé et conservé en base.
+  INSTAGRAM_ACCESS_TOKEN: optionalEnvironmentSecret,
+  INSTAGRAM_USER_ID: optionalEnvironmentSecret,
+  INSTAGRAM_GRAPH_VERSION: z.string().default("v24.0"),
+  // Adresse publique de l'API (ex. https://api.nourmeet.com) : Instagram télécharge l'image depuis cette
+  // adresse, qui doit donc être joignable depuis Internet.
+  API_PUBLIC_URL: z.preprocess((v) => typeof v === "string" && v.trim() === "" ? undefined : v, z.string().url().optional()),
   // See the comment beside its only use in index.ts (perWorkerConnectionLimit) for why
   // this is a total budget across all cluster workers, not a per-worker value. Keep it
   // comfortably under Postgres's max_connections (default 100) to leave headroom for

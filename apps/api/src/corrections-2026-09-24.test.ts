@@ -1,7 +1,7 @@
 import { EVENT_VIEWER_STATUS_LABEL, eventViewerStatus, upcomingEventsInOrder } from "@nour/shared";
 import { describe, expect, it } from "vitest";
 import { NOT_BOOKABLE_MESSAGE, isEventBookable, planChangeDirection } from "./domain.js";
-import { parisDay, sanitizeGeneratedArticle } from "./services/blog-content.js";
+import { parisDay, sanitizeGeneratedArticle, sanitizeInstagramCaption } from "./services/blog-content.js";
 
 // Règles critiques des corrections web du 2026-09-24 testables sans base ni serveur.
 
@@ -61,7 +61,7 @@ describe("article généré : seules les sources réellement trouvées sont publ
     "```chart\n" + JSON.stringify({ title: "Chiffre inventé", sourceLabel: "Blog", sourceUrl: "https://inconnu.example/x", data: [{ label: "a", value: 1 }, { label: "b", value: 2 }] }) + "\n```",
     "[[cta:/events|Voir les soirées]]", "[[cta:/admin|Espace admin]]"
   ].join("\n\n");
-  const base = { kind: "factual" as const, title: "La solitude en ville", excerpt: "Chapô.", category: "Solitude et vie sociale", keywords: ["Solitude"], metaTitle: "Solitude", metaDescription: "Description", coverPhoto: "friends-duo", sources: [] as { title: string; url: string }[] };
+  const base = { kind: "factual" as const, title: "La solitude en ville", excerpt: "Chapô.", category: "Solitude et vie sociale", keywords: ["Solitude"], metaTitle: "Solitude", metaDescription: "Description", coverPhoto: "friends-duo", imagePrompt: "A warm Parisian café terrace", instagramCaption: "Accroche.\n\nArticle complet : lien en bio\n#rencontres", sources: [] as { title: string; url: string }[] };
 
   it("retire les liens et graphiques non vérifiés, les images et appels à l'action invalides, et ajoute les sources", () => {
     const clean = sanitizeGeneratedArticle({ ...base, content: body("Selon [l'INSEE](https://www.insee.fr/fr/statistiques/1) et [une étude inventée](https://fausse.example/etude), voir [nos soirées](/events) ou [l'admin](/admin)."), sources: [{ title: "INSEE", url: "https://www.insee.fr/fr/statistiques/1" }, { title: "Inventée", url: "https://fausse.example/etude" }] }, ["https://www.insee.fr/fr/statistiques/1/"]);
@@ -92,5 +92,15 @@ describe("article généré : seules les sources réellement trouvées sont publ
   it("calcule le jour de publication dans le fuseau de Paris", () => {
     expect(parisDay(new Date("2026-09-24T22:30:00Z"))).toBe("2026-09-25");
     expect(parisDay(new Date("2026-09-24T21:30:00Z"))).toBe("2026-09-24");
+  });
+});
+
+describe("légende Instagram de l'article du jour", () => {
+  it("retire les URL, respecte la limite d'Instagram et refuse le mot interdit par la charte", () => {
+    const caption = sanitizeInstagramCaption(`Première ligne.\nVoir https://exemple.com/article et www.site.fr\n${"#tag ".repeat(600)}`);
+    expect(caption).not.toMatch(/https?:|www\./);
+    expect(caption!.length).toBeLessThanOrEqual(2200);
+    expect(sanitizeInstagramCaption("Rencontres musulmanes à Paris")).toBeNull();
+    expect(sanitizeInstagramCaption("   ")).toBeNull();
   });
 });
