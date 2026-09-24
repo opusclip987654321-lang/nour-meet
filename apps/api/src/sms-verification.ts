@@ -49,7 +49,7 @@ export class TwilioVerifyProvider implements SmsVerificationProvider {
     }).catch((err: Error) => {
       // Délai dépassé ou réseau coupé : indisponibilité du fournisseur, présentée comme telle (503)
       // plutôt qu'une « erreur interne » opaque.
-      throw Object.assign(new Error("Le service d’envoi des SMS est momentanément indisponible. Réessayez dans quelques instants."), { statusCode: 503, cause: err });
+      throw Object.assign(new Error("Le service d’envoi des SMS est momentanément indisponible. Réessayez dans quelques instants."), { statusCode: 503, expose: true, cause: err });
     });
     const data = await response.json().catch(() => ({})) as { status?: string; message?: string; code?: number };
     if (!response.ok) {

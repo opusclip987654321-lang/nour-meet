@@ -39,7 +39,7 @@ export async function checkEmailLoginCode(rawEmail: string, code: string) {
 // publiques de Google, émetteur, destinataire (notre identifiant client) et expiration.
 const googleKeys = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"), { timeoutDuration: 10_000 });
 export async function verifyGoogleCredential(credential: string) {
-  if (!env.GOOGLE_CLIENT_ID) throw httpError(503, "La connexion avec Google n’est pas configurée sur ce serveur.");
+  if (!env.GOOGLE_CLIENT_ID) throw Object.assign(httpError(503, "La connexion avec Google n’est pas configurée sur ce serveur."), { expose: true });
   try {
     const { payload } = await jwtVerify(credential, googleKeys, { issuer: ["https://accounts.google.com", "accounts.google.com"], audience: env.GOOGLE_CLIENT_ID });
     if (!payload.sub) throw new Error("sub manquant");
