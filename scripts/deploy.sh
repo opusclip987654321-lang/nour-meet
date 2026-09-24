@@ -49,6 +49,13 @@ echo "Nouvelle version : $NEW_SHA"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
 
+# Le Caddyfile est monté comme fichier unique : git le remplace par un nouveau fichier que le conteneur
+# ne voit pas (ni recréation ni rechargement). S'il a changé, on redémarre Caddy (coupure d'une seconde).
+if ! git diff --quiet "$PREVIOUS_SHA" HEAD -- infra/Caddyfile && docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps --services | grep -qx caddy; then
+  echo "Caddyfile modifié : redémarrage de Caddy..."
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart caddy
+fi
+
 echo "Attente de la disponibilité de l'API ($HEALTH_URL)..."
 for i in $(seq 1 30); do
   if curl -sf "$HEALTH_URL" > /dev/null; then
