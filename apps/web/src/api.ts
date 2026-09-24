@@ -11,6 +11,6 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers: { ...(init.body && !isFormData ? { "Content-Type": "application/json" } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init.headers ?? {}) }
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Object.assign(new Error(data.error ?? "Une erreur est survenue"), data);
+  if (!response.ok) throw Object.assign(new Error(data.error ?? "Une erreur est survenue"), data, { status: response.status });
   return data;
 }
