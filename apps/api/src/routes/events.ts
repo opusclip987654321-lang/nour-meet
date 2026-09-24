@@ -4,7 +4,7 @@ import { z } from "zod";
 import { app, prisma } from "../context.js";
 import { env } from "../env.js";
 import { paginated, paginationQuery, toSkipTake } from "../pagination.js";
-import { auth, currentId, optionalAuth } from "../services/auth.js";
+import { TokenUser, auth, currentId, optionalAuth } from "../services/auth.js";
 import { publicEvent, viewerStatuses } from "../services/events.js";
 
 // Corrections web 2026-09-24 (§5) : uniquement les événements à venir, du plus proche au plus éloigné
@@ -22,10 +22,17 @@ app.get("/events", { preHandler: optionalAuth }, async (request) => {
   return paginated(events.map(e => ({ ...publicEvent(e, false, viewerCategory), viewerStatus: statuses.get(e.id) ?? null })), total, query);
 });
 
-app.get("/events/:id", { preHandler: optionalAuth }, async (request) => {
+app.get("/events/:id", { preHandler: optionalAuth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const event = await prisma.event.findFirstOrThrow({ where: { OR: [{ id }, { slug: id }] }, include: { controllerRestaurant: true, venueRestaurant: true, quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } } });
   const viewerId = request.user ? currentId(request) : null;
+  // Un brouillon ou un événement en attente de validation n'est visible que de l'administration et du
+  // restaurateur qui l'organise, jamais par simple connaissance de son identifiant (revue de sécurité).
+  if (event.status === EventStatus.DRAFT || event.status === EventStatus.PENDING_REVIEW) {
+    const token = request.user as TokenUser | undefined;
+    const isOwner = !!token && !!event.controllerRestaurant && event.controllerRestaurant.ownerId === token.sub;
+    if (token?.role !== "ADMIN" && !isOwner) return reply.code(404).send({ error: "Ressource introuvable" });
+  }
   const viewerCategory = viewerId ? (await prisma.profile.findUnique({ where: { userId: viewerId } }))?.quotaCategory ?? null : null;
   const statuses = await viewerStatuses(viewerId, [event.id]);
   return { ...publicEvent(event, false, viewerCategory), viewerStatus: statuses.get(event.id) ?? null };

@@ -1,4 +1,4 @@
-import { Plan, RestaurantSubscription, SubscriptionStatus } from "@prisma/client";
+import { Plan, RestaurantSubscription, SubscriptionStatus, UserRole } from "@prisma/client";
 import Stripe from "stripe";
 import { httpError, prisma, stripe } from "../context.js";
 import { audit } from "./audit.js";
@@ -83,7 +83,8 @@ export const changeSubscriptionPlan = async (subscription: SubscriptionWithPlan,
   if (direction === "UPGRADE") {
     // Un passage à la baisse déjà programmé est annulé : on ne peut pas garder à la fois une montée
     // immédiate et une descente prévue à l'échéance.
-    await releaseSchedule(subscription.stripeScheduleId);
+    // Calendrier lu chez Stripe (et non la valeur locale, qu'un webhook désordonné aurait pu effacer).
+    await releaseSchedule(stripeSub.schedule ? (typeof stripeSub.schedule === "string" ? stripeSub.schedule : stripeSub.schedule.id) : subscription.stripeScheduleId);
     const updated = await stripe.subscriptions.update(stripeSub.id, {
       items: [{ id: item.id, price: targetPriceId }],
       proration_behavior: "always_invoice",
@@ -145,7 +146,19 @@ export const recordCheckoutSession = async (session: Stripe.Checkout.Session) =>
   const stripeSubscriptionId = typeof session.subscription === "string" ? session.subscription : session.subscription.id;
   const customerId = typeof session.customer === "string" ? session.customer : session.customer.id;
   const previous = await prisma.restaurantSubscription.findUnique({ where: { restaurantId } });
-  const alreadyRecorded = previous?.stripeSubscriptionId === stripeSubscriptionId;
+  if (previous?.stripeSubscriptionId === stripeSubscriptionId) return prisma.restaurantSubscription.findUnique({ where: { restaurantId }, include: { plan: true } });
+  // Un autre abonnement Stripe encore actif existe déjà pour cet établissement (deux paiements
+  // Checkout parallèles, ou statut modifié à la main) : on n'écrase jamais la référence de l'abonnement
+  // en cours, ce qui laisserait un abonnement facturé mais invisible — l'équipe est alertée à la place.
+  if (previous?.stripeSubscriptionId) {
+    const current = await stripe.subscriptions.retrieve(previous.stripeSubscriptionId).catch(() => null);
+    if (current && !["canceled", "incomplete_expired"].includes(current.status)) {
+      const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+      await Promise.all(admins.map(a => notify(a.id, "Double abonnement Stripe à régulariser", `Un second abonnement (${stripeSubscriptionId}) a été payé pour un établissement déjà abonné : à annuler et rembourser depuis Stripe.`, "/admin/restaurants")));
+      await audit(undefined, "DUPLICATE_SUBSCRIPTION_DETECTED", "RestaurantSubscription", previous.id, { kept: previous.stripeSubscriptionId, duplicate: stripeSubscriptionId });
+      return null;
+    }
+  }
   const stripeSub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
   const item = stripeSub.items.data[0];
   const data = {
@@ -153,8 +166,16 @@ export const recordCheckoutSession = async (session: Stripe.Checkout.Session) =>
     currentPeriodStart: new Date(item.current_period_start * 1000), currentPeriodEnd: new Date(item.current_period_end * 1000),
     cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false, cancelledAt: null, pendingPlanId: null, pendingChangeAt: null, stripeScheduleId: null
   };
-  const updated = await prisma.restaurantSubscription.upsert({ where: { restaurantId }, update: data, create: { restaurantId, ...data }, include: { plan: true } });
-  if (!alreadyRecorded) {
+  // Écriture conditionnelle : si le webhook et la resynchronisation arrivent en même temps, un seul
+  // des deux enregistre l'abonnement et envoie la notification.
+  let claimed: boolean;
+  if (previous) {
+    claimed = (await prisma.restaurantSubscription.updateMany({ where: { restaurantId, OR: [{ stripeSubscriptionId: null }, { stripeSubscriptionId: previous.stripeSubscriptionId }] }, data })).count === 1;
+  } else {
+    claimed = await prisma.restaurantSubscription.create({ data: { restaurantId, ...data } }).then(() => true, (err: { code?: string }) => { if (err.code === "P2002") return false; throw err; });
+  }
+  const updated = await prisma.restaurantSubscription.findUniqueOrThrow({ where: { restaurantId }, include: { plan: true } });
+  if (claimed && updated.stripeSubscriptionId === stripeSubscriptionId) {
     const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id: restaurantId } });
     const trial = updated.status === SubscriptionStatus.TRIALING ? ", essai gratuit de 7 jours en cours" : "";
     await notify(restaurant.ownerId, "Abonnement activé", `Votre abonnement « ${updated.plan.name} » (${billingPeriod === "ANNUAL" ? "annuel" : "mensuel"}) est confirmé${trial}.`, "/restaurant?tab=subscription");

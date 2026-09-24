@@ -11,14 +11,18 @@ import { auth, currentId, roles } from "../services/auth.js";
 import { notify } from "../services/notify.js";
 import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, syncSubscriptionFromStripe } from "../services/subscriptions.js";
 
+// Jamais les notes internes de l'administration, le taux de commission, l'auteur de la décision ni le
+// marquage démo dans une réponse destinée au restaurateur : informations internes de Nūr Meet
+// (§6.2 des corrections web 2026-09-24). Appliqué à toutes les routes qui renvoient sa fiche.
+const ownRestaurantView = <T extends { adminNotes?: unknown; commissionRate?: unknown; reviewedBy?: unknown; isDemo?: unknown }>(restaurant: T) => {
+  const { adminNotes: _adminNotes, commissionRate: _commissionRate, reviewedBy: _reviewedBy, isDemo: _isDemo, ...visible } = restaurant;
+  return visible;
+};
 app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
   const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) }, include: { photos: { orderBy: { position: "asc" } }, subscription: { include: { plan: true } }, connectedAccount: true } });
   if (!restaurant) return reply.code(404).send({ error: "Aucune demande restaurateur" });
   const usage = await prisma.restaurantMonthlyUsage.findUnique({ where: { restaurantId_yearMonth: { restaurantId: restaurant.id, yearMonth: currentYearMonth() } } });
-  // Jamais les notes internes de l'administration, le taux de commission ni l'auteur de la décision :
-  // informations internes de Nūr Meet (§6.2 des corrections web 2026-09-24).
-  const { adminNotes: _adminNotes, commissionRate: _commissionRate, reviewedBy: _reviewedBy, isDemo: _isDemo, ...visible } = restaurant;
-  return { ...visible, currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
+  return { ...ownRestaurantView(restaurant), currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
 });
 // §19/§20 : formulaire explicitement cité comme devant être protégé contre un abus automatisé,
 // au même titre que l'authentification et la génération IA.
@@ -47,7 +51,7 @@ app.post("/restaurants/apply", { preHandler: auth, config: { rateLimit: { max: s
   const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
   await Promise.all(admins.map(a => notify(a.id, "Nouvelle demande restaurateur", `${input.name} souhaite ouvrir un compte professionnel.`, "/admin/restaurants")));
   await audit(userId, "APPLY_RESTAURANT", "Restaurant", restaurant.id);
-  return reply.code(201).send(restaurant);
+  return reply.code(201).send(ownRestaurantView(restaurant));
 });
 app.get("/admin/restaurants", { preHandler: roles(UserRole.ADMIN) }, async (request) => {
   const query = z.object({ status: z.enum(["PENDING", "APPROVED", "REJECTED", "SUSPENDED"]).optional() }).parse(request.query);
@@ -100,7 +104,7 @@ app.patch("/restaurants/me", { preHandler: roles(UserRole.ORGANIZER) }, async (r
   }).parse(request.body);
   const updated = await prisma.restaurant.update({ where: { id: restaurant.id }, data: input });
   await audit(currentId(request), "UPDATE_RESTAURANT_PROFILE", "Restaurant", restaurant.id);
-  return updated;
+  return ownRestaurantView(updated);
 });
 app.post("/restaurants/me/photos", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
   const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
@@ -173,10 +177,15 @@ app.post("/restaurants/me/subscription/checkout", { preHandler: auth }, async (r
   const plan = await prisma.plan.findUniqueOrThrow({ where: { id: planId } });
   const priceId = billingPeriod === "ANNUAL" ? plan.stripePriceAnnualId : plan.stripePriceMonthlyId;
   if (!priceId) return reply.code(409).send({ error: `Formule ${plan.name} indisponible en facturation ${billingPeriod === "ANNUAL" ? "annuelle" : "mensuelle"} pour le moment.` });
-  let customerId = restaurant.subscription?.stripeCustomerId ?? undefined;
+  // Un seul client Stripe par établissement, et une seule session Checkout ouverte à la fois : deux
+  // onglets payés en parallèle créeraient sinon deux abonnements facturés (revue de sécurité 2026-09-24).
+  let customerId = restaurant.subscription?.stripeCustomerId ?? (await stripe.customers.search({ query: `metadata['restaurantId']:'${restaurant.id}'`, limit: 1 })).data[0]?.id;
   if (!customerId) {
     const customer = await stripe.customers.create({ email: restaurant.owner.email ?? undefined, name: restaurant.name, metadata: { restaurantId: restaurant.id } });
     customerId = customer.id;
+  } else {
+    const open = await stripe.checkout.sessions.list({ customer: customerId, status: "open", limit: 10 });
+    await Promise.all(open.data.map(s => stripe!.checkout.sessions.expire(s.id).catch(() => null)));
   }
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",

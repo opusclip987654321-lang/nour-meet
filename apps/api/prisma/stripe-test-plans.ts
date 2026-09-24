@@ -11,6 +11,11 @@ if (!key.startsWith("sk_test_")) {
   console.error("STRIPE_SECRET_KEY doit être une clé de TEST (sk_test_…). Abandon.");
   process.exit(1);
 }
+// Jamais contre la production : les identifiants de prix de test remplaceraient ceux du compte réel.
+if (process.env.NODE_ENV === "production" || /prod/i.test(process.env.DATABASE_URL ?? "")) {
+  console.error("Script réservé au développement : NODE_ENV=production ou base de production détectée. Abandon.");
+  process.exit(1);
+}
 const stripe = new Stripe(key);
 const prisma = new PrismaClient();
 

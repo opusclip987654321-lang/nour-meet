@@ -122,9 +122,25 @@ describe("remboursements et finances : jamais par un restaurateur (§6)", () => 
     const { body: own } = await api<Record<string, unknown>>("/restaurants/me", {}, org.token);
     expect(own).not.toHaveProperty("adminNotes");
     expect(own).not.toHaveProperty("commissionRate");
+    const { body: patched } = await api<Record<string, unknown>>("/restaurants/me", { method: "PATCH", body: JSON.stringify({ description: "Nouvelle description" }) }, org.token);
+    expect(patched).not.toHaveProperty("adminNotes");
+    expect(patched).not.toHaveProperty("commissionRate");
+    // Le billet du participant ne porte que le nom du restaurant, jamais sa fiche interne.
+    const { body: tickets } = await api<{ reservation: { event: { controllerRestaurant: Record<string, unknown> } } }[]>("/me/tickets", {}, buyer.token);
+    expect(Object.keys(tickets[0].reservation.event.controllerRestaurant).sort()).toEqual(["id", "name"]);
     // Le super-admin, lui, rembourse réellement (Stripe test).
     const refund = await api<{ refunded: boolean }>(`/admin/payments/${payment.id}/refund`, { method: "POST", body: JSON.stringify({}) }, await adminToken());
     expect(refund.body.refunded).toBe(true);
+  });
+});
+
+describe("brouillon d'événement invisible hors administration et restaurateur propriétaire", () => {
+  it("renvoie 404 à un visiteur ou un participant, la fiche à l'admin", async () => {
+    const draft = await publishedEvent({ status: "DRAFT" });
+    const buyer = await participant("DraftViewer");
+    expect((await api(`/events/${draft.slug}`)).status).toBe(404);
+    expect((await api(`/events/${draft.slug}`, {}, buyer.token)).status).toBe(404);
+    expect((await api(`/events/${draft.slug}`, {}, await adminToken())).status).toBe(200);
   });
 });
 

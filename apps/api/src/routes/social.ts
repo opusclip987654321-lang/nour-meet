@@ -12,7 +12,7 @@ import { notify } from "../services/notify.js";
 import { getSetting } from "../settings.js";
 
 app.get("/me/tickets", { preHandler: auth }, async (request) => {
-  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: true } } } } }, orderBy: { createdAt: "desc" } });
+  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: { select: { id: true, name: true } } } } } } }, orderBy: { createdAt: "desc" } });
   return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await cachedQrDataUrl(t.code) })));
 });
 

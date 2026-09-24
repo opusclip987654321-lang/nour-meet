@@ -197,7 +197,10 @@ await app.register(async (webhooks) => {
         const wasActiveOrTrialing = existing.status === SubscriptionStatus.ACTIVE || existing.status === SubscriptionStatus.TRIALING;
         // §1.4 (corrections web 2026-09-24) : formule, statut, période et changement différé toujours
         // recopiés depuis Stripe par la même fonction que la resynchronisation manuelle.
-        const synced = await syncSubscriptionFromStripe(existing, stripeSub, { deleted: event.type === "customer.subscription.deleted" });
+        // Stripe ne garantit pas l'ordre des événements : on recopie l'état relu à l'instant chez Stripe,
+        // jamais l'instantané éventuellement périmé porté par l'événement (revue de sécurité 2026-09-24).
+        const fresh = event.type === "customer.subscription.deleted" ? stripeSub : await stripe.subscriptions.retrieve(stripeSub.id);
+        const synced = await syncSubscriptionFromStripe(existing, fresh, { deleted: event.type === "customer.subscription.deleted" || fresh.status === "canceled" });
         const status = synced.status;
         if (synced.planId !== existing.planId) await notify(existing.restaurant.ownerId, "Formule d’abonnement modifiée", `Votre établissement est désormais en formule « ${synced.plan.name} ».`, "/restaurant?tab=subscription");
         // C09 : ne notifier une expiration/désactivation que sur une vraie transition, jamais à

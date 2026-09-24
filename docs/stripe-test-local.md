@@ -66,3 +66,11 @@ confirme : statut « Place confirmée », billet QR dans « Mes billets », noti
 
 **Événement de démonstration** (`isDemo`) : le paiement est refusé par l'API avec le message
 « Cet événement n'est actuellement pas réservable » — aucun PaymentIntent n'est créé.
+
+## Bon à savoir
+
+- Pour un abonnement souscrit via Stripe, **Stripe fait foi** : une modification manuelle du statut
+  depuis Administration → Restaurateurs est écrasée au prochain webhook ou à la prochaine
+  resynchronisation. Pour bloquer un restaurateur, suspendre l'établissement (statut `SUSPENDED`).
+- Un second paiement Checkout pour un établissement déjà abonné n'écrase jamais l'abonnement en
+  cours : les administrateurs reçoivent une notification « Double abonnement Stripe à régulariser ».
