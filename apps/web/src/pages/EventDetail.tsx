@@ -238,10 +238,10 @@ export function EventDetail() {
         <section aria-labelledby="deroulement" className="event-block">
           <h2 id="deroulement">Comment ça se passe</h2>
           <ol className="steps compact">
-            {requiresScreening?<li><b>Votre profil est validé</b><span>Un court entretien avec l’équipe, une seule fois, avant votre première soirée de rencontre.</span></li>:<li><b>Vous vous inscrivez</b><span>Aucune étape préalable : la place est à vous dès {free?"votre confirmation":"le paiement confirmé"}.</span></li>}
+            {requiresScreening?<li><b>Votre profil est validé</b><span>Un court appel avec l’équipe, une seule fois, avant votre première soirée de rencontre. <Link className="text-link" to="/concept#entretien">En savoir plus</Link></span></li>:<li><b>Vous vous inscrivez</b><span>Aucune étape préalable : la place est à vous dès {free?"votre confirmation":"le paiement confirmé"}.</span></li>}
             <li><b>Vous réservez votre place</b><span>{free?"Soirée gratuite : une simple confirmation, et votre billet avec QR code arrive aussitôt.":"Paiement sécurisé par Stripe ; votre billet avec QR code arrive aussitôt."}</span></li>
             <li><b>Le jour J</b><span>L’équipe vous accueille sur place et anime la soirée{event.hasQuotas?", avec des places équilibrées entre femmes et hommes":""}.</span></li>
-            <li><b>Après la soirée</b><span>Vous pouvez demander à revoir quelqu’un ; l’échange ne s’ouvre que si l’intérêt est réciproque.</span></li>
+            <li><b>Après la soirée</b><span>Échangez vos codes sur place ; la conversation ne s’ouvre que si l’intérêt est réciproque. <Link className="text-link" to="/concept#garder-contact">Voir comment</Link></span></li>
           </ol>
         </section>
         {event.photos.length>0&&<section aria-labelledby="photos" className="event-block"><h2 id="photos">Le lieu</h2><div className="event-gallery">{event.photos.map((url,i)=><img key={i} src={imgUrl(url)} alt={`Photo ${i+1} du lieu`} loading="lazy" width={480} height={360}/>)}</div></section>}
@@ -266,7 +266,7 @@ export function EventDetail() {
     </>
     :user.hasRestaurant?<Notice kind="info">Votre compte restaurateur vous permet de découvrir les événements proposés, mais ne permet pas d’y participer.</Notice>
     :!user.phoneVerified?<PhoneVerification compact/>
-    :requiresScreening&&!profileValidated?<Notice kind="error">Votre profil doit d’abord être validé lors d’un entretien avec Nūr Meet avant de vous inscrire à un speed dating. <Link to="/dashboard">Demander mon entretien →</Link></Notice>
+    :requiresScreening&&!profileValidated?<Notice kind="info"><span>Première soirée de rencontre ? Validez d’abord votre profil : un court appel avec l’équipe, une seule fois. <Link className="text-link" to="/dashboard?tab=interview">Demander mon entretien</Link> · <Link className="text-link" to="/concept#entretien">Comment ça se passe</Link></span></Notice>
     :categoryUnknown?<Notice kind="error">Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement.</Notice>
     :requiresScreening&&showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>
     :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même vous inscrire : au moment de payer, vous serez placé(e) sur liste d’attente et, si possible, une soirée comparable vous sera proposée.</Notice>}<button className="button full" disabled={busy} onClick={()=>requiresScreening?setShowQuestionnaire(true):apply()}>{requiresScreening?"Candidater":busy?"…":"S’inscrire"}</button></>}

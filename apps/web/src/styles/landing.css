@@ -1,0 +1,450 @@
+/* Refonte conversion du 2026-09-25 (accueil et « Comment ça marche ») : sections courtes, lisibles
+   en diagonale, illustrations IA pédagogiques. Uniquement des tokens (voir DESIGN.md), pour que le
+   mode sombre s'applique sans règle supplémentaire. */
+
+/* Illustration IA : la mention reste visible en bas à droite de l'image (voir brand.tsx). */
+.ai-picture {
+  position: relative;
+  display: block;
+}
+
+.ai-picture picture {
+  display: block;
+  height: 100%;
+}
+
+.ai-picture .ai-image-tag {
+  z-index: 1;
+}
+
+/* Là où une carte recouvre le bas de l'image, la mention passe en haut ou à gauche. */
+.home-hero .ai-image-tag {
+  top: var(--s-3);
+  bottom: auto;
+}
+
+.contact-photo .ai-image-tag {
+  right: auto;
+  left: var(--s-3);
+}
+
+.home-hero-visual .hero-photo-main {
+  margin-right: 0;
+}
+
+/* Le principe en trois points */
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-5);
+}
+
+.pillar {
+  display: grid;
+  align-content: start;
+  gap: var(--s-2);
+  padding: var(--s-5);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  min-width: 0;
+}
+
+.pillar svg {
+  color: var(--saffron-ink);
+  margin-bottom: var(--s-2);
+}
+
+.pillar h3 {
+  margin: 0;
+}
+
+.pillar p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+/* Formats : bénéfices en liste courte plutôt qu'en paragraphe */
+.format-points {
+  list-style: none;
+  margin: 0 0 var(--s-2);
+  padding: 0;
+  display: grid;
+  gap: var(--s-2);
+  color: var(--ink-2);
+}
+
+.format-points li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--s-2);
+}
+
+.format-points svg {
+  color: var(--success);
+  margin-top: 3px;
+}
+
+.format-copy .button {
+  justify-self: start;
+}
+
+.step-link {
+  margin-top: var(--s-1);
+  font-size: var(--fs-sm);
+}
+
+/* Entretien de validation */
+.explainer {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: clamp(var(--s-6), 5vw, var(--s-8));
+  align-items: center;
+  scroll-margin-top: calc(var(--header-h) + var(--s-4));
+}
+
+.explainer-photo img {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.explainer-copy {
+  min-width: 0;
+}
+
+.explainer-copy h2,
+.explainer-copy h3 {
+  margin: 0;
+}
+
+.explainer-lead {
+  margin: var(--s-3) 0 var(--s-5);
+  color: var(--ink-2);
+  font-size: var(--fs-lg);
+  max-width: 52ch;
+}
+
+.mini-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-3);
+}
+
+.mini-steps li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.mini-steps li > svg {
+  color: var(--saffron-ink);
+}
+
+.mini-steps b {
+  display: block;
+}
+
+.mini-steps span:not(.mini-step-num) {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.mini-step-num {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-pill);
+  background: var(--night);
+  color: var(--on-night);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+}
+
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
+  margin-top: var(--s-5);
+}
+
+.why-grid div {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  background: var(--success-bg);
+  color: var(--success);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  min-width: 0;
+}
+
+.explainer-note {
+  margin: var(--s-4) 0 0;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+/* Échange de codes et reprise de contact : bande nuit, lisible sans lire */
+.contact-band {
+  background: var(--band);
+  color: var(--on-night);
+  scroll-margin-top: var(--header-h);
+}
+
+.contact-inner {
+  width: min(100% - 2 * var(--gutter), var(--container));
+  margin-inline: auto;
+  padding-block: clamp(var(--s-7), 7vw, var(--s-9));
+  display: grid;
+  gap: clamp(var(--s-6), 4vw, var(--s-7));
+}
+
+.contact-head {
+  max-width: 760px;
+  display: grid;
+  gap: var(--s-3);
+}
+
+.contact-head h2,
+.contact-head h3 {
+  color: var(--on-night);
+  margin: 0;
+}
+
+.contact-head p {
+  margin: 0;
+  color: var(--on-night-2);
+  font-size: var(--fs-lg);
+}
+
+.contact-visual {
+  position: relative;
+  padding-right: clamp(0px, 14vw, 180px);
+}
+
+.contact-photo img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--r-lg);
+  box-shadow: 0 24px 48px -24px rgb(0 0 0 / 0.6);
+}
+
+.code-card {
+  position: absolute;
+  right: 0;
+  bottom: -32px;
+  width: 240px;
+  display: grid;
+  justify-items: center;
+  gap: var(--s-2);
+  padding: var(--s-5) var(--s-4);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.code-card-title {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.code-card b {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.code-card-sent {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 2px var(--s-3);
+  border-radius: var(--r-pill);
+  background: var(--success-bg);
+  color: var(--success);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.contact-steps {
+  list-style: none;
+  margin: var(--s-4) 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+
+.contact-steps li {
+  display: grid;
+  align-content: start;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  border: 1px solid var(--on-night-line);
+  border-radius: var(--r-md);
+  min-width: 0;
+}
+
+.contact-steps .mini-step-num {
+  background: var(--saffron);
+  color: var(--on-saffron);
+}
+
+.contact-steps li > svg {
+  color: var(--saffron);
+}
+
+.contact-steps b {
+  color: var(--on-night);
+}
+
+.contact-steps span:not(.mini-step-num) {
+  color: var(--on-night-2);
+  font-size: var(--fs-sm);
+}
+
+.after-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: clamp(var(--s-5), 4vw, var(--s-7));
+  align-items: center;
+}
+
+.after-photo img {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  border-radius: var(--r-lg);
+}
+
+.after-row h3 {
+  color: var(--on-night);
+  margin: 0 0 var(--s-4);
+  font-size: var(--fs-h2);
+}
+
+.after-row .check-list li {
+  color: var(--on-night-2);
+}
+
+.after-row .check-list svg {
+  color: var(--saffron);
+}
+
+.after-row .button {
+  margin-top: var(--s-5);
+}
+
+/* Confiance : six engagements en une ligne chacun */
+.trust-tiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+
+.trust-tiles li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-weight: 600;
+}
+
+.trust-tiles svg {
+  color: var(--saffron-ink);
+}
+
+/* Squelettes des cartes (dimensions en tokens, plus de styles en ligne) */
+.skeleton-media {
+  aspect-ratio: 4 / 3;
+}
+
+.skeleton-line {
+  height: 18px;
+  width: 60%;
+}
+
+.skeleton-line.short {
+  width: 50%;
+}
+
+.skeleton-line.tall {
+  height: 26px;
+  width: 85%;
+}
+
+@media (max-width: 900px) {
+  .pillars,
+  .trust-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .explainer,
+  .after-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .explainer-photo img {
+    aspect-ratio: 16 / 10;
+  }
+
+  .contact-visual {
+    padding-right: 0;
+    display: grid;
+    gap: var(--s-4);
+  }
+
+  .code-card {
+    position: static;
+    width: 100%;
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-items: start;
+    text-align: left;
+    align-items: center;
+  }
+
+  .code-card > svg {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    width: 64px;
+    height: 64px;
+  }
+
+  .code-card > :not(svg) {
+    grid-column: 2;
+  }
+
+  .contact-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .why-grid,
+  .contact-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

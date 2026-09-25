@@ -22,7 +22,7 @@ function MyCode() {
     <div className="contact-code-body">
       {qr ? <img src={qr.qrDataUrl} alt={`QR code de votre code personnel ${qr.code}`} width={152} height={152}/> : <div className="skeleton" style={{ width: 152, height: 152 }}/>}
       <div>
-        <p>Pendant une soirée, montrez ce QR code ou donnez ce code à une personne que vous souhaitez revoir. Elle pourra vous envoyer une demande : rien ne s’ouvre sans votre accord.</p>
+        <ol className="interview-steps"><li><b>1.</b> Montrez ce QR code ou dictez votre code</li><li><b>2.</b> La personne le scanne (application) ou le saisit (site)</li><li><b>3.</b> Vous recevez sa demande : rien ne s’ouvre sans votre accord</li></ol>
         {qr && <strong className="contact-code-value">{qr.code}</strong>}
       </div>
     </div>
@@ -51,7 +51,7 @@ function AddContact({ onSent }: { onSent: () => void }) {
   return <section className="panel" aria-labelledby="add-contact">
     <div className="panel-title"><h2 id="add-contact">Revoir quelqu’un</h2></div>
     <form className="contact-lookup" onSubmit={lookup}>
-      <label>Code personnel de la personne<input value={code} onChange={e => setCode(e.target.value)} placeholder="Code reçu lors de la soirée" autoCapitalize="off" autoCorrect="off" spellCheck={false} autoComplete="off"/></label>
+      <label>Code personnel de la personne<input value={code} onChange={e => setCode(e.target.value)} placeholder="Ex. NOUR-3F9A-C21B-07E4" autoCapitalize="off" autoCorrect="off" spellCheck={false} autoComplete="off"/></label>
       <button className="button secondary" disabled={busy || !code.trim()}><Search size={18} aria-hidden="true"/>Rechercher</button>
     </form>
     {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
