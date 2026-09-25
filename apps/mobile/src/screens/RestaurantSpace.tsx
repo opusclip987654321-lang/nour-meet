@@ -52,10 +52,25 @@ function Establishment({ restaurant, onChanged }: { restaurant: any; onChanged: 
   const [notice, setNotice] = useState<{ kind: "error" | "success"; text: string } | null>(null), [busy, setBusy] = useState(false), [photoBusy, setPhotoBusy] = useState(false);
   useEffect(() => { if (restaurant) setForm(formFrom(restaurant)); }, [restaurant]);
   const set = (patch: Partial<Form>) => setForm(f => ({ ...f, ...patch }));
+  // Au moins une photo de l'établissement accompagne la demande (obligatoire pour l'approbation).
+  const [applicationPhotos, setApplicationPhotos] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const pickApplicationPhotos = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) { Alert.alert("Accès refusé", "Autorisez l’accès aux photos pour ajouter une photo."); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8, allowsMultipleSelection: true, selectionLimit: 8 });
+    if (!result.canceled) setApplicationPhotos(result.assets.slice(0, 8));
+  };
+  const sendPhoto = (asset: ImagePicker.ImagePickerAsset) => { const body = new FormData(); body.append("file", { uri: asset.uri, name: asset.fileName ?? "photo.jpg", type: asset.mimeType ?? "image/jpeg" } as any); return api("/restaurants/me/photos", { method: "POST", body }); };
   const submit = async () => {
     if (!form.name.trim() || !form.managerName.trim() || !/^\d{14}$/.test(form.siret)) { setNotice({ kind: "error", text: "Renseignez le nom, le responsable et un SIRET à 14 chiffres." }); return; }
+    if (applicationPhotos.length === 0) { setNotice({ kind: "error", text: "Ajoutez au moins une photo de votre établissement." }); return; }
     setBusy(true); setNotice(null);
-    try { await api("/restaurants/apply", { method: "POST", body: JSON.stringify(payload(form)) }); setNotice({ kind: "success", text: "Votre demande a été envoyée." }); onChanged(); }
+    try {
+      await api("/restaurants/apply", { method: "POST", body: JSON.stringify(payload(form)) });
+      let failed = 0;
+      for (const asset of applicationPhotos) await sendPhoto(asset).catch(() => { failed++; });
+      setNotice(failed ? { kind: "error", text: `Votre demande a été envoyée, mais ${failed} photo(s) n’ont pas pu être ajoutées : ajoutez-en au moins une.` } : { kind: "success", text: "Votre demande a été envoyée." }); onChanged();
+    }
     catch (e) { setNotice({ kind: "error", text: (e as Error).message }); }
     finally { setBusy(false); }
   };
@@ -72,7 +87,7 @@ function Establishment({ restaurant, onChanged }: { restaurant: any; onChanged: 
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
     setPhotoBusy(true); setNotice(null);
-    try { const body = new FormData(); body.append("file", { uri: asset.uri, name: asset.fileName ?? "photo.jpg", type: asset.mimeType ?? "image/jpeg" } as any); await api("/restaurants/me/photos", { method: "POST", body }); onChanged(); }
+    try { await sendPhoto(asset); onChanged(); }
     catch (e) { setNotice({ kind: "error", text: (e as Error).message }); }
     finally { setPhotoBusy(false); }
   };
@@ -95,9 +110,15 @@ function Establishment({ restaurant, onChanged }: { restaurant: any; onChanged: 
     <Field label="Conditions particulières" multiline value={form.specialConditions} onChangeText={v => set({ specialConditions: v })} />
   </>;
 
-  if (restaurant?.status === "PENDING") return <Notice>Votre demande pour « {restaurant.name} » est en cours d’examen.</Notice>;
+  const photos = restaurant?.photos ?? [];
+  const gallery = <View style={s.panel}>
+    <View style={[s.row, { justifyContent: "space-between" }]}><Text style={s.h3}>Galerie</Text><Text style={s.meta}>{photos.length}/8 photos</Text></View>
+    {photos.length === 0 && <Notice kind="error">Ajoutez au moins une photo de votre établissement : elle est obligatoire pour l’approbation de votre compte et pour soumettre une soirée.</Notice>}
+    <View style={[s.row, { flexWrap: "wrap", gap: S[3] }]}>{photos.map((p: any) => <View key={p.id} style={{ width: 96, gap: 2 }}><Image source={{ uri: imgUrl(p.url) }} style={{ width: 96, height: 96, borderRadius: R.sm, backgroundColor: T.surface2 }} /><Pressable onPress={() => removePhoto(p.id)} disabled={photoBusy} style={{ minHeight: 36, justifyContent: "center" }}><Text style={[s.link, { fontSize: 13, textAlign: "center" }]}>Retirer</Text></Pressable></View>)}</View>
+    <Button small variant="secondary" title="Ajouter une photo" busy={photoBusy} disabled={photos.length >= 8} onPress={uploadPhoto} />
+  </View>;
+  if (restaurant?.status === "PENDING") return <><Notice>Votre demande pour « {restaurant.name} » est en cours d’examen.</Notice>{notice && <Notice kind={notice.kind}>{notice.text}</Notice>}{gallery}</>;
   if (restaurant?.status === "APPROVED") {
-    const photos = restaurant.photos ?? [];
     return <>
       <Notice kind="success">Votre établissement « {restaurant.name} » est approuvé.</Notice>
       <View style={s.panel}>
@@ -106,11 +127,7 @@ function Establishment({ restaurant, onChanged }: { restaurant: any; onChanged: 
         {priceFields}
         <Button title="Enregistrer" busy={busy} onPress={save} />
       </View>
-      <View style={s.panel}>
-        <View style={[s.row, { justifyContent: "space-between" }]}><Text style={s.h3}>Galerie</Text><Text style={s.meta}>{photos.length}/8 photos</Text></View>
-        <View style={[s.row, { flexWrap: "wrap", gap: S[3] }]}>{photos.map((p: any) => <View key={p.id} style={{ width: 96, gap: 2 }}><Image source={{ uri: imgUrl(p.url) }} style={{ width: 96, height: 96, borderRadius: R.sm, backgroundColor: T.surface2 }} /><Pressable onPress={() => removePhoto(p.id)} disabled={photoBusy} style={{ minHeight: 36, justifyContent: "center" }}><Text style={[s.link, { fontSize: 13, textAlign: "center" }]}>Retirer</Text></Pressable></View>)}</View>
-        <Button small variant="secondary" title="Ajouter une photo" busy={photoBusy} disabled={photos.length >= 8} onPress={uploadPhoto} />
-      </View>
+      {gallery}
     </>;
   }
   return <View style={s.panel}>
@@ -125,7 +142,8 @@ function Establishment({ restaurant, onChanged }: { restaurant: any; onChanged: 
     <Field label="Adresse" value={form.address} onChangeText={v => set({ address: v })} />
     <Field label="Description" multiline value={form.description} onChangeText={v => set({ description: v })} />
     {priceFields}
-    <Text style={s.meta}>Le SIRET est déclaratif : Nūr Meet ne réalise pas de vérification officielle auprès d’un registre. La galerie de photos se complète après approbation.</Text>
+    <Button small variant="secondary" title={applicationPhotos.length ? `${applicationPhotos.length} photo(s) de l’établissement choisie(s)` : "Choisir les photos de l’établissement (au moins une)"} onPress={pickApplicationPhotos} />
+    <Text style={s.meta}>Le SIRET est déclaratif : Nūr Meet ne réalise pas de vérification officielle auprès d’un registre.</Text>
     <Button title="Envoyer ma demande" busy={busy} onPress={submit} />
   </View>;
 }
@@ -205,7 +223,7 @@ function Subscription({ restaurant, onChanged }: { restaurant: any; onChanged: (
       </View>
     </View>}
     <Text style={s.h2}>{subscribed ? "Les formules" : "Choisissez votre formule"}</Text>
-    <Text style={s.small}>Prix hors taxes. {!subscription ? "Essai gratuit de 7 jours, carte requise, résiliable avant l’échéance." : "Sans engagement au-delà de la période en cours."}</Text>
+    <Text style={s.small}>Prix hors taxes. {!subscription ? `Essai gratuit de ${restaurant.trialDays ?? 7} jours, carte requise, résiliable avant l’échéance.` : "Sans engagement au-delà de la période en cours."}</Text>
     {!subscribed && <View style={s.row}><Chip label="Mensuel" active={period === "MONTHLY"} onPress={() => setPeriod("MONTHLY")} /><Chip label="Annuel · 2 mois offerts" active={period === "ANNUAL"} onPress={() => setPeriod("ANNUAL")} /></View>}
     {plans === null ? [0, 1].map(i => <Skeleton key={i} height={380} />) : plans.map(plan => {
       const price = priceFor(plan, period);

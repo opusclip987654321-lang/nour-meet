@@ -100,7 +100,9 @@ function EventDetail({ user, slug, navigate, goBack, onUserChanged }: { user: an
     const result = await api<{ confirmed: boolean }>(`/applications/${application.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) });
     setMessage({ kind: "success", text: result.confirmed ? "Place confirmée ! Votre billet est dans votre espace." : "Votre place a déjà été confirmée." }); refresh();
   });
-  const pay = () => run(async () => { await payByCard(application.id, event.id, event.priceCents); refresh(); });
+  // Montant résolu par le serveur (tarif différencié compris), jamais le prix de base de la fiche.
+  const amountCents: number = application?.amountCents ?? event.priceCents;
+  const pay = () => run(async () => { await payByCard(application.id, event.id, amountCents); refresh(); });
   const cancel = () => run(async () => {
     const result = await api<{ refunded: boolean; refundedAmountCents: number | null; eligible: boolean | null }>(`/me/applications/${application.id}/cancel`, { method: "POST" });
     setMessage({ kind: "success", text: result.refunded ? `Inscription annulée. ${money(result.refundedAmountCents!)} ont été remboursés intégralement.` : result.eligible === false ? "Inscription annulée. Conformément à notre politique, aucun remboursement n’est possible à 24 heures ou moins de l’événement." : "Inscription annulée." });
@@ -131,8 +133,8 @@ function EventDetail({ user, slug, navigate, goBack, onUserChanged }: { user: an
         {event.viewerStatus === "WAITLIST" ? <Notice>Vous êtes sur la liste d’attente. Dès qu’une place se libère, vous êtes prévenu(e) : elle revient à la première personne qui finalise son paiement.</Notice>
           : <Notice kind="success">{application.reservation ? `Votre place est retenue quelques minutes (jusqu’au ${when(application.reservation.expiresAt)}) : finalisez votre paiement.` : "Vous pouvez régler votre billet dès maintenant."}</Notice>}
         {!phoneOk ? <PhoneVerification onVerified={() => { setNeedsPhone(false); onUserChanged(); }} />
-          : event.priceCents === 0 ? <><ConsentCheck checked={acceptCgv} onChange={setAcceptCgv}>J’ai lu et j’accepte les {legalLink("conditions générales de vente", "cgv")}, notamment la politique d’annulation.</ConsentCheck><Button title="Confirmer ma place (gratuit)" busy={busy} disabled={!acceptCgv} onPress={confirmFree} /></>
-            : <Button title={`Payer par carte · ${money(event.priceCents)}`} busy={busy} onPress={pay} />}
+          : amountCents === 0 ? <><ConsentCheck checked={acceptCgv} onChange={setAcceptCgv}>J’ai lu et j’accepte les {legalLink("conditions générales de vente", "cgv")}, notamment la politique d’annulation.</ConsentCheck><Button title="Confirmer ma place (gratuit)" busy={busy} disabled={!acceptCgv} onPress={confirmFree} /></>
+            : <Button title={`Payer par carte · ${money(amountCents)}`} busy={busy} onPress={pay} />}
       </View>}
       {application.call && application.status === "CALL_SCHEDULED" && <Notice>Entretien programmé le {when(application.call.startsAt)} : l’équipe Nūr Meet vous appellera à cette heure.</Notice>}
       {waitlistEntry ? <View style={s.panel}><Badge tone="warning" label="Liste d’attente" /><Text style={s.bodyStrong}>Position {waitlistEntry.rank ?? waitlistEntry.position}</Text><Button small variant="secondary" title="Quitter la liste d’attente" busy={busy} onPress={leaveWaitlist} /></View>

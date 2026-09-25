@@ -1,14 +1,23 @@
 import { Inbox, X } from "lucide-react";
 import { EVENT_CATEGORIES, EVENT_ZONES } from "@nour/shared";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../api";
 import { useAuth } from "../../auth";
 import { Layout } from "../../components/Layout";
 import { CategoryBadge, Loading, Notice } from "../../components/ui";
 import { dateTime, imgUrl } from "../../lib/format";
-import { EVENT_STATUS_LABEL } from "../../lib/labels";
+import { EVENT_STATUS_LABEL, QUOTA_CATEGORY_LABEL } from "../../lib/labels";
 import { AdminNav } from "./AdminNav";
+
+// Prix saisis en euros (« 35 » ou « 29,50 »), comme dans l'application mobile — stockés en centimes.
+// Le texte tapé est gardé tel quel pendant la frappe (« 29, » ne doit pas redevenir « 29 »).
+function EuroInput({ cents, onChange, required }: { cents: number; onChange: (cents: number) => void; required?: boolean }) {
+  const format = (c: number) => (c / 100).toFixed(2).replace(".", ",").replace(",00", "");
+  const [text, setText] = useState(format(cents));
+  useEffect(() => { setText(prev => { const n = Number(prev.replace(",", ".")); return Number.isFinite(n) && Math.round(n * 100) === cents ? prev : format(cents); }); }, [cents]);
+  return <input required={required} inputMode="decimal" pattern="[0-9]+([,.][0-9]{1,2})?" value={text} onChange={e => { setText(e.target.value); const n = Number(e.target.value.replace(",", ".")); if (Number.isFinite(n) && n >= 0) onChange(Math.round(n * 100)); }}/>;
+}
 
 export function AdminCreateEvent() {
   const {user}=useAuth();
@@ -30,7 +39,9 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
     finally{setSubmitting(false)}
   };
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Créer une soirée</h1><p className="fine left">{user?.role==="ORGANIZER"?"Votre soirée démarre en brouillon : ajoutez ensuite vos photos puis soumettez-la à validation.":"Vous publiez directement vos propres événements."}</p>
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Créer une soirée</h1><p className="fine left">{user?.role==="ORGANIZER"?"Votre soirée démarre en brouillon : ajoutez ensuite ses photos puis soumettez-la à validation (au moins une photo de votre établissement est obligatoire).":"Vous publiez directement vos propres événements."}</p>
+    {user?.role==="ORGANIZER"&&restaurantInfo&&!(restaurantInfo.photos?.length>0)&&<Notice kind="error">Ajoutez d’abord au moins une photo de votre établissement : sans elle, la soirée ne pourra pas être soumise à validation. <Link className="text-link" to="/restaurant">Ajouter une photo</Link></Notice>}
+    {user?.role==="ORGANIZER"&&restaurantInfo&&!["ACTIVE","TRIALING"].includes(restaurantInfo.subscription?.status)&&<Notice kind="info">Aucun abonnement actif : vous pouvez préparer et soumettre votre soirée, mais elle ne sera publiée qu’avec une formule active. <Link className="text-link" to="/restaurant?tab=subscription">Choisir une formule</Link></Notice>}
     {user?.role==="ORGANIZER"&&restaurantInfo?.subscription&&<Notice kind="info">Abonnement « {restaurantInfo.subscription.plan.name} » ({(restaurantInfo.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois) — {restaurantInfo.currentMonthEventsPublished}{restaurantInfo.subscription.plan.monthlyEventQuota==null?" événements publiés ce mois-ci (illimité)":`/${restaurantInfo.subscription.plan.monthlyEventQuota} événements publiés ce mois-ci`}. Un brouillon ne consomme le quota qu’à sa première publication.</Notice>}
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <form className="panel form-grid" onSubmit={submit}>
@@ -44,7 +55,7 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
       <div className="time-row"><label>Début<input required type="datetime-local" value={form.startsAt} onChange={e=>setForm({...form,startsAt:e.target.value})}/></label><label>Fin<input required type="datetime-local" value={form.endsAt} onChange={e=>setForm({...form,endsAt:e.target.value})}/></label></div>
       <label>Quartier / ville<input required value={form.district} onChange={e=>setForm({...form,district:e.target.value})}/></label>
       <label>Adresse<input required value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></label>
-      <div className="time-row"><label>Capacité totale<input required type="number" min={5} max={500} value={form.capacity} onChange={e=>setForm({...form,capacity:Number(e.target.value)})}/></label><label>Prix (centimes)<input required type="number" min={0} value={form.priceCents} onChange={e=>setForm({...form,priceCents:Number(e.target.value)})}/></label></div>
+      <div className="time-row"><label>Capacité totale<input required type="number" min={5} max={500} value={form.capacity} onChange={e=>setForm({...form,capacity:Number(e.target.value)})}/></label><label>Prix (€, TTC)<EuroInput required cents={form.priceCents} onChange={c=>setForm({...form,priceCents:c})}/></label></div>
       <div className="wide"><small>Prestations réellement incluses</small><div className="perks-checks">
         <label><input type="checkbox" checked={form.includesDrink} onChange={e=>setForm({...form,includesDrink:e.target.checked})}/> Boisson</label>
         <label><input type="checkbox" checked={form.includesStarter} onChange={e=>setForm({...form,includesStarter:e.target.checked})}/> Entrée</label>
@@ -173,7 +184,7 @@ export function AdminEventPhotos() {
   const openPricing=(ev:any)=>{
     const homme=ev.priceTiers?.find((t:any)=>t.category==="HOMME")?.amountCents;
     const femme=ev.priceTiers?.find((t:any)=>t.category==="FEMME")?.amountCents;
-    setPricingForm({mode:homme!=null&&femme!=null?"differentiated":"flat",amountCents:ev.priceCents,homme:homme??ev.priceCents,femme:femme??ev.priceCents});
+    setPricingForm({mode:ev.genderPricingEnabled&&homme!=null&&femme!=null?"differentiated":"flat",amountCents:ev.priceCents,homme:homme??ev.priceCents,femme:femme??ev.priceCents});
     setPricingFor(ev.id);
   };
   const savePricing=async(eventId:string)=>{
@@ -224,11 +235,11 @@ export function AdminEventPhotos() {
       </div>:<button className="button small secondary" onClick={()=>openEditor(ev)}>Modifier les informations</button>}
 
       {pricingFor===ev.id?<div className="event-edit-form">
-        <div className="time-row"><label><input type="radio" checked={pricingForm.mode==="flat"} onChange={()=>setPricingForm({...pricingForm,mode:"flat"})}/> Tarif unique</label><label><input type="radio" checked={pricingForm.mode==="differentiated"} onChange={()=>setPricingForm({...pricingForm,mode:"differentiated"})}/> Tarif différencié homme/femme</label></div>
-        {pricingForm.mode==="flat"?<label>Prix (centimes)<input type="number" min={0} value={pricingForm.amountCents} onChange={e=>setPricingForm({...pricingForm,amountCents:Number(e.target.value)})}/></label>
-        :<><div className="time-row"><label>Hommes (centimes)<input type="number" min={0} value={pricingForm.homme} onChange={e=>setPricingForm({...pricingForm,homme:Number(e.target.value)})}/></label><label>Femmes (centimes)<input type="number" min={0} value={pricingForm.femme} onChange={e=>setPricingForm({...pricingForm,femme:Number(e.target.value)})}/></label></div><p className="fine left">La conformité juridique d’un tarif différencié selon le sexe doit être vérifiée avant toute mise en production. Tant que « Tarification homme/femme » reste désactivée dans Réglages, ces montants sont enregistrés mais n’ont aucun effet : tout le monde paie le tarif unique.</p></>}
+        {ev.genderPricingEnabled&&<div className="time-row"><label><input type="radio" checked={pricingForm.mode==="flat"} onChange={()=>setPricingForm({...pricingForm,mode:"flat"})}/> Tarif unique</label><label><input type="radio" checked={pricingForm.mode==="differentiated"} onChange={()=>setPricingForm({...pricingForm,mode:"differentiated"})}/> Tarif différencié homme/femme</label></div>}
+        {pricingForm.mode==="flat"?<label>Prix (€, TTC)<EuroInput cents={pricingForm.amountCents} onChange={c=>setPricingForm({...pricingForm,amountCents:c})}/></label>
+        :<><div className="time-row"><label>Hommes (€, TTC)<EuroInput cents={pricingForm.homme} onChange={c=>setPricingForm({...pricingForm,homme:c})}/></label><label>Femmes (€, TTC)<EuroInput cents={pricingForm.femme} onChange={c=>setPricingForm({...pricingForm,femme:c})}/></label></div><p className="fine left">La conformité juridique d’un tarif différencié selon le sexe doit être vérifiée avant toute mise en production. Tant que « Tarification homme/femme » reste désactivée dans Réglages, ces montants sont enregistrés mais n’ont aucun effet : tout le monde paie le tarif unique.</p></>}
         <div className="decision-buttons"><button className="button small" disabled={actingOn===ev.id} onClick={()=>savePricing(ev.id)}>Enregistrer les tarifs</button><button className="button small secondary" onClick={()=>setPricingFor(null)}>Annuler</button></div>
-      </div>:<button className="button small secondary" onClick={()=>openPricing(ev)}>{ev.priceTiers?.length?"Modifier les tarifs":"Définir un tarif différencié"}</button>}
+      </div>:<button className="button small secondary" onClick={()=>openPricing(ev)}>{!ev.genderPricingEnabled?"Modifier le prix":ev.priceTiers?.length?"Modifier les tarifs":"Définir un tarif différencié"}</button>}
 
       {ev.category==="Speed dating"&&<div className="quota-editor">
         {quotaEditFor===ev.id?<><div className="time-row"><label>Hommes<input type="number" min={0} value={quotaForm.homme} onChange={e=>setQuotaForm({...quotaForm,homme:Number(e.target.value)})}/></label><label>Femmes<input type="number" min={0} value={quotaForm.femme} onChange={e=>setQuotaForm({...quotaForm,femme:Number(e.target.value)})}/></label></div><button className="button small" disabled={actingOn===ev.id} onClick={()=>saveQuotas(ev.id)}>Enregistrer les quotas</button></>
@@ -277,6 +288,6 @@ export function AdminAttendees() {
   const STATUS_LABEL:Record<string,string>={PENDING:"En attente",SUCCEEDED:"Payé",FAILED:"Échoué",REFUNDED:"Remboursé"};
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Participants</h1><p className="fine">Informations nécessaires à l’organisation de votre événement uniquement.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     <div className="filters"><select value={eventId} onChange={e=>setEventId(e.target.value)}>{events.map(ev=><option key={ev.id} value={ev.id}>{ev.title}</option>)}</select></div>
-    {loading?<Loading/>:reservations.length===0?<div className="empty"><Inbox size={24} aria-hidden="true"/><h2>Aucun participant pour le moment</h2></div>:<div className="panel table"><div className="table-row head"><span>Participant</span><span>Catégorie</span><span>Paiement</span><span>Billet</span></div>{reservations.map(r=><div key={r.id} className="table-row"><span><b>{r.user.displayName}</b>{r.user.phone&&<small>{r.user.phone}</small>}</span><span>{r.quotaCategory??"—"}</span><span>{r.payment?STATUS_LABEL[r.payment.status]??r.payment.status:"—"}{isAdmin&&r.payment?.status==="SUCCEEDED"&&(requestingFor===r.payment.id?<div className="reject-note"><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motif (obligatoire à 24 h ou moins)"/><button className="button small danger" disabled={busy===r.payment.id} onClick={()=>refund(r.payment.id)}>{busy===r.payment.id?"Remboursement…":"Confirmer le remboursement"}</button></div>:<button type="button" className="button small secondary" onClick={()=>setRequestingFor(r.payment.id)}>Rembourser</button>)}{isAdmin&&r.payment?.refundRequestedAt&&r.payment.status==="SUCCEEDED"&&<small className="fine">Demande historique : {r.payment.refundRequestReason}</small>}</span><span>{r.ticket?.status==="USED"?"Utilisé":r.ticket?.status==="VALID"?"Valide":r.cancelledAt?"Annulé":"En attente"}</span></div>)}</div>}
+    {loading?<Loading/>:reservations.length===0?<div className="empty"><Inbox size={24} aria-hidden="true"/><h2>Aucun participant pour le moment</h2></div>:<div className="panel table"><div className="table-row head"><span>Participant</span><span>Catégorie</span><span>Paiement</span><span>Billet</span></div>{reservations.map(r=><div key={r.id} className="table-row"><span><b>{r.user.displayName}</b>{r.user.phone&&<small>{r.user.phone}</small>}</span><span>{r.quotaCategory?QUOTA_CATEGORY_LABEL[r.quotaCategory]??r.quotaCategory:"—"}</span><span>{r.payment?STATUS_LABEL[r.payment.status]??r.payment.status:"—"}{isAdmin&&r.payment?.status==="SUCCEEDED"&&(requestingFor===r.payment.id?<div className="reject-note"><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motif (obligatoire à 24 h ou moins)"/><button className="button small danger" disabled={busy===r.payment.id} onClick={()=>refund(r.payment.id)}>{busy===r.payment.id?"Remboursement…":"Confirmer le remboursement"}</button></div>:<button type="button" className="button small secondary" onClick={()=>setRequestingFor(r.payment.id)}>Rembourser</button>)}{isAdmin&&r.payment?.refundRequestedAt&&r.payment.status==="SUCCEEDED"&&<small className="fine">Demande historique : {r.payment.refundRequestReason}</small>}</span><span>{r.ticket?.status==="USED"?"Utilisé":r.ticket?.status==="VALID"?"Valide":r.cancelledAt?"Annulé":"En attente"}</span></div>)}</div>}
   </div></section></Layout>;
 }

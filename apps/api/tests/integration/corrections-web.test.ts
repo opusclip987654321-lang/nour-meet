@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publishDailyArticle } from "../../src/services/blog-autopublish.js";
 import type { AIProvider } from "../../src/ai-provider.js";
-import { API_URL, NETWORKING_ANSWERS_FIXTURE, adminToken, api, applyToEvent, deleteTestUsers, ensureServerRunning, payAndConfirm, prisma, signStripeWebhook, stripe, testPhone } from "./helpers.js";
+import { API_URL, NETWORKING_ANSWERS_FIXTURE, addRestaurantPhoto, adminToken, api, applyToEvent, deleteTestUsers, ensureServerRunning, payAndConfirm, prisma, signStripeWebhook, stripe, testPhone } from "./helpers.js";
 
 const createdUserIds: string[] = [];
 const createdEventIds: string[] = [];
@@ -31,6 +31,7 @@ async function organizer(displayName: string) {
   const { body: me } = await api<{ id: string }>("/me", {}, verify.token);
   createdUserIds.push(me.id);
   const { body: restaurant } = await api<{ id: string }>("/restaurants/apply", { method: "POST", body: JSON.stringify({ name: `${displayName} Resto`, managerName: displayName, siret: "12345678900019" }) }, verify.token);
+  await addRestaurantPhoto(verify.token);
   await api(`/admin/restaurants/${restaurant.id}/decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, await adminToken());
   const { body: reverify } = await api<{ token: string }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456" }) });
   return { token: reverify.token, userId: me.id, restaurantId: restaurant.id };

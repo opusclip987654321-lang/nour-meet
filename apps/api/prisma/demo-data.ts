@@ -23,6 +23,15 @@ const at = (daysFromNow: number, hours: number, minutes = 0) => {
   return new Date(guess.getTime() - offsetHours * 3_600_000);
 };
 
+// Décalage (en jours) jusqu'au jour de semaine voulu (0 = dimanche) à partir de J+daysFromNow : un
+// titre qui nomme un jour (« … du dimanche ») ne doit jamais tomber un autre jour de la semaine.
+const onWeekday = (daysFromNow: number, weekday?: number) => {
+  if (weekday === undefined) return daysFromNow;
+  const current = new Date(Date.now() + daysFromNow * 86_400_000).toLocaleDateString("en-US", { timeZone: "Europe/Paris", weekday: "short" });
+  const index = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(current);
+  return daysFromNow + ((weekday - index + 7) % 7);
+};
+
 const RESTAURANTS = [
   {
     phone: "+33639980001", owner: "Selma B.", name: "Maison Selma", district: "Paris 11e", zone: "Paris intra-muros",
@@ -41,7 +50,7 @@ const RESTAURANTS = [
   }
 ] as const;
 
-const EVENTS: { slug: string; restaurant: number; title: string; category: "Speed dating" | "Networking"; description: string; day: number; start: [number, number]; end: [number, number]; priceCents: number; capacity: number; minAge?: number; maxAge?: number; perks: { drink?: boolean; starter?: boolean; main?: boolean; dessert?: boolean; description?: string } }[] = [
+const EVENTS: { slug: string; restaurant: number; title: string; category: "Speed dating" | "Networking"; description: string; day: number; weekday?: number; start: [number, number]; end: [number, number]; priceCents: number; capacity: number; minAge?: number; maxAge?: number; perks: { drink?: boolean; starter?: boolean; main?: boolean; dessert?: boolean; description?: string } }[] = [
   {
     slug: "rencontres-maison-selma-30-40", restaurant: 0, title: "Dîner rencontres 30-40 ans", category: "Speed dating",
     description: "Un dîner assis en petit comité : sept rencontres de huit minutes entre le plat et le dessert, puis un temps libre pour prolonger les échanges. Profils validés en amont par un court entretien.",
@@ -55,7 +64,7 @@ const EVENTS: { slug: string; restaurant: number; title: string; category: "Spee
   {
     slug: "the-et-rencontres-salon-kenza", restaurant: 1, title: "Thé & rencontres du dimanche", category: "Speed dating",
     description: "Un après-midi en douceur autour d’un thé et de pâtisseries : rencontres en tête-à-tête de dix minutes, dans un salon privatisé. Profils validés en amont par un court entretien.",
-    day: 16, start: [15, 0], end: [18, 0], priceCents: 2900, capacity: 16, minAge: 25, maxAge: 35, perks: { drink: true, dessert: true, description: "Thé à volonté et assortiment de pâtisseries." }
+    day: 16, weekday: 0, start: [15, 0], end: [18, 0], priceCents: 2900, capacity: 16, minAge: 25, maxAge: 35, perks: { drink: true, dessert: true, description: "Thé à volonté et assortiment de pâtisseries." }
   },
   {
     slug: "networking-femmes-entrepreneures-salon-kenza", restaurant: 1, title: "Cercle des femmes entrepreneures", category: "Networking",
@@ -90,7 +99,7 @@ export async function seedDemoData(prisma: PrismaClient) {
     const r = RESTAURANTS[e.restaurant];
     const data = {
       title: e.title, category: e.category, flow: e.category === "Speed dating" ? EventFlow.SCREENING : EventFlow.DIRECT, description: e.description,
-      startsAt: at(e.day, ...e.start), endsAt: at(e.day, ...e.end), district: r.district, address: r.district, zone: r.zone,
+      startsAt: at(onWeekday(e.day, e.weekday), ...e.start), endsAt: at(onWeekday(e.day, e.weekday), ...e.end), district: r.district, address: r.district, zone: r.zone,
       capacity: e.capacity, priceCents: e.priceCents, minAge: e.minAge ?? null, maxAge: e.maxAge ?? null,
       includesDrink: !!e.perks.drink, includesStarter: !!e.perks.starter, includesMain: !!e.perks.main, includesDessert: !!e.perks.dessert, perksDescription: e.perks.description ?? null,
       status: EventStatus.PUBLISHED, controllerRestaurantId: restaurantIds[e.restaurant], venueRestaurantId: restaurantIds[e.restaurant], isDemo: true

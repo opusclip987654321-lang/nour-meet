@@ -10,6 +10,7 @@ import { audit } from "../services/audit.js";
 import { auth, currentId, roles } from "../services/auth.js";
 import { notify } from "../services/notify.js";
 import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, syncSubscriptionFromStripe } from "../services/subscriptions.js";
+import { getSetting } from "../settings.js";
 
 // Jamais les notes internes de l'administration, le taux de commission, l'auteur de la décision ni le
 // marquage démo dans une réponse destinée au restaurateur : informations internes de Nūr Meet
@@ -22,7 +23,7 @@ app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
   const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) }, include: { photos: { orderBy: { position: "asc" } }, subscription: { include: { plan: true } }, connectedAccount: true } });
   if (!restaurant) return reply.code(404).send({ error: "Aucune demande restaurateur" });
   const usage = await prisma.restaurantMonthlyUsage.findUnique({ where: { restaurantId_yearMonth: { restaurantId: restaurant.id, yearMonth: currentYearMonth() } } });
-  return { ...ownRestaurantView(restaurant), currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
+  return { ...ownRestaurantView(restaurant), currentMonthEventsPublished: usage?.eventsPublished ?? 0, trialDays: getSetting("RESTAURANT_TRIAL_DAYS") };
 });
 // §19/§20 : formulaire explicitement cité comme devant être protégé contre un abus automatisé,
 // au même titre que l'authentification et la génération IA.
@@ -70,9 +71,10 @@ app.patch("/admin/restaurants/:id/notes", { preHandler: roles(UserRole.ADMIN) },
 app.post("/admin/restaurants/:id/decision", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const { accept, reason } = z.object({ accept: z.boolean(), reason: z.string().max(1000).optional() }).parse(request.body);
-  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id }, include: { owner: true } });
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id }, include: { owner: true, _count: { select: { photos: true } } } });
   if (restaurant.status !== "PENDING") return reply.code(409).send({ error: "Cette demande a déjà été traitée" });
   const adminId = currentId(request);
+  if (accept && restaurant._count.photos === 0) return reply.code(409).send({ error: "Au moins une photo de l’établissement est requise avant l’approbation" });
   if (accept) {
     // Instructions définitives 2026-09-20 : le choix commercial de la formule (et son paiement via
     // Stripe Checkout) est distinct de l'autorisation de publier — l'approbation ne crée plus
@@ -106,8 +108,12 @@ app.patch("/restaurants/me", { preHandler: roles(UserRole.ORGANIZER) }, async (r
   await audit(currentId(request), "UPDATE_RESTAURANT_PROFILE", "Restaurant", restaurant.id);
   return ownRestaurantView(updated);
 });
-app.post("/restaurants/me/photos", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
-  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
+// Au moins une photo de l'établissement est obligatoire (demande d'approbation, puis chaque soirée
+// soumise) : l'envoi est donc ouvert dès la demande, pas seulement après approbation. Un compte
+// suspendu ne modifie plus sa galerie.
+app.post("/restaurants/me/photos", { preHandler: auth }, async (request, reply) => {
+  const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) } });
+  if (!restaurant || restaurant.status === "SUSPENDED") return reply.code(403).send({ error: "Aucun établissement modifiable pour ce compte" });
   const count = await prisma.restaurantPhoto.count({ where: { restaurantId: restaurant.id } });
   if (count >= 8) return reply.code(409).send({ error: "8 photos maximum : supprimez-en une avant d’en ajouter une nouvelle" });
   const file = await request.file();
@@ -122,9 +128,10 @@ app.post("/restaurants/me/photos", { preHandler: roles(UserRole.ORGANIZER) }, as
   await audit(currentId(request), "ADD_RESTAURANT_PHOTO", "Restaurant", restaurant.id);
   return reply.code(201).send(photo);
 });
-app.delete("/restaurants/me/photos/:photoId", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
+app.delete("/restaurants/me/photos/:photoId", { preHandler: auth }, async (request, reply) => {
   const { photoId } = z.object({ photoId: z.string() }).parse(request.params);
-  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
+  const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) } });
+  if (!restaurant || restaurant.status === "SUSPENDED") return reply.code(403).send({ error: "Aucun établissement modifiable pour ce compte" });
   const deleted = await prisma.restaurantPhoto.deleteMany({ where: { id: photoId, restaurantId: restaurant.id } });
   if (deleted.count === 0) return reply.code(404).send({ error: "Photo introuvable" });
   return reply.code(204).send();
@@ -164,7 +171,7 @@ app.post("/restaurants/me/subscription/portal", { preHandler: auth }, async (req
 });
 // C06/C07/C08 (instructions définitives 2026-09-20) : vrai tunnel Stripe Checkout en mode
 // abonnement, carte obligatoire dès l'essai (Checkout collecte toujours le moyen de paiement),
-// essai de 7 jours géré par Stripe lui-même (trial_period_days) — jamais simulé par un simple
+// essai (RESTAURANT_TRIAL_DAYS) géré par Stripe lui-même (trial_period_days) — jamais simulé par un simple
 // changement de statut local. Accessible dès le dépôt de candidature (PENDING), pas seulement une
 // fois approuvé : le choix commercial de la formule est distinct de l'autorisation de publier.
 app.post("/restaurants/me/subscription/checkout", { preHandler: auth }, async (request, reply) => {
@@ -193,7 +200,7 @@ app.post("/restaurants/me/subscription/checkout", { preHandler: auth }, async (r
     line_items: [{ price: priceId, quantity: 1 }],
     // L'essai gratuit n'est offert qu'une fois par établissement : un restaurateur qui se réabonne
     // après une résiliation (ou qui quitte un abonnement géré à la main) paie dès la souscription.
-    subscription_data: { ...(restaurant.subscription ? {} : { trial_period_days: 7 }), metadata: { restaurantId: restaurant.id, planId, billingPeriod } },
+    subscription_data: { ...(restaurant.subscription ? {} : { trial_period_days: getSetting("RESTAURANT_TRIAL_DAYS") }), metadata: { restaurantId: restaurant.id, planId, billingPeriod } },
     payment_method_collection: "always",
     metadata: { restaurantId: restaurant.id, planId, billingPeriod },
     success_url: `${env.WEB_ORIGIN}/restaurant?tab=subscription&checkout=success`,

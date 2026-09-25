@@ -5,7 +5,7 @@ import { app, prisma } from "../context.js";
 import { env } from "../env.js";
 import { paginated, paginationQuery, toSkipTake } from "../pagination.js";
 import { TokenUser, auth, currentId, optionalAuth } from "../services/auth.js";
-import { publicEvent, viewerStatuses } from "../services/events.js";
+import { applicationAmountCents, publicEvent, viewerStatuses } from "../services/events.js";
 
 // Corrections web 2026-09-24 (§5) : uniquement les événements à venir, du plus proche au plus éloigné
 // (tri SQL sur la colonne startsAt, un vrai horodatage), avec le statut du visiteur connecté.
@@ -40,9 +40,10 @@ app.get("/events/:id", { preHandler: optionalAuth }, async (request, reply) => {
 
 app.get("/events/:id/my-application", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId: currentId(request) } }, include: { call: true, reservation: { include: { payment: true } }, networkingAnswer: true } });
+  const application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId: currentId(request) } }, include: { call: true, reservation: { include: { payment: true } }, networkingAnswer: true, event: { include: { priceTiers: true } } } });
   if (!application) return reply.code(404).send({ error: "Aucune inscription pour cet événement" });
-  return application;
+  const { event, ...rest } = application;
+  return { ...rest, amountCents: event ? applicationAmountCents(event, application.quotaCategory) : null };
 });
 
 // Partage « J'y vais, viens avec moi » (§12) : un code non sensible par (personne, événement),

@@ -180,7 +180,8 @@ model Profile {
   interests       String[]
   bio             String?
   photoUrl        String?
-  shareCode       String   @unique @default(cuid())
+  // Code personnel lisible et dictable en soirée (« NOUR-3F9A-C21B »), jamais un identifiant technique.
+  shareCode       String   @unique @default(dbgenerated("((('NOUR-'::text || upper(substr(md5(((random())::text || (clock_timestamp())::text)), 1, 4))) || '-'::text) || upper(substr(md5(((random())::text || (clock_timestamp())::text)), 1, 4)))"))
   profileCompleted Boolean @default(false)
   quotaCategory   QuotaCategory?
   validatedAt     DateTime?

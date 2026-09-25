@@ -1,5 +1,6 @@
 import { EVENT_CATEGORIES, EventViewerStatus, eventViewerStatus } from "@nour/shared";
 import { prisma } from "../context.js";
+import { PriceTier, resolvePriceCents } from "../domain.js";
 import { getSetting } from "../settings.js";
 
 export const defaultCategoryImage = (category: string) => EVENT_CATEGORIES.find(c => c.name === category)?.defaultImage ?? EVENT_CATEGORIES[0].defaultImage;
@@ -61,3 +62,8 @@ export const viewerStatuses = async (userId: string | null, eventIds: string[]):
   }
   return out;
 };
+
+// Montant affiché avant le paiement : exactement celui que POST /applications/:id/payment-intent
+// débitera (même résolution, même drapeau), pour que l'écran n'annonce jamais un autre prix.
+export const applicationAmountCents = (event: { priceCents: number; priceTiers?: PriceTier[] }, quotaCategory: "HOMME" | "FEMME" | null) =>
+  resolvePriceCents(event, quotaCategory, getSetting("ENABLE_GENDER_PRICING"));

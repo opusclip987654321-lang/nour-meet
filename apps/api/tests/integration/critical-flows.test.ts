@@ -4,7 +4,7 @@
 // couverture exhaustive de tout le cahier des charges : voir le rapport de la Phase 8 pour ce qui
 // reste testé manuellement uniquement.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { api, adminToken, ensureServerRunning, makeValidatedParticipant, deleteTestUsers, testPhone, prisma, signStripeWebhook, applyToEvent, payAndConfirm, SCREENING_ANSWERS_FIXTURE, NETWORKING_ANSWERS_FIXTURE } from "./helpers.js";
+import { addRestaurantPhoto, api, adminToken, ensureServerRunning, makeValidatedParticipant, deleteTestUsers, testPhone, prisma, signStripeWebhook, applyToEvent, payAndConfirm, SCREENING_ANSWERS_FIXTURE, NETWORKING_ANSWERS_FIXTURE } from "./helpers.js";
 
 const createdUserIds: string[] = [];
 async function tracked(displayName?: string, quotaCategory?: "HOMME" | "FEMME") {
@@ -54,6 +54,7 @@ describe("isolation restaurateur", () => {
     const { body: me } = await api<{ id: string }>("/me", {}, orgToken);
     createdUserIds.push(me.id);
     const { body: restaurant } = await api<{ id: string }>("/restaurants/apply", { method: "POST", body: JSON.stringify({ name: "Concurrent Test", managerName: "Test Manager", siret: "12345678900019" }) }, orgToken);
+    await addRestaurantPhoto(orgToken);
     await api(`/admin/restaurants/${restaurant.id}/decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
     // Le rôle vient de changer côté serveur : un jeton fraîchement émis le reflète (voir le test de
     // fraîcheur du rôle ci-dessus).
@@ -426,6 +427,7 @@ async function newOrganizer(displayName: string) {
   const { body: me } = await api<{ id: string }>("/me", {}, token);
   const { body: restaurant } = await api<{ id: string }>("/restaurants/apply", { method: "POST", body: JSON.stringify({ name: `${displayName} Resto`, managerName: displayName, siret: "12345678900019" }) }, token);
   const admin = await adminToken();
+  await addRestaurantPhoto(token);
   await api(`/admin/restaurants/${restaurant.id}/decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
   // L'approbation ne crée plus d'abonnement (le restaurateur choisit sa formule) ; or une soirée ne
   // peut être publiée qu'avec un abonnement actif : on l'attribue comme le ferait l'administration.

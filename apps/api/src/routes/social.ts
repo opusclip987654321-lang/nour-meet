@@ -13,7 +13,7 @@ import { notify } from "../services/notify.js";
 import { getSetting } from "../settings.js";
 
 app.get("/me/tickets", { preHandler: auth }, async (request) => {
-  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: { select: { id: true, name: true } } } } } } }, orderBy: { createdAt: "desc" } });
+  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: { select: { id: true, name: true } }, venueRestaurant: { select: { id: true, name: true } } } } } } }, orderBy: { createdAt: "desc" } });
   return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await cachedQrDataUrl(t.code) })));
 });
 
@@ -29,7 +29,8 @@ app.get("/me/share-qr", { preHandler: auth }, async (request) => {
 
 app.get("/profiles/code/:code", { preHandler: auth }, async (request, reply) => {
   const { code } = z.object({ code: z.string() }).parse(request.params);
-  const profile = await prisma.profile.findUnique({ where: { shareCode: code }, include: { user: true } });
+  // Code dicté ou recopié à la main : espaces et minuscules tolérés (les codes sont en majuscules).
+  const profile = await prisma.profile.findUnique({ where: { shareCode: code.trim().toUpperCase() }, include: { user: true } });
   if (!profile || !profile.validatedAt) return reply.code(404).send({ error: "Code invalide ou révoqué" });
   if (profile.userId === currentId(request)) return reply.code(409).send({ error: "Il s’agit de votre propre code" });
   return { userId: profile.userId, displayName: profile.user.displayName, photoUrl: profile.photoUrl, age: profileAge(profile.birthDate), city: profile.city, profession: profile.profession, interests: profile.interests, bio: profile.bio, validated: true };

@@ -113,7 +113,7 @@ export function RestaurantSubscriptionPanel({ restaurant, onChanged }: { restaur
     <div className="pricing-head">
       <div>
         <h2>{subscribed ? "Les formules" : "Choisissez votre formule"}</h2>
-        <p className="fine left">Prix hors taxes. {trialOffered ? "Essai gratuit de 7 jours, carte requise, résiliable avant l’échéance." : "Sans engagement au-delà de la période en cours."}</p>
+        <p className="fine left">Prix hors taxes. {trialOffered ? `Essai gratuit de ${restaurant.trialDays??7} jours, carte requise, résiliable avant l’échéance.` : "Sans engagement au-delà de la période en cours."}</p>
       </div>
       {canToggle && <div className="segmented" role="group" aria-label="Périodicité de facturation">
         <button type="button" aria-pressed={period === "MONTHLY"} className={period === "MONTHLY" ? "active" : undefined} onClick={() => setPeriod("MONTHLY")}>Mensuel</button>

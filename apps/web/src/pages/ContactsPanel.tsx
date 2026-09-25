@@ -12,7 +12,7 @@ type ContactRequest = { id: string; status: "PENDING" | "ACCEPTED" | "REFUSED" |
 type Conversation = { id: string; members: { userId: string; blockedAt: string | null; user: Person }[]; messages: { body?: string | null; createdAt: string }[] };
 
 const STATUS_LABEL: Record<ContactRequest["status"], string> = { PENDING: "En attente de réponse", ACCEPTED: "Acceptée", REFUSED: "Déclinée", CANCELLED: "Annulée" };
-const time = (v: string) => new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(v));
+const time = (v: string) => new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(v)).replace(":", "h");
 
 function MyCode() {
   const [qr, setQr] = useState<{ code: string; qrDataUrl: string } | null>(null);

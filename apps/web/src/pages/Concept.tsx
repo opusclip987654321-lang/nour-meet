@@ -18,7 +18,7 @@ export function Concept() {
     <section className="page concept-intro">
       <div className="concept-intro-copy">
         <h1>Comment fonctionne Nūr Meet</h1>
-        <p className="page-lead">Des soirées en petit comité, dans des restaurants partenaires à Paris. Vous choisissez une soirée, vous réservez votre place, l’équipe s’occupe du reste — et après, c’est vous qui décidez qui vous revoyez.</p>
+        <p className="page-lead">Des soirées en petit comité, dans des restaurants partenaires à Paris et en Île-de-France. Vous choisissez une soirée, vous réservez votre place, l’équipe s’occupe du reste — et après, c’est vous qui décidez qui vous revoyez.</p>
         <div className="hero-actions"><Link className="button" to="/events">Voir les prochaines soirées<ArrowRight size={18} aria-hidden="true"/></Link><Link className="button secondary" to="/login">Créer mon compte</Link></div>
       </div>
       {video?.url
@@ -33,9 +33,8 @@ export function Concept() {
           <span className="category-badge" data-category="Speed dating"><Heart size={14} aria-hidden="true"/>Speed dating</span>
           <h3>Pour une rencontre sérieuse</h3>
           <ol className="steps compact">
-            <li><b>Profil et questionnaire</b><span>Vous complétez votre profil, puis un questionnaire privé sur ce que vous recherchez. Il n’est jamais transmis au restaurant ni aux autres participants.</span></li>
-            <li><b>Entretien de validation</b><span>Un court appel avec l’équipe, une seule fois : il vaut pour toutes les soirées de rencontre suivantes.</span></li>
-            <li><b>Réservation</b><span>Une fois validé, vous réservez votre place. Lorsque la soirée le prévoit, les places sont réparties entre femmes et hommes.</span></li>
+            <li><b>Entretien de validation</b><span>Vous complétez votre profil, puis un court appel avec l’équipe, une seule fois : il vaut pour toutes les soirées de rencontre suivantes.</span></li>
+            <li><b>Questionnaire et réservation</b><span>Pour chaque soirée, un questionnaire privé sur ce que vous recherchez — jamais transmis au restaurant ni aux autres participants —, puis le paiement de votre place. Lorsque la soirée le prévoit, les places sont réparties entre femmes et hommes.</span></li>
             <li><b>La soirée</b><span>Des tête-à-tête courts et animés, puis des temps libres, avec l’équipe présente du début à la fin.</span></li>
           </ol>
         </article>

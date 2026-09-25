@@ -101,10 +101,16 @@ export function EventCard({ event, onPress }: { event: any; onPress: () => void 
   </Pressable>;
 }
 
+// Initiales du prénom et du nom (« Karim Benali » → KB), comme sur le site.
+const initials = (name?: string | null) => {
+  const words = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  return (words.length > 1 ? words[0][0] + words[words.length - 1][0] : words[0].slice(0, 2)).toUpperCase();
+};
 export function Avatar({ name, size = 48, photoUrl, verified }: { name: string; size?: number; photoUrl?: string | null; verified?: boolean }) {
   const img = photoUrl
     ? <Image source={{ uri: imgUrl(photoUrl) }} style={{ width: size, height: size, borderRadius: size / 2 }} />
-    : <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: T.night, alignItems: "center", justifyContent: "center" }}><Text style={{ fontFamily: F.textBold, color: T.onNight, fontSize: size * 0.34 }}>{(name || "?").slice(0, 2).toUpperCase()}</Text></View>;
+    : <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: T.night, alignItems: "center", justifyContent: "center" }}><Text style={{ fontFamily: F.textBold, color: T.onNight, fontSize: size * 0.34 }}>{initials(name)}</Text></View>;
   if (!verified) return img;
   return <View>{img}<View style={{ position: "absolute", bottom: -2, right: -2, backgroundColor: T.success, borderRadius: 10, width: 20, height: 20, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: T.surface }}><Check size={11} color={T.onNight} strokeWidth={3} /></View></View>;
 }

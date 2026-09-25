@@ -203,7 +203,7 @@ function EditInfo({ ev, locked, busy, run, onSaved }: { ev: any; locked: boolean
 
 function Pricing({ ev, busy, run, onSaved }: { ev: any; busy: string | null; run: Run; onSaved: () => void }) {
   const homme = ev.priceTiers?.find((t: any) => t.category === "HOMME")?.amountCents, femme = ev.priceTiers?.find((t: any) => t.category === "FEMME")?.amountCents;
-  const [differentiated, setDifferentiated] = useState(homme != null && femme != null);
+  const [differentiated, setDifferentiated] = useState(!!ev.genderPricingEnabled && homme != null && femme != null);
   const [flat, setFlat] = useState(centsToEuros(ev.priceCents)), [men, setMen] = useState(centsToEuros(homme ?? ev.priceCents)), [women, setWomen] = useState(centsToEuros(femme ?? ev.priceCents));
   const save = () => run("pricing", async () => {
     const body = differentiated ? { mode: "differentiated", homme: eurosToCents(men), femme: eurosToCents(women) } : { mode: "flat", amountCents: eurosToCents(flat) };
@@ -211,7 +211,7 @@ function Pricing({ ev, busy, run, onSaved }: { ev: any; busy: string | null; run
     await api(`/admin/events/${ev.id}/pricing`, { method: "POST", body: JSON.stringify(body) }); onSaved();
   }, "Tarifs mis à jour.");
   return <View style={s.panel}>
-    <View style={[s.row, { justifyContent: "space-between" }]}><Text style={[s.small, { flex: 1, color: T.ink }]}>Tarif différencié hommes / femmes</Text><Switch value={differentiated} onValueChange={setDifferentiated} trackColor={{ true: T.night, false: T.lineStrong }} accessibilityLabel="Tarif différencié hommes / femmes" /></View>
+    {!!ev.genderPricingEnabled && <View style={[s.row, { justifyContent: "space-between" }]}><Text style={[s.small, { flex: 1, color: T.ink }]}>Tarif différencié hommes / femmes</Text><Switch value={differentiated} onValueChange={setDifferentiated} trackColor={{ true: T.night, false: T.lineStrong }} accessibilityLabel="Tarif différencié hommes / femmes" /></View>}
     {differentiated ? <View style={s.row}><View style={{ flex: 1 }}><Field label="Hommes (€)" keyboardType="decimal-pad" value={men} onChangeText={setMen} /></View><View style={{ flex: 1 }}><Field label="Femmes (€)" keyboardType="decimal-pad" value={women} onChangeText={setWomen} /></View></View>
       : <Field label="Prix par personne (€)" keyboardType="decimal-pad" value={flat} onChangeText={setFlat} />}
     {differentiated && <Text style={s.meta}>La conformité juridique d’un tarif différencié selon le sexe doit être vérifiée avant toute mise en ligne.</Text>}
