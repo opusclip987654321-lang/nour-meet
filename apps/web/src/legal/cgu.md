@@ -1,6 +1,8 @@
 # Conditions Générales d'Utilisation (CGU) — Nour Meet
 
-Dernière mise à jour : 23 septembre 2026
+Dernière mise à jour : 25 septembre 2026
+
+Le service est exploité par **{{societe.nom}}** ({{societe.statut}}) — contact : **{{societe.email}}**.
 
 ## 1. Objet
 
@@ -9,12 +11,11 @@ Les présentes Conditions Générales d'Utilisation encadrent l'accès et l'util
 Nour Meet permet notamment :
 - de créer et gérer un compte ;
 - de consulter des événements ;
-- de déposer une candidature à certains événements ;
-- de participer à un processus de validation pouvant inclure un entretien ;
+- de faire valider son profil, pour les soirées de rencontre, au cours d'un court entretien téléphonique réalisé une seule fois ;
 - de recevoir un statut ou badge de vérification ;
 - de réserver et payer une place après validation ;
 - d'accéder à une liste d'attente ou à des propositions alternatives ;
-- d'utiliser, lorsque cette fonction est disponible, une messagerie entre utilisateurs ;
+- après une soirée, de demander à revoir une personne inscrite à la même soirée grâce à son code personnel, puis d'échanger par messagerie si elle accepte ;
 - de recevoir des notifications liées au service.
 
 L'utilisation du service implique l'acceptation des présentes CGU.
@@ -39,19 +40,17 @@ Tout accès suspect ou usage non autorisé doit être signalé à **contact@nour
 
 Un utilisateur ne peut créer qu'un nombre raisonnable de comptes correspondant à son identité réelle. Les comptes fictifs, usurpations d'identité et créations destinées à contourner une suspension sont interdits.
 
-## 4. Candidature et validation
+## 4. Validation du profil et inscription
 
-Certains événements nécessitent une candidature avant de pouvoir être réservés.
+Les soirées de rencontre (speed dating) sont réservées aux profils validés. La validation se fait une seule fois : l'utilisateur écrit quelques mots de motivation, choisit un créneau, puis l'équipe l'appelle pour un court entretien. Elle vaut ensuite pour toutes les soirées de rencontre. Les soirées de networking sont en accès direct.
 
-Nour Meet peut demander des informations relatives au profil, à l'âge, à la ville, aux disponibilités, aux préférences d'événements et à d'autres critères pertinents pour l'organisation de l'événement.
+Pour chaque soirée de rencontre, un questionnaire privé est rempli avant la réservation ; ses réponses ne sont jamais transmises à l'établissement ni aux autres participants.
 
-La candidature peut également inclure un entretien de courte durée.
-
-La validation d'une candidature ne constitue pas encore une réservation. La place n'est garantie qu'après confirmation du paiement, sous réserve des disponibilités indiquées.
+La validation du profil ou l'inscription à une soirée ne constitue pas encore une réservation. La place n'est garantie qu'après confirmation du paiement, sous réserve des disponibilités indiquées.
 
 Nour Meet peut refuser une candidature sans communiquer de motif détaillé lorsqu'une telle communication compromettrait la sécurité, la confidentialité d'autres personnes, la prévention des abus ou le fonctionnement du processus de sélection. Ce refus ne doit toutefois pas être fondé sur un motif discriminatoire interdit par la loi.
 
-Lorsqu'une nouvelle candidature est autorisée après un refus, le délai indiqué dans l'interface s'applique.
+Après un refus, une nouvelle demande d'entretien est possible trois mois après la décision. Les notes internes de l'équipe ne sont pas communiquées.
 
 ## 5. Badge « Vérifié »
 
@@ -79,17 +78,23 @@ Il est notamment interdit :
 - d'introduire des logiciels malveillants ;
 - d'utiliser le service à des fins illégales.
 
-## 7. Messagerie et contenus utilisateurs
+## 7. Code personnel, mise en relation et messagerie
 
-Lorsque la messagerie ou la publication de contenus est disponible, l'utilisateur reste responsable de ce qu'il transmet.
+Chaque participant dispose d'un **code personnel** (et du QR code correspondant), quel que soit le format de la soirée, entretien passé ou non.
 
-L'utilisateur conserve ses droits sur ses contenus mais accorde à Nour Meet, pour la durée nécessaire au fonctionnement du service, une licence non exclusive, mondiale et gratuite permettant uniquement d'héberger, reproduire techniquement, afficher, transmettre et modérer les contenus dans la mesure nécessaire à la fourniture et à la sécurité du service.
+- Un code ne permet de retrouver et de solliciter **qu'une personne inscrite à une même soirée que soi**. Il ne permet jamais de contacter un autre membre de Nūr Meet. La présence effective à la soirée n'est pas exigée : une personne inscrite mais absente peut elle aussi utiliser le code d'une autre personne inscrite.
+- La personne sollicitée reçoit une demande et reste libre de l'accepter ou non. **Aucune conversation n'existe avant son acceptation.**
+- Si elle ne l'accepte pas, l'expéditeur voit seulement « Cette personne n'est pas disponible » ; la demande ne peut pas être renouvelée.
+- Il n'y a pas de limite au nombre de personnes qu'un participant peut demander à revoir parmi les inscrits d'une même soirée.
+- Une fois la demande acceptée, les deux personnes échangent par la messagerie privée de Nūr Meet, sans que leur numéro ni leur e-mail ne soient communiqués.
 
-Les utilisateurs sont invités à ne pas communiquer inutilement de données sensibles dans les messages ou champs libres.
+L'utilisateur reste responsable de ce qu'il transmet. Il conserve ses droits sur ses contenus mais accorde à Nūr Meet, pour la durée nécessaire au fonctionnement du service, une licence non exclusive, gratuite, limitée à l'hébergement, l'affichage, la transmission et la modération de ces contenus.
+
+Les utilisateurs sont invités à ne pas communiquer inutilement de données sensibles dans les messages ou champs libres. Toute sollicitation insistante, tout harcèlement ou tout usage commercial de la messagerie est interdit.
 
 ## 8. Signalement et modération
 
-Tout comportement ou contenu problématique peut être signalé via les outils prévus dans l'application ou à **contact@nourmeet.com**.
+Tout comportement ou contenu problématique peut être signalé depuis l'espace personnel (rubrique « Signaler ») ou à **contact@nourmeet.com**. Un signalement ferme la conversation entre les deux personnes et empêche toute nouvelle demande de la personne signalée.
 
 Nour Meet peut prendre les mesures proportionnées nécessaires : avertissement, limitation temporaire, retrait d'un contenu, suspension ou fermeture de compte.
 

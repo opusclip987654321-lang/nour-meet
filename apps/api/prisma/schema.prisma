@@ -795,6 +795,9 @@ model RestaurantSubscription {
   // calendrier d'abonnement Stripe (stripeScheduleId). pendingPlanId/pendingChangeAt ne servent qu'à
   // l'affichage et sont effacés par le webhook dès que Stripe a réellement basculé la formule.
   pendingPlanId        String?
+  // Périodicité programmée avec pendingPlanId (passage annuel → mensuel, ou baisse de formule en
+  // changeant aussi de périodicité) ; nulle = périodicité actuelle conservée.
+  pendingBillingPeriod String?
   pendingChangeAt      DateTime?
   stripeScheduleId     String?
   createdAt            DateTime           @default(now())

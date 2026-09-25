@@ -1,9 +1,12 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { useAuth } from "../auth";
+import { AdminNav } from "./admin/AdminNav";
 import { Layout } from "../components/Layout";
 import { Loading, Notice } from "../components/ui";
 import { imgUrl } from "../lib/format";
+import { spacePath } from "../lib/spaces";
 import { SUBSCRIPTION_STATUS_LABEL } from "../lib/labels";
 import { RestaurantSubscriptionPanel } from "./RestaurantSubscription";
 
@@ -69,7 +72,7 @@ function RestaurantApplication() {
     </div>;
   if(restaurant?.status==="PENDING") return <div className="stack"><div className="panel"><Notice kind="info">Votre demande pour « {restaurant.name} » est en cours d’examen.</Notice>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}</div>{gallery}</div>;
   if(restaurant?.status==="APPROVED") return <div className="stack">
-    <div className="panel"><Notice kind="success">Votre établissement « {restaurant.name} » est approuvé. <Link to="/admin">Accéder à mon espace restaurateur →</Link></Notice>
+    <div className="panel"><Notice kind="success">Votre établissement « {restaurant.name} » est approuvé. <Link className="text-link" to={spacePath("ORGANIZER","overview")}>Tableau de bord de mes soirées</Link></Notice>
       {restaurant.subscription&&<p className="fine">Formule « {restaurant.subscription.plan.name} » — {SUBSCRIPTION_STATUS_LABEL[restaurant.subscription.status]??restaurant.subscription.status} — {restaurant.currentMonthEventsPublished}{restaurant.subscription.plan.monthlyEventQuota==null?" soirée(s) publiée(s) ce mois-ci (illimité)":`/${restaurant.subscription.plan.monthlyEventQuota} soirées publiées ce mois-ci`}. <Link to="/restaurant?tab=subscription">Voir mon abonnement</Link></p>}
     </div>
     <form className="panel form-grid" onSubmit={saveProfile}>
@@ -109,6 +112,7 @@ function RestaurantApplication() {
 // notifications propres. Onglets Abonnement/Notifications pilotables par ?tab= (ex. depuis une
 // notification cliquable) une fois qu'un dossier restaurateur existe (en attente ou approuvé).
 export function RestaurantSpace() {
+  const {user}=useAuth();
   const [searchParams]=useSearchParams();
   const [restaurant,setRestaurant]=useState<any>(undefined);
   const [tab,setTab]=useState(searchParams.get("tab")??"establishment");
@@ -122,12 +126,14 @@ export function RestaurantSpace() {
   // /notifications, plus dans un onglet de cet espace — un ancien lien ?tab=notifications y renvoie.
   if(tab==="notifications")return <Navigate to="/notifications" replace/>;
   const hasTabs=restaurant&&(restaurant.status==="PENDING"||restaurant.status==="APPROVED");
-  return <Layout><section className="page"><h1>Mon établissement</h1>
-    {hasTabs&&<div className="tabs" role="tablist" aria-label="Sections de l’espace restaurateur">
+  const content=<>    {hasTabs&&<div className="tabs" role="tablist" aria-label="Sections de l’espace restaurateur">
       <button type="button" role="tab" aria-selected={tab==="establishment"} className={tab==="establishment"?"active":undefined} onClick={()=>setTab("establishment")}>Mon établissement</button>
       <button type="button" role="tab" aria-selected={tab==="subscription"} className={tab==="subscription"?"active":undefined} onClick={()=>setTab("subscription")}>Abonnement</button>
     </div>}
     {(!hasTabs||tab!=="subscription")&&<RestaurantApplication/>}
     {hasTabs&&tab==="subscription"&&<RestaurantSubscriptionPanel restaurant={restaurant} onChanged={loadRestaurant}/>}
-  </section></Layout>;
+  </>;
+  // Restaurateur approuvé : même barre latérale que le reste de son espace (tableau de bord, soirées…).
+  if(user?.role==="ORGANIZER")return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Mon établissement</h1>{content}</div></section></Layout>;
+  return <Layout><section className="page"><h1>Mon établissement</h1>{content}</section></Layout>;
 }

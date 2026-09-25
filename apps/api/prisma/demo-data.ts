@@ -83,7 +83,13 @@ const EVENTS: { slug: string; restaurant: number; title: string; category: "Spee
   }
 ];
 
-export async function seedDemoData(prisma: PrismaClient) {
+export async function seedDemoData(prisma: PrismaClient, opts: { alongsideRealEvents?: boolean } = {}) {
+  // Décision du 2026-09-25 : une fois une vraie soirée commercialisable publiée, les démonstrations
+  // sont retirées (services/demo-events.ts) — ce script ne doit jamais les republier ensuite en
+  // production. Seule la base de développement (prisma/seed.ts) les garde à côté de vraies soirées,
+  // pour pouvoir tester le parcours de démonstration.
+  const realEvents = await prisma.event.count({ where: { isDemo: false, status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, startsAt: { gt: new Date() } } });
+  if (realEvents > 0 && !opts.alongsideRealEvents) return { restaurants: 0, events: 0 };
   const restaurantIds: string[] = [];
   for (const r of RESTAURANTS) {
     const owner = await prisma.user.upsert({

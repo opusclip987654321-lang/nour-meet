@@ -11,6 +11,9 @@ describe("liens des notifications et des articles vers les écrans de l'applicat
     expect(routeFromPath("/dashboard?tab=contacts")).toEqual({ name: "messages" });
     expect(routeFromPath("/restaurant?tab=subscription")).toEqual({ name: "restaurant", tab: "subscription" });
     expect(routeFromPath("/admin/events?highlight=ev1")).toEqual({ name: "restaurant", tab: "events", focus: "ev1" });
+    expect(routeFromPath("/restaurant/soirees?highlight=ev2")).toEqual({ name: "restaurant", tab: "events", focus: "ev2" });
+    expect(routeFromPath("/restaurant/scanner")).toEqual({ name: "scan" });
+    expect(routeFromPath("/scanner")).toEqual({ name: "scan" });
     expect(routeFromPath("/admin/finance")).toEqual({ name: "web", path: "/admin/finance" });
     expect(routeFromPath("/blog/un-article")).toEqual({ name: "blog", slug: "un-article" });
   });

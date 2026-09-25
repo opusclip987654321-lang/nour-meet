@@ -3,10 +3,11 @@ import { Mail, Smartphone } from "lucide-react";
 import { GOOGLE_CLIENT_ID, GoogleButton } from "../components/GoogleButton";
 import { useNavigate } from "react-router-dom";
 import { api, setToken } from "../api";
-import { STAFF_ROLES, useAuth } from "../auth";
+import { useAuth } from "../auth";
 import { Layout } from "../components/Layout";
 import { Notice } from "../components/ui";
 import { useSeo } from "../lib/seo";
+import { homeFor } from "../lib/spaces";
 
 // Comptes de test créés par prisma/seed.ts (voir ce fichier pour le détail de chaque état) : ces
 // boutons ne sont affichés que lorsque le serveur tourne en mode SMS simulé (jamais en production,
@@ -57,7 +58,7 @@ export function Login() {
   const afterVerify=async(result:LoginResult)=>{
     setToken(result.token);await refresh();
     if(result.isNewUser){setStep(3);return}
-    navigate(STAFF_ROLES.includes(result.user.role)?"/admin":"/dashboard");
+    navigate(homeFor(result.user));
   };
   const switchMethod=(m:"email"|"sms")=>{setMethod(m);setStep(1);setIdentifier("");setCode("");setError("");setDevCode(null)};
   const submit=async(e:FormEvent)=>{

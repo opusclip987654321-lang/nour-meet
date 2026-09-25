@@ -6,12 +6,14 @@ import { Avatar, Notice } from "../components/ui";
 
 // Mise en relation après une soirée (§ concept) : chaque participant a un code personnel ; saisir
 // le code de quelqu'un permet de voir son profil et de lui envoyer une demande. La conversation ne
-// s'ouvre que si la demande est acceptée — l'API refuse toute relance après un refus.
+// s'ouvre que si la demande est acceptée — l'API refuse toute relance après un refus. Décision du
+// 2026-09-25 : uniquement entre personnes inscrites à une même soirée, et un refus n'est jamais
+// montré comme tel à l'expéditeur (statut UNAVAILABLE, « n'est pas disponible »).
 type Person = { id: string; displayName: string; profile?: { photoUrl?: string | null } | null };
-type ContactRequest = { id: string; status: "PENDING" | "ACCEPTED" | "REFUSED" | "CANCELLED"; requesterId: string; recipientId: string; requester: Person; recipient: Person; createdAt: string };
+type ContactRequest = { id: string; status: "PENDING" | "ACCEPTED" | "REFUSED" | "CANCELLED" | "UNAVAILABLE"; requesterId: string; recipientId: string; requester: Person; recipient: Person; createdAt: string };
 type Conversation = { id: string; members: { userId: string; blockedAt: string | null; user: Person }[]; messages: { body?: string | null; createdAt: string }[] };
 
-const STATUS_LABEL: Record<ContactRequest["status"], string> = { PENDING: "En attente de réponse", ACCEPTED: "Acceptée", REFUSED: "Déclinée", CANCELLED: "Annulée" };
+const STATUS_LABEL: Record<ContactRequest["status"], string> = { PENDING: "En attente de réponse", ACCEPTED: "Acceptée", REFUSED: "Déclinée", CANCELLED: "Annulée", UNAVAILABLE: "Cette personne n’est pas disponible" };
 const time = (v: string) => new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(v)).replace(":", "h");
 
 function MyCode() {
@@ -49,7 +51,7 @@ function AddContact({ onSent }: { onSent: () => void }) {
     finally { setBusy(false); }
   };
   return <section className="panel" aria-labelledby="add-contact">
-    <div className="panel-title"><h2 id="add-contact">Revoir quelqu’un</h2></div>
+    <div className="panel-title"><h2 id="add-contact">Revoir quelqu’un</h2><span>Une personne inscrite à la même soirée que vous</span></div>
     <form className="contact-lookup" onSubmit={lookup}>
       <label>Code personnel de la personne<input value={code} onChange={e => setCode(e.target.value)} placeholder="Ex. NOUR-3F9A-C21B-07E4" autoCapitalize="off" autoCorrect="off" spellCheck={false} autoComplete="off"/></label>
       <button className="button secondary" disabled={busy || !code.trim()}><Search size={18} aria-hidden="true"/>Rechercher</button>

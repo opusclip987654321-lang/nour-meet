@@ -222,8 +222,33 @@ describe("abonnement restaurateur : montée immédiate avec prorata, descente à
     expect((await stripe.subscriptionSchedules.retrieve(schedule.id)).status).toBe("released");
     // Un second Checkout est refusé tant que l'abonnement est actif.
     expect((await api("/restaurants/me/subscription/checkout", { method: "POST", body: JSON.stringify({ planId: standard.id, billingPeriod: "MONTHLY" }) }, org.token)).status).toBe(409);
+
+    // Décision du 2026-09-25 — mensuel → annuel : immédiat (même formule, périodicité annuelle facturée).
+    expect(premium.stripePriceAnnualId, "lancer npm run stripe:setup-test-plans").toBeTruthy();
+    const yearly = await api<{ direction: string; subscription: { billingPeriod: string } }>("/restaurants/me/subscription/change-plan", { method: "POST", body: JSON.stringify({ planId: premium.id, billingPeriod: "ANNUAL" }) }, org.token);
+    expect(yearly.status).toBe(200);
+    expect(yearly.body.direction).toBe("UPGRADE");
+    expect(yearly.body.subscription.billingPeriod).toBe("ANNUAL");
+    expect((await stripe.subscriptions.retrieve(subscription.id)).items.data[0].price.id).toBe(premium.stripePriceAnnualId);
+    // Annuel → mensuel : l'année payée est conservée, le mensuel est programmé à l'échéance.
+    const monthly = await api<{ direction: string; subscription: { billingPeriod: string; pendingPlanId: string; pendingBillingPeriod: string } }>("/restaurants/me/subscription/change-plan", { method: "POST", body: JSON.stringify({ planId: premium.id, billingPeriod: "MONTHLY" }) }, org.token);
+    expect(monthly.status).toBe(200);
+    expect(monthly.body.direction).toBe("DOWNGRADE");
+    expect(monthly.body.subscription.billingPeriod).toBe("ANNUAL");
+    expect(monthly.body.subscription.pendingBillingPeriod).toBe("MONTHLY");
+    const scheduled = await stripe.subscriptions.retrieve(subscription.id);
+    expect((await stripe.subscriptionSchedules.retrieve(scheduled.schedule as string)).phases.at(-1)?.items[0].price).toBe(premium.stripePriceMonthlyId);
+
+    // Même lecture pour le restaurateur et pour l'administration, qui ne peut rien modifier.
+    const own = await api<{ subscription: unknown; invoices: { id: string }[] }>("/restaurants/me/subscription", {}, org.token);
+    const seenByAdmin = await api<{ subscription: unknown; invoices: { id: string }[] }>(`/admin/restaurants/${org.restaurantId}/subscription`, {}, await adminToken());
+    expect(own.status).toBe(200);
+    expect(seenByAdmin.status).toBe(200);
+    expect(seenByAdmin.body.subscription).toEqual(own.body.subscription);
+    expect(own.body.invoices.length).toBeGreaterThan(0);
+    expect(JSON.stringify(own.body)).not.toMatch(/stripeSubscriptionId|stripeCustomerId|cus_|sub_|"in_/);
     await stripe.subscriptions.cancel(subscription.id);
-  }, 60_000);
+  }, 90_000);
 });
 
 describe("publication quotidienne du blog sans doublon (§3.1)", () => {
@@ -311,5 +336,66 @@ describe("photo d'établissement obligatoire (audit 2026-09-25)", () => {
     const rejected = await api(`/admin/restaurants/${restaurant.id}/decision`, { method: "POST", body: JSON.stringify({ accept: false, reason: "Test" }) }, admin);
     expect(rejected.status).toBe(200);
     expect((await addRestaurantPhoto(applicant.token)).status).toBe(403);
+  });
+});
+
+describe("soirées de démonstration retirées dès la première vraie soirée publiée (décision du 2026-09-25)", () => {
+  it("annule la démonstration et les inscriptions ouvertes, prévient les inscrits, sans toucher la vraie soirée", async () => {
+    const demoOwner = await organizer("DemoResto");
+    await prisma.restaurant.update({ where: { id: demoOwner.restaurantId }, data: { isDemo: true } });
+    const demo = await publishedEvent({ isDemo: true, controllerRestaurantId: demoOwner.restaurantId, venueRestaurantId: demoOwner.restaurantId, title: "Démo à retirer" });
+    const applicant = await participant("DemoInscrit");
+    const application = await prisma.application.create({ data: { eventId: demo.id, userId: applicant.userId, status: "PAYMENT_PENDING" } });
+
+    const admin = await adminToken();
+    const real = await api<{ id: string; status: string }>("/admin/events", { method: "POST", body: JSON.stringify({
+      title: "Vraie soirée", slug: `vraie-soiree-${Date.now()}`, category: "Networking", description: "Une vraie soirée commercialisable publiée par l'administration.",
+      startsAt: day(25).toISOString(), endsAt: day(25, 22).toISOString(), district: "Paris 11e", address: "1 rue de test", zone: "Paris intra-muros",
+      capacity: 20, priceCents: 2500, publish: true
+    }) }, admin);
+    expect(real.status).toBe(200);
+    createdEventIds.push(real.body.id);
+    expect(real.body.status).toBe("PUBLISHED");
+
+    expect((await prisma.event.findUniqueOrThrow({ where: { id: demo.id } })).status).toBe("CANCELLED");
+    expect((await prisma.application.findUniqueOrThrow({ where: { id: application.id } })).status).toBe("CANCELLED");
+    expect(await prisma.notification.count({ where: { userId: applicant.userId, title: "Soirée retirée" } })).toBe(1);
+    expect((await prisma.event.findUniqueOrThrow({ where: { id: real.body.id } })).status).toBe("PUBLISHED");
+    const catalogue = await api<{ items: { id: string }[] }>("/events?pageSize=100");
+    expect(catalogue.body.items.some(e => e.id === demo.id)).toBe(false);
+  });
+});
+
+describe("espaces restaurateur et administration strictement séparés (décision du 2026-09-25)", () => {
+  it("l'administration consulte l'abonnement sans pouvoir le modifier ; le restaurateur n'accède à aucune fonction globale", async () => {
+    const org = await organizer("SeparationOrg");
+    const other = await organizer("SeparationAutre");
+    const admin = await adminToken();
+    // Plus aucune route de modification manuelle d'un abonnement par l'administration.
+    const standard = await prisma.plan.findFirstOrThrow({ where: { name: "Standard", active: true } });
+    expect((await api(`/admin/restaurants/${org.restaurantId}/subscription`, { method: "POST", body: JSON.stringify({ planId: standard.id, status: "ACTIVE" }) }, admin)).status).toBe(404);
+    expect(await prisma.restaurantSubscription.count({ where: { restaurantId: org.restaurantId } })).toBe(0);
+    // Le restaurateur ne lit ni l'abonnement d'un autre établissement ni les écrans globaux.
+    for (const path of [`/admin/restaurants/${other.restaurantId}/subscription`, "/admin/restaurants", "/admin/plans", "/admin/settings", "/admin/global-interviews", "/admin/outbox"]) {
+      expect((await api(path, {}, org.token)).status, path).toBe(403);
+    }
+    expect((await api("/restaurants/me/subscription", {}, org.token)).status).toBe(200);
+  });
+});
+
+describe("réglages de l'administration appliqués sans redémarrage (décision du 2026-09-25)", () => {
+  it("une durée d'essai modifiée est lue aussitôt par l'espace restaurateur, puis restaurée", async () => {
+    const org = await organizer("ReglageOrg");
+    const admin = await adminToken();
+    const before = (await api<{ trialDays: number }>("/restaurants/me", {}, org.token)).body.trialDays;
+    try {
+      expect((await api("/admin/settings/RESTAURANT_TRIAL_DAYS", { method: "PATCH", body: JSON.stringify({ value: 12 }) }, admin)).status).toBe(200);
+      expect((await api<{ trialDays: number }>("/restaurants/me", {}, org.token)).body.trialDays).toBe(12);
+      // Valeur hors de ce que Stripe accepte : refusée, l'ancienne reste en vigueur.
+      expect((await api("/admin/settings/RESTAURANT_TRIAL_DAYS", { method: "PATCH", body: JSON.stringify({ value: 999 }) }, admin)).status).toBe(400);
+      expect((await api<{ trialDays: number }>("/restaurants/me", {}, org.token)).body.trialDays).toBe(12);
+    } finally {
+      await api("/admin/settings/RESTAURANT_TRIAL_DAYS", { method: "PATCH", body: JSON.stringify({ value: before }) }, admin);
+    }
   });
 });

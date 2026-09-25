@@ -8,6 +8,7 @@ import { Layout } from "../../components/Layout";
 import { Loading } from "../../components/ui";
 import { money } from "../../lib/format";
 import { EVENT_STATUS_LABEL } from "../../lib/labels";
+import { spacePath } from "../../lib/spaces";
 import { AdminNav, Stat } from "./AdminNav";
 
 const emptyDashboardFilters={eventId:"",category:"",status:"",city:"",minAge:"",maxAge:""};
@@ -64,7 +65,7 @@ export function Admin() {
     {stats.shareAttributedApplications!=null&&<Stat label="Inscriptions attribuées" value={stats.shareAttributedApplications}/>}
     {stats.shareAttributedPurchases!=null&&<Stat label="Ventes attribuées" value={stats.shareAttributedPurchases}/>}
     {stats.subscriptionsByStatus?.map((s:any)=><Stat key={s.status} label={`Abonnements ${SUBSCRIPTION_STATUS_LABEL[s.status]??s.status}`} value={s.count}/>)}
-  </div><div className="admin-grid"><ActivityChart data={stats.activity??[]} periodDays={periodDays}/><div className="panel quick"><h2>Actions rapides</h2>{user?.role==="ADMIN"&&<Link to="/admin/applications">Traiter les entretiens <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to="/admin/attendees">Voir les participants <ArrowRight size={18} aria-hidden="true"/></Link><Link to="/admin/scanner">Scanner un billet <ArrowRight size={18} aria-hidden="true"/></Link>{user?.role==="ADMIN"&&<Link to="/admin/restaurants">Demandes restaurateurs <ArrowRight size={18} aria-hidden="true"/></Link>}{user?.role==="ADMIN"&&<Link to="/admin/finance">Voir les finances <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to="/events">Voir les événements <ArrowRight size={18} aria-hidden="true"/></Link></div></div></>}</div></section></Layout>;
+  </div><div className="admin-grid"><ActivityChart data={stats.activity??[]} periodDays={periodDays}/><div className="panel quick"><h2>Actions rapides</h2>{user?.role==="ADMIN"&&<Link to="/admin/applications">Traiter les entretiens <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to={spacePath(user?.role,"attendees")}>Voir les participants <ArrowRight size={18} aria-hidden="true"/></Link><Link to={spacePath(user?.role,"scanner")}>Scanner un billet <ArrowRight size={18} aria-hidden="true"/></Link>{user?.role==="ADMIN"&&<Link to="/admin/restaurants">Demandes restaurateurs <ArrowRight size={18} aria-hidden="true"/></Link>}{user?.role==="ADMIN"&&<Link to="/admin/finance">Voir les finances <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to="/events">Voir les événements <ArrowRight size={18} aria-hidden="true"/></Link></div></div></>}</div></section></Layout>;
 }
 
 // Activité réelle (inscriptions aux événements par jour) sur la période filtrée — une seule série :

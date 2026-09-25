@@ -2,7 +2,8 @@ import { ChevronRight, Menu, X } from "lucide-react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { api } from "../api";
-import { STAFF_ROLES, useAuth } from "../auth";
+import { useAuth } from "../auth";
+import { homeFor } from "../lib/spaces";
 import { Logo } from "./brand";
 import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "./ThemeToggle";
@@ -11,13 +12,17 @@ import { CONSENT_CHANGED, analyticsAllowed, openConsentSettings } from "../lib/c
 
 // Navigation publique : 3 entrées seulement (au-delà, le menu devient une liste à lire plutôt qu'un
 // repère). « Mon espace » ou « Mon établissement » selon le compte, l'administration pour l'équipe.
+// Décision du 2026-09-25 : l'équipe Nūr Meet va vers /admin, le restaurateur vers son espace
+// /restaurant, le personnel d'accueil vers le scanner — chacun ne voit que le lien de son espace.
 function useNavLinks() {
   const { user } = useAuth();
-  const isStaff = !!user && STAFF_ROLES.includes(user.role);
-  const links: { to: string; label: string }[] = isStaff
-    ? [{ to: "/admin", label: "Administration" }, { to: "/events", label: "Événements" }]
-    : [{ to: "/events", label: "Événements" }, { to: "/concept", label: "Comment ça marche" }, { to: "/blog", label: "Le journal" }];
-  const account = !user ? null : isStaff ? null : user.hasRestaurant ? { to: "/restaurant", label: "Mon établissement" } : { to: "/dashboard", label: "Mon espace" };
+  const team = !!user && (user.role === "ADMIN" || user.role === "MODERATOR");
+  const links: { to: string; label: string }[] = team
+    ? [{ to: homeFor(user), label: "Administration" }, { to: "/events", label: "Événements" }]
+    : user?.role === "RECEPTION"
+      ? [{ to: "/scanner", label: "Scanner les billets" }, { to: "/events", label: "Événements" }]
+      : [{ to: "/events", label: "Événements" }, { to: "/concept", label: "Comment ça marche" }, { to: "/blog", label: "Le journal" }];
+  const account = !user || team || user.role === "RECEPTION" ? null : user.role === "ORGANIZER" || user.hasRestaurant ? { to: homeFor(user), label: "Mon établissement" } : { to: "/dashboard", label: "Mon espace" };
   return { user, links, account };
 }
 
@@ -89,7 +94,7 @@ function Footer() {
   const year = new Date().getFullYear();
   // Connecté : l'espace du compte (ou l'administration pour l'équipe), jamais « Créer un compte ».
   const { user, account } = useNavLinks();
-  const accountLink = !user ? { to: "/login", label: "Créer un compte" } : account ?? { to: "/admin", label: "Administration" };
+  const accountLink = !user ? { to: "/login", label: "Créer un compte" } : account ?? { to: homeFor(user), label: user.role === "RECEPTION" ? "Scanner les billets" : "Administration" };
   return (
     <footer className="site-footer">
       <div className="site-footer-inner">

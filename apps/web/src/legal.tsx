@@ -6,12 +6,13 @@ import cguMd from "./legal/cgu.md?raw";
 import cgvMd from "./legal/cgv.md?raw";
 import confidentialiteMd from "./legal/politique-confidentialite.md?raw";
 import cookiesMd from "./legal/politique-cookies.md?raw";
+import { COMPANY, companyPending, fillCompany } from "./legal/company";
 
-// Documents juridiques (version du 23/09/2026). Le texte fait foi dans les fichiers ./legal/*.md :
+// Documents juridiques (version du 25/09/2026 ; identité de la société dans ./legal/company.ts). Le texte fait foi dans les fichiers ./legal/*.md :
 // pour mettre à jour une page, on édite uniquement le Markdown correspondant. Les données de
-// société non encore connues y figurent sous la forme « [À COMPLÉTER …] » / « [À DÉSIGNER …] » —
-// jamais de valeur fictive présentée comme réelle. Tant qu'il en reste une, la page affiche
-// automatiquement un bandeau d'avertissement.
+// société (société en cours de constitution) y figurent sous la forme {{societe.cle}}, remplie depuis
+// ./legal/company.ts — jamais de valeur fictive présentée comme réelle. Tant qu'une information
+// d'immatriculation manque, la page affiche automatiquement un bandeau d'avertissement.
 
 // Rendu Markdown volontairement minimal, limité à ce qu'utilisent ces documents : titres (#, ##, ###),
 // paragraphes, retours à la ligne forcés (deux espaces en fin de ligne), listes à puces et numérotées,
@@ -67,17 +68,16 @@ function renderMarkdown(body: string): ReactNode[] {
   return out;
 }
 
-const PLACEHOLDER = /\[À (COMPLÉTER|DÉSIGNER)[^\]]*\]/;
-
-function LegalPage({ markdown }: { markdown: string }) {
+function LegalPage({ markdown: source }: { markdown: string }) {
+  const markdown = fillCompany(source);
   const [titleLine, ...body] = markdown.trim().split("\n");
   return (
     <div className="page legal-page">
       
       <h1>{titleLine.replace(/^# /, "")}</h1>
-      {PLACEHOLDER.test(markdown) && (
+      {companyPending && source.includes("{{societe.") && (
         <div className="notice warning">
-          <AlertTriangle size={18} aria-hidden="true"/><p><b>Document en cours de finalisation.</b> Certaines informations (signalées « À compléter ») seront renseignées prochainement.</p>
+          <AlertTriangle size={18} aria-hidden="true"/><p><b>{COMPANY.statut}.</b> Les informations d’immatriculation (dénomination, siège, numéros d’identification…) seront ajoutées dès l’immatriculation de la société.</p>
         </div>
       )}
       <div className="legal-body">{renderMarkdown(body.join("\n"))}</div>

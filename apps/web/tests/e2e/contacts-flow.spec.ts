@@ -1,12 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
-import { forgetContacts } from "./helpers.js";
+import { forgetContacts, forgetSharedEvent, shareAnEvent } from "./helpers.js";
 
 // Mise en relation après une soirée, entièrement depuis le site : code personnel, demande,
 // acceptation, message, puis signalement qui ferme la conversation.
 const HOMME = "+33600000020";
 const FEMME = "+33600000022";
-test.beforeAll(() => forgetContacts(HOMME, FEMME));
-test.afterAll(() => forgetContacts(HOMME, FEMME));
+test.beforeAll(async () => { await forgetContacts(HOMME, FEMME); await shareAnEvent(HOMME, FEMME); });
+test.afterAll(async () => { await forgetContacts(HOMME, FEMME); await forgetSharedEvent(); });
 
 async function loginAs(page: Page, label: string) {
   await page.goto("/login");

@@ -9,7 +9,7 @@ import { env } from "../env.js";
 import { audit } from "../services/audit.js";
 import { auth, currentId, roles } from "../services/auth.js";
 import { notify } from "../services/notify.js";
-import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, syncSubscriptionFromStripe } from "../services/subscriptions.js";
+import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, subscriptionOverview, syncSubscriptionFromStripe } from "../services/subscriptions.js";
 import { getSetting } from "../settings.js";
 
 // Jamais les notes internes de l'administration, le taux de commission, l'auteur de la décision ni le
@@ -224,12 +224,17 @@ const ownSubscription = async (userId: string) => {
   if (!subscription) throw httpError(404, "Aucun abonnement pour cet établissement");
   return { restaurant, subscription };
 };
+// Son propre abonnement, factures comprises (même lecture que l'administration).
+app.get("/restaurants/me/subscription", { preHandler: auth }, async (request) => {
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) }, select: { id: true } });
+  return subscriptionOverview(restaurant.id);
+});
 app.post("/restaurants/me/subscription/change-plan", { preHandler: auth, config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } }, async (request) => {
-  const { planId } = z.object({ planId: z.string() }).parse(request.body);
+  const { planId, billingPeriod } = z.object({ planId: z.string(), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]).optional() }).parse(request.body);
   const { subscription } = await ownSubscription(currentId(request));
   const target = await prisma.plan.findUniqueOrThrow({ where: { id: planId } });
-  const result = await changeSubscriptionPlan(subscription, target);
-  await audit(currentId(request), result.direction === "UPGRADE" ? "SUBSCRIPTION_UPGRADED" : "SUBSCRIPTION_DOWNGRADE_SCHEDULED", "RestaurantSubscription", subscription.id, { from: subscription.planId, to: target.id });
+  const result = await changeSubscriptionPlan(subscription, target, billingPeriod ?? (subscription.billingPeriod as "MONTHLY" | "ANNUAL"));
+  await audit(currentId(request), result.direction === "UPGRADE" ? "SUBSCRIPTION_UPGRADED" : "SUBSCRIPTION_DOWNGRADE_SCHEDULED", "RestaurantSubscription", subscription.id, { from: subscription.planId, to: target.id, fromPeriod: subscription.billingPeriod, toPeriod: billingPeriod ?? subscription.billingPeriod });
   return result;
 });
 app.post("/restaurants/me/subscription/cancel-plan-change", { preHandler: auth }, async (request) => {
@@ -276,19 +281,14 @@ app.patch("/admin/plans/:id", { preHandler: roles(UserRole.ADMIN) }, async (requ
   await audit(currentId(request), "UPDATE_PLAN", "Plan", id, input);
   return plan;
 });
-app.post("/admin/restaurants/:id/subscription", { preHandler: roles(UserRole.ADMIN) }, async (request, _reply) => {
+// Administration : consultation de l'abonnement d'un restaurateur, en lecture seule (décision du
+// 2026-09-25). L'ancienne route POST qui permettait de changer la formule ou le statut à la main a été
+// supprimée : seul le restaurateur modifie son abonnement, via Stripe (logique unique de
+// services/subscriptions.ts).
+app.get("/admin/restaurants/:id/subscription", { preHandler: roles(UserRole.ADMIN) }, async (request) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const input = z.object({ planId: z.string(), status: z.enum(["TRIALING", "ACTIVE", "PAST_DUE", "CANCELLED", "INCOMPLETE"]).optional(), currentPeriodEnd: z.string().optional() }).parse(request.body);
-  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id } });
-  const plan = await prisma.plan.findUniqueOrThrow({ where: { id: input.planId } });
-  const updated = await prisma.restaurantSubscription.upsert({
-    where: { restaurantId: id },
-    update: { planId: plan.id, status: input.status ?? undefined, currentPeriodEnd: input.currentPeriodEnd ? new Date(input.currentPeriodEnd) : undefined },
-    create: { restaurantId: id, planId: plan.id, status: input.status ?? "ACTIVE", currentPeriodEnd: input.currentPeriodEnd ? new Date(input.currentPeriodEnd) : new Date(Date.now() + 30 * 24 * 60 * 60_000) }
-  });
-  await notify(restaurant.ownerId, "Abonnement mis à jour", `Votre abonnement « ${plan.name} » est maintenant ${updated.status === "ACTIVE" ? "actif" : updated.status.toLowerCase()}.`, "/restaurant?tab=subscription");
-  await audit(currentId(request), "UPDATE_SUBSCRIPTION", "RestaurantSubscription", updated.id, input);
-  return updated;
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id }, select: { id: true, name: true } });
+  return { restaurant, ...(await subscriptionOverview(restaurant.id)) };
 });
 
 // Scaffolding marketplace (§9), Stripe Connect en mode test uniquement : suit un compte connecté,

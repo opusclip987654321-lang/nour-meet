@@ -281,7 +281,7 @@ async function main() {
 
   // §8 : restaurants et soirées de démonstration (isDemo=true), identiques à ceux de la production,
   // pour vérifier en local que leur paiement est bien refusé.
-  await seedDemoData(prisma);
+  await seedDemoData(prisma, { alongsideRealEvents: true });
 
   // CGU §2 : service réservé aux personnes majeures, l'API refuse toute inscription sans date de
   // naissance adulte. Les comptes de démonstration qui n'en ont pas en reçoivent une (y compris sur

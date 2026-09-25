@@ -1820,3 +1820,27 @@
   color: var(--saffron-ink);
   margin-right: var(--s-1);
 }
+
+/* Abonnement : factures et squelettes (décision du 2026-09-25) */
+.invoice-list {
+  margin-top: var(--s-5);
+  display: grid;
+  gap: var(--s-3);
+}
+
+.invoice-list h3 {
+  margin: 0;
+}
+
+.invoice-links {
+  display: flex;
+  gap: var(--s-3);
+}
+
+.skeleton-panel {
+  min-height: 180px;
+}
+
+.skeleton-pricing {
+  min-height: 420px;
+}

@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, setToken } from "../api";
 import { money } from "../lib/format";
@@ -123,7 +123,12 @@ export function PayStandalone(){
   const [done, setDone] = useState(false);
   const [amountCents, setAmountCents] = useState<number | null>(null);
   const [eventId, setEventId] = useState("");
+  // Le jeton est à usage unique : l'échange ne doit partir qu'une fois, même si l'effet est rejoué
+  // (mode strict de React en développement, remontage) — un second appel serait refusé.
+  const exchangeStarted = useRef(false);
   useEffect(() => {
+    if (exchangeStarted.current) return;
+    exchangeStarted.current = true;
     const session = searchParams.get("session");
     if (!session) { setError(true); setReady(true); return; }
     api<{ token: string }>("/auth/payment-session-exchange", { method: "POST", body: JSON.stringify({ token: session }) })

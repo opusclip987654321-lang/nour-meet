@@ -1,244 +1,208 @@
-# Conditions Générales de Vente (CGV) — Nour Meet
+# Conditions Générales de Vente (CGV) — Nūr Meet
 
-Dernière mise à jour : 23 septembre 2026
+Dernière mise à jour : 25 septembre 2026
 
 Les présentes CGV comprennent :
-- **Partie A : Participants consommateurs** ;
-- **Partie B : Restaurateurs et organisateurs professionnels**.
+- **Partie A : participants** (consommateurs qui réservent une place à une soirée) ;
+- **Partie B : restaurateurs et établissements partenaires** (professionnels qui accueillent des soirées et souscrivent un abonnement).
 
 ## Dispositions communes
 
-Nour Meet exploite une plateforme permettant la présentation, la candidature, la réservation et le paiement d'événements organisés par des partenaires professionnels.
+### Exploitant
 
-Sauf indication contraire sur la fiche événement, **le restaurateur ou l'établissement partenaire est l'organisateur de l'événement** et assume l'organisation matérielle de celui-ci. Nour Meet agit comme intermédiaire et fournit les services numériques de candidature, réservation, paiement et communication.
+La plateforme Nūr Meet est exploitée par **{{societe.nom}}** ({{societe.statut}}).  
+Dénomination sociale, forme, siège et numéros d'identification : **{{societe.denomination}}**.  
+Contact : **{{societe.email}}**.
+
+### Rôle de chacun
+
+Sauf indication contraire sur la fiche de la soirée, **l'établissement partenaire accueille la soirée et en assure l'organisation matérielle** (lieu, repas ou boissons compris dans le prix, accueil, sécurité de ses locaux). Nūr Meet présente les soirées, sélectionne les participants lorsque le format le prévoit, encaisse les paiements des places, émet les billets, anime la mise en relation après la soirée et fournit les outils de l'espace restaurateur.
+
+### Acceptation
+
+Les CGV sont acceptées par une case à cocher avant chaque réservation (Partie A) et avant la souscription d'un abonnement (Partie B). La version acceptée est conservée avec sa date.
 
 ---
 
-# Partie A — Participants consommateurs
+# Partie A — Participants
 
-## A1. Informations précontractuelles
+## A1. Informations avant réservation
 
-Avant tout paiement, la fiche de l'événement présente ou rend accessible au minimum :
-- l'identité ou les informations permettant d'identifier l'organisateur ;
-- la nature de l'événement ;
-- la date, l'horaire et le lieu ;
-- le prix total TTC et frais inclus ;
-- les principales conditions de participation ;
-- les règles d'annulation applicables ;
-- le cas échéant, la nécessité d'une validation préalable.
+La fiche de chaque soirée indique, avant tout paiement :
+- l'établissement qui l'accueille et le quartier ou la ville ;
+- le format (rencontre sur sélection ou accès direct) ;
+- la date et l'heure ;
+- le prix total en euros **TTC, frais inclus**, ou la gratuité ;
+- ce qui est compris dans le prix (boisson, entrée, plat, dessert, précisions éventuelles) ;
+- la tranche d'âge éventuelle et les places disponibles ;
+- les règles d'annulation.
 
-Le participant doit vérifier ces informations avant de confirmer sa commande.
+L'adresse exacte figure sur le billet, une fois la place confirmée.
 
-## A2. Candidature et validation
+## A2. Validation du profil (soirées de rencontre)
 
-Pour les événements soumis à candidature, le participant doit d'abord être validé.
+Les soirées de rencontre (speed dating) sont réservées aux profils validés. La validation se fait **une seule fois**, au cours d'un court entretien téléphonique avec l'équipe Nūr Meet, sur un créneau choisi par le participant ; elle vaut ensuite pour toutes les soirées de rencontre.
 
-Une validation n'emporte pas réservation automatique. Tant que le paiement n'est pas confirmé, la place peut rester disponible pour d'autres participants.
+Nūr Meet peut ne pas valider un profil. La décision est communiquée sans motif détaillé ; une nouvelle demande est possible **trois mois** après la décision.
 
-En cas d'expiration du délai de paiement, la place peut être libérée. Nour Meet peut alors proposer une liste d'attente ou d'autres événements.
+Les soirées de networking sont en accès direct, sans entretien.
+
+Pour chaque soirée de rencontre, un questionnaire privé est rempli avant la réservation. Ses réponses ne sont jamais transmises à l'établissement ni aux autres participants.
 
 ## A3. Formation de la réservation
 
+Une inscription ne garantit pas une place. La place est réservée au moment du paiement : un verrou technique de quelques minutes est posé pendant le paiement, puis la place est définitivement acquise lorsque le paiement est confirmé.
+
 La réservation devient ferme après :
-1. validation du participant lorsque celle-ci est requise ;
-2. affichage du prix total ;
-3. acceptation des CGV ;
-4. confirmation du paiement.
+1. la validation du profil lorsqu'elle est requise ;
+2. l'acceptation des présentes CGV ;
+3. la confirmation du paiement, ou la confirmation de la place pour une soirée gratuite.
 
-Une confirmation est adressée sur support électronique.
+Le billet, avec son QR code personnel et l'adresse exacte, est alors disponible dans l'espace personnel, et une confirmation est envoyée par voie électronique.
 
-## A4. Prix
+Une soirée peut ne pas être encore ouverte à la réservation. Dans ce cas, aucun paiement n'est possible et **aucune somme n'est prélevée**.
 
-Les prix destinés aux consommateurs sont affichés en euros **TTC et frais inclus**, sauf indication légale contraire clairement affichée avant la commande.
+## A4. Soirée complète, liste d'attente et soirées comparables
 
-Le prix applicable est celui présenté au participant au moment de la confirmation de la réservation.
+Si la soirée est complète au moment du paiement, le participant est placé sur liste d'attente. Lorsqu'une place se libère, elle est proposée au premier inscrit de la liste, qui dispose d'un délai affiché pour la régler ; passé ce délai, elle est proposée au suivant.
 
-## A5. Paiement
+Nūr Meet peut aussi proposer jusqu'à trois soirées comparables. Le participant reste libre de les accepter ou de les refuser ; l'acceptation d'une soirée comparable n'est définitive qu'après son paiement.
 
-Les paiements en ligne sont traités par **Stripe** ou par tout prestataire de paiement indiqué au moment de la commande.
+## A5. Prix et paiement
 
-Nour Meet ne conserve pas le numéro complet de carte bancaire lorsque celui-ci est traité directement par le prestataire de paiement.
+Les prix sont affichés en euros, **TTC et frais inclus**. Le prix applicable est celui affiché au moment de la confirmation de la réservation.
 
-En cas d'échec ou de refus de paiement, la réservation n'est pas confirmée.
+Le paiement se fait par carte bancaire via **Stripe**. Nūr Meet ne reçoit ni ne conserve le numéro complet de la carte. En cas d'échec ou de refus du paiement, la réservation n'est pas confirmée.
 
 ## A6. Droit de rétractation
 
-Les billets et réservations correspondant à des activités de loisirs devant être fournies à une **date ou période déterminée** ne bénéficient pas du délai légal de rétractation de quatorze jours dans les conditions prévues par l'article L.221-28 du Code de la consommation.
-
-Cette absence de droit légal de rétractation n'empêche pas l'application de la politique contractuelle d'annulation ci-dessous.
+Une place pour une soirée de loisirs fournie à une **date déterminée** ne bénéficie pas du délai légal de rétractation de quatorze jours (article L.221-28, 12° du Code de la consommation). La politique d'annulation ci-dessous s'applique néanmoins.
 
 ## A7. Annulation par le participant
 
-Sauf conditions particulières plus favorables affichées pour un événement :
-- annulation effectuée **plus de 24 heures avant le début de l'événement** : remboursement intégral du montant payé pour la réservation ;
-- annulation effectuée **24 heures ou moins avant le début de l'événement** : aucun remboursement, sauf geste commercial, situation exceptionnelle acceptée par Nour Meet ou obligation légale contraire ;
-- absence à l'événement (« no-show ») : aucun remboursement.
+L'annulation se fait depuis l'espace personnel :
+- **plus de 24 heures avant le début de la soirée** : remboursement intégral, automatique, sur le moyen de paiement d'origine ;
+- **24 heures ou moins avant le début de la soirée** : aucun remboursement, sauf décision exceptionnelle de Nūr Meet ou obligation légale contraire ;
+- **absence à la soirée** : aucun remboursement.
 
-Le délai est calculé d'après l'heure locale du lieu de l'événement.
+Une place annulée est aussitôt proposée à la liste d'attente.
 
-## A8. Annulation ou report par l'organisateur
+## A8. Annulation, report ou minimum de participants
 
-En cas d'annulation définitive de l'événement par l'organisateur, le participant bénéficie d'un remboursement intégral du montant payé pour la réservation.
+Si la soirée est **annulée** (par l'établissement, par Nūr Meet, ou faute d'avoir atteint le minimum de participants annoncé), chaque participant est **intégralement remboursé**, automatiquement, et peut se voir proposer des soirées comparables.
 
-En cas de changement substantiel de date ou d'horaire, le participant est informé et peut, selon les modalités proposées :
-- accepter le nouvel horaire ;
-- ou demander le remboursement intégral de sa réservation.
+Si la **date ou l'heure change** après qu'une place a été payée, le participant en est informé et peut accepter le nouvel horaire ou obtenir le remboursement intégral de sa place.
 
-Le remboursement est effectué sur le moyen de paiement d'origine lorsque cela est techniquement possible.
+## A9. Déroulement de la soirée
 
-## A9. Liste d'attente et alternatives
+L'équipe ou l'établissement vérifie le billet à l'entrée (QR code). L'établissement est responsable de l'accueil, du lieu, de la sécurité de ses locaux et de ce qui est compris dans le prix.
 
-Lorsqu'une place devient indisponible ou qu'une réservation expire, le participant peut se voir proposer :
-- une inscription sur liste d'attente ;
-- jusqu'au nombre d'alternatives prévu dans l'application.
+Chaque participant adopte un comportement respectueux. Un comportement dangereux, violent, harcelant ou frauduleux peut entraîner un refus d'accès ou une exclusion, sans remboursement lorsque la mesure est justifiée, ainsi que la suspension du compte (voir les CGU).
 
-L'acceptation d'une alternative ne devient définitive qu'après confirmation par le participant et, s'il y a lieu, régularisation de toute différence de prix.
+## A10. Après la soirée
 
-## A10. Déroulement de l'événement
+La mise en relation entre participants est gratuite et régie par les CGU : elle n'est possible qu'entre personnes inscrites à la même soirée, et une conversation ne s'ouvre que si la personne sollicitée accepte.
 
-L'organisateur est responsable de l'accueil, du lieu, de la sécurité relevant de son établissement, de la capacité d'accueil et de l'exécution matérielle de l'événement.
+## A11. Réclamations
 
-Nour Meet reste responsable de ses propres obligations de plateforme, notamment de la bonne exécution des services qu'elle fournit directement.
-
-Le participant doit adopter un comportement respectueux. Un comportement dangereux, violent, harcelant, frauduleux ou contraire aux règles du lieu peut entraîner un refus d'accès ou une exclusion, sans remboursement lorsque cette mesure est justifiée par le comportement du participant.
-
-## A11. Réclamation
-
-Toute réclamation relative à la plateforme, au paiement ou à la réservation peut être adressée à :
-
-**contact@nourmeet.com**
-
-Lorsqu'une réclamation concerne exclusivement l'exécution matérielle de l'événement, Nour Meet peut la transmettre à l'organisateur concerné ou orienter le participant vers celui-ci.
+Toute réclamation relative à une réservation, un paiement ou une soirée peut être adressée à **{{societe.email}}**. Lorsqu'elle concerne uniquement l'exécution matérielle de la soirée, Nūr Meet la transmet à l'établissement concerné.
 
 ## A12. Médiation de la consommation
 
-Après une réclamation écrite préalable restée sans solution satisfaisante, le consommateur peut recourir gratuitement au médiateur de la consommation dont relève Nour Meet.
+Après une réclamation écrite restée sans solution satisfaisante, le consommateur peut recourir gratuitement à un médiateur de la consommation.
 
-**Médiateur : [À DÉSIGNER AVANT MISE EN LIGNE]**  
-Adresse : **[À COMPLÉTER]**  
-Site internet : **[À COMPLÉTER]**
+Médiateur de la consommation : **{{societe.mediateur}}**
 
-Ces coordonnées doivent être complétées avec celles du médiateur effectivement choisi par Nour Meet avant toute mise en ligne commerciale.
+Le médiateur sera désigné lors de l'immatriculation de la société ; ses coordonnées seront publiées ici.
 
 ## A13. Droit applicable
 
-Les relations avec les consommateurs sont soumises au droit français, sans priver le consommateur des dispositions impératives plus protectrices éventuellement applicables.
+Les relations avec les participants sont soumises au droit français, sans priver le consommateur des dispositions impératives plus protectrices éventuellement applicables.
 
 ---
 
-# Partie B — Restaurateurs et organisateurs professionnels
+# Partie B — Restaurateurs et établissements partenaires
 
-## B1. Champ d'application
+## B1. Demande d'ouverture d'un compte professionnel
 
-La présente partie s'applique aux professionnels qui utilisent Nour Meet pour proposer, organiser ou commercialiser des événements.
+Le professionnel dépose une demande depuis l'espace restaurateur : nom de l'établissement, nom du responsable, SIRET (déclaratif, Nūr Meet ne le vérifie pas auprès d'un registre), coordonnées, description, conditions habituelles, et **au moins une photo réelle de l'établissement**.
 
-L'inscription professionnelle implique la capacité et les autorisations nécessaires à l'activité déclarée.
+Nūr Meet examine la demande et peut l'accepter ou la refuser. **Aucune demande n'est acceptée sans photo de l'établissement.** Le professionnel garantit disposer des droits sur les photos transmises.
 
-## B2. Offres Standard et Premium
+## B2. Formules d'abonnement
 
-Nour Meet peut proposer des abonnements **Standard** et **Premium**, mensuels ou annuels.
+Nūr Meet propose des abonnements **Standard** et **Premium**, en facturation **mensuelle** ou **annuelle**. Le prix hors taxes, le nombre de soirées publiables par mois et les options (mise en avant) sont ceux affichés dans l'espace restaurateur au moment de la souscription. La formule annuelle bénéficie de la remise affichée.
 
-Le prix, le nombre d'événements inclus, les quotas, les options de mise en avant et les fonctionnalités applicables sont ceux affichés dans l'espace professionnel ou dans le bon de commande au moment de la souscription.
+La souscription se fait par carte bancaire via **Stripe**. Lors d'une première souscription, un **essai gratuit** d'une durée affichée est accordé ; la carte est demandée dès la souscription et l'abonnement démarre à la fin de l'essai, sauf résiliation avant son terme.
 
-Une formule annuelle peut bénéficier d'une remise par rapport au paiement mensuel, selon l'offre affichée au moment de la souscription.
+Le choix d'une formule ne publie aucune soirée : chaque soirée reste soumise à la validation de Nūr Meet (B4).
 
-## B3. Durée et renouvellement
+## B3. Gestion de l'abonnement par le restaurateur
 
-Sauf indication différente lors de la souscription :
-- l'abonnement mensuel est conclu pour un mois et se renouvelle mensuellement ;
-- l'abonnement annuel est conclu pour douze mois et se renouvelle pour une nouvelle période annuelle.
+Le restaurateur gère lui-même son abonnement depuis son espace. Il peut :
+- consulter sa formule, sa périodicité, ses échéances et ses factures ;
+- passer à une **formule supérieure** ou de la facturation **mensuelle à annuelle** : le changement est **immédiat**, la différence étant facturée au prorata ;
+- passer à une **formule inférieure** ou de la facturation **annuelle à mensuelle** : le changement prend effet **à la fin de la période déjà payée**, qui reste acquise ; il peut être annulé tant qu'il n'a pas pris effet ;
+- mettre à jour son moyen de paiement ;
+- **résilier** : la résiliation prend effet à la fin de la période en cours, sans remboursement prorata temporis de la période commencée, sauf obligation légale.
 
-Le professionnel peut désactiver le renouvellement avant la prochaine échéance depuis l'espace prévu ou en contactant Nour Meet.
+L'abonnement mensuel se renouvelle chaque mois et l'abonnement annuel chaque année, jusqu'à résiliation. En cas d'échec de paiement, le professionnel en est informé et doit mettre à jour son moyen de paiement pour conserver sa formule.
 
-La résiliation met fin au renouvellement futur ; elle n'entraîne pas le remboursement prorata temporis de la période déjà commencée, sauf accord contraire ou obligation légale.
+L'équipe Nūr Meet peut consulter l'abonnement d'un établissement pour l'accompagner, mais ne le modifie pas à sa place.
 
-## B4. Publication des événements
+## B4. Soirées : création, validation et publication
 
-Le restaurateur soumet ses événements à Nour Meet.
+Le restaurateur crée ses soirées en brouillon puis les soumet à validation. Une soirée ne peut être soumise que si l'établissement dispose d'**au moins une photo**. Nūr Meet vérifie la cohérence, la qualité et la conformité de la soirée avant de la publier, et peut demander des modifications.
 
-Nour Meet peut vérifier la cohérence, la qualité, la conformité et l'adéquation de l'événement avec le positionnement de la plateforme avant publication.
+La publication requiert un **abonnement actif** (ou en période d'essai) et s'impute sur le nombre de soirées publiables par mois de la formule.
 
 Le restaurateur reste responsable :
-- de l'exactitude des informations fournies ;
-- des autorisations administratives éventuellement nécessaires ;
-- de la conformité du lieu ;
+- de l'exactitude des informations fournies (date, prix, prestations comprises, capacité) ;
+- des autorisations administratives nécessaires, de la conformité et de la capacité du lieu ;
 - de la sécurité, de l'hygiène et de l'accueil ;
 - de ses assurances professionnelles ;
-- du respect de la capacité maximale ;
-- de l'exécution effective de l'événement.
+- de l'exécution effective de la soirée.
 
-## B5. Prix des billets
+## B5. Prix des places
 
-Le professionnel propose le prix de l'événement. Nour Meet peut demander une modification avant publication afin d'assurer la cohérence de l'offre ou le respect de règles légales.
-
-Tout prix différencié selon une catégorie de participants ne peut être mis en œuvre que s'il est licite et objectivement justifié.
+Le restaurateur propose le prix de la soirée, affiché TTC aux participants. Nūr Meet peut demander une modification avant publication. Un prix différencié selon une catégorie de participants n'est appliqué que si Nūr Meet l'a activé et s'il est licite et objectivement justifié.
 
 ## B6. Encaissement et reversement
 
-Nour Meet peut encaisser les paiements des participants pour le compte de l'organisateur via Stripe ou un autre prestataire de paiement.
+Nūr Meet encaisse les paiements des participants via Stripe.
 
-Les commissions, frais de paiement et autres frais applicables sont ceux indiqués dans l'offre professionnelle, le tableau tarifaire ou le récapitulatif contractuel accepté par le professionnel.
+Les commissions, frais et modalités de reversement applicables sont ceux indiqués dans l'offre professionnelle ou le récapitulatif contractuel accepté par le professionnel. Sauf disposition contractuelle différente, les sommes dues à l'établissement sont reversées dans un délai maximal de **15 jours ouvrés** après la tenue de la soirée, sous réserve des remboursements dus aux participants, des contestations de paiement, des fraudes suspectées et des sommes légalement retenues.
 
-Les sommes dues à l'organisateur sont reversées selon le calendrier indiqué dans son espace professionnel et, sauf disposition contractuelle différente, dans un délai maximal de **15 jours ouvrés** après la tenue de l'événement, sous réserve :
-- des remboursements dus aux participants ;
-- des contestations de paiement ;
-- des fraudes suspectées ;
-- des sommes légalement retenues ;
-- des incidents nécessitant une vérification.
+## B7. Annulation, changement de date et minimum de participants
 
-## B7. Annulation par l'organisateur
+L'établissement informe Nūr Meet dès qu'une soirée ne peut pas avoir lieu. L'annulation d'une soirée entraîne le **remboursement intégral et automatique** des participants.
 
-L'organisateur doit informer Nour Meet dès qu'il sait qu'un événement ne pourra pas avoir lieu.
+Un changement de date alors que des places sont payées est proposé aux participants, qui peuvent l'accepter ou être remboursés.
 
-L'annulation définitive d'un événement entraîne le remboursement intégral des participants concernés.
+Lorsqu'un minimum de participants est fixé, sa date limite de décision est indiquée lors de la création de la soirée. À cette date, si le minimum n'est pas atteint, l'établissement choisit de maintenir ou d'annuler la soirée dans le délai affiché ; en l'absence de réponse, la règle affichée dans son espace s'applique. En cas d'annulation, les participants sont remboursés intégralement.
 
-Lorsque des sommes ont déjà été reversées à l'organisateur au titre d'un événement annulé, celui-ci autorise Nour Meet à les compenser avec des sommes futures ou s'engage à les restituer dans le délai demandé.
+Lorsque des sommes ont déjà été reversées pour une soirée annulée, l'établissement autorise Nūr Meet à les compenser avec des sommes futures ou s'engage à les restituer. Des annulations répétées ou tardives peuvent entraîner la limitation ou la suspension du compte.
 
-Des annulations répétées ou tardives peuvent entraîner la limitation ou la suspension du compte professionnel.
+## B8. Personnel d'accueil
 
-## B8. Minimum de participants
-
-Lorsque l'organisateur fixe un minimum de participants, ce seuil et la date limite de décision doivent être communiqués avant la commercialisation ou suffisamment tôt pour permettre l'information des participants.
-
-Si l'événement est annulé faute d'atteindre ce minimum, les participants sont remboursés intégralement.
+Le restaurateur peut donner à des membres de son personnel un accès limité au scan des billets de son établissement. Il est responsable de l'usage de ces accès et les retire lorsqu'ils ne sont plus nécessaires.
 
 ## B9. Données des participants
 
-Le restaurateur n'accède qu'aux données nécessaires à l'organisation de l'événement.
+Le restaurateur n'accède qu'aux informations nécessaires à l'accueil : prénom ou pseudonyme, catégorie lorsque la soirée répartit les places, statut du paiement et du billet. Il ne reçoit jamais le numéro de téléphone, l'adresse e-mail, les réponses aux questionnaires ni les messages des participants.
 
-Il s'engage à :
-- ne pas réutiliser les coordonnées pour sa propre prospection sans base légale appropriée ;
-- ne pas constituer de fichier parallèle injustifié ;
-- protéger les informations reçues ;
-- supprimer ou anonymiser les données lorsqu'elles ne sont plus nécessaires.
+Il s'engage à ne pas réutiliser ces informations à d'autres fins, à ne pas constituer de fichier parallèle, à les protéger et à les supprimer lorsqu'elles ne sont plus nécessaires.
 
-Les questionnaires internes de candidature et informations non nécessaires à l'organisation ne doivent pas être transmis au restaurateur.
+## B10. Responsabilité
 
-## B10. Responsabilité professionnelle
+Chaque partie répond de ses propres obligations. Le restaurateur garantit Nūr Meet contre les conséquences directement liées à une information fausse, à une violation de la réglementation relevant de son établissement, à un défaut d'autorisation ou à une inexécution matérielle de la soirée qui lui est imputable.
 
-Chaque partie répond de ses propres obligations.
+Entre professionnels, et sauf faute lourde, dol, dommage corporel ou cas où la loi interdit une limitation, la responsabilité de Nūr Meet pour les dommages directs est plafonnée au montant hors taxes payé par le professionnel à Nūr Meet au cours des douze mois précédant le fait générateur. Les pertes indirectes ne sont indemnisables que lorsque la loi l'impose.
 
-Le restaurateur garantit Nour Meet contre les conséquences directement liées à une information fausse, à une violation de la réglementation relevant de son établissement, à un défaut d'autorisation ou à une inexécution matérielle de l'événement qui lui est imputable.
+## B11. Suspension ou résiliation par Nūr Meet
 
-Dans les relations entre professionnels, et sauf faute lourde, dol, dommage corporel ou cas dans lesquels une limitation est interdite par la loi, la responsabilité contractuelle de Nour Meet pour les dommages directs peut être plafonnée au montant hors taxes payé par le professionnel à Nour Meet au cours des douze mois précédant le fait générateur.
+Nūr Meet peut suspendre un compte professionnel en cas de non-paiement, de fraude, de mise en danger de participants, d'annulations répétées, d'informations trompeuses, de violation grave des présentes conditions ou de demande d'une autorité. Sauf urgence, le professionnel est informé et peut présenter ses observations.
 
-Les pertes indirectes, pertes d'opportunité, pertes d'image ou pertes de bénéfice ne sont indemnisables que lorsque la loi l'impose ou lorsqu'elles résultent d'une faute ne pouvant faire l'objet d'une exclusion.
+## B12. Droit applicable et juridiction
 
-## B11. Suspension ou résiliation
-
-Nour Meet peut suspendre un compte professionnel en cas de :
-- non-paiement ;
-- fraude ;
-- mise en danger de participants ;
-- annulations répétées ;
-- informations trompeuses ;
-- violation grave des présentes conditions ;
-- demande d'une autorité compétente.
-
-Sauf urgence ou gravité particulière, le professionnel est informé et peut présenter ses observations.
-
-## B12. Droit applicable et juridiction B2B
-
-Les relations B2B sont soumises au droit français.
-
-Après tentative de résolution amiable, tout litige entre commerçants relatif aux présentes relève des tribunaux matériellement compétents du ressort de Paris, sous réserve des règles impératives contraires.
+Les relations avec les professionnels sont soumises au droit français. Après tentative de résolution amiable, tout litige entre commerçants relève des tribunaux compétents du ressort de Paris, sous réserve des règles impératives contraires.

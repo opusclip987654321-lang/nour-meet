@@ -6,6 +6,7 @@ import { Notice } from "../../components/ui";
 import { imgUrl, money } from "../../lib/format";
 import { RESTAURANT_STATUS_LABEL } from "../../lib/labels";
 import { AdminNav } from "./AdminNav";
+import { SubscriptionSummary, type SubscriptionOverview } from "../RestaurantSubscription";
 
 export function AdminRestaurants() {
   // null = en cours de chargement (squelette), [] = réellement vide : jamais d'état vide affiché
@@ -18,8 +19,16 @@ export function AdminRestaurants() {
   const [reason,setReason]=useState("");
   const [notesFor,setNotesFor]=useState<string|null>(null);
   const [notes,setNotes]=useState("");
+  // Abonnement d'un restaurateur : consultation seule (décision du 2026-09-25), même lecture que
+  // l'espace restaurateur (GET /admin/restaurants/:id/subscription → subscriptionOverview).
   const [subFor,setSubFor]=useState<string|null>(null);
-  const [subForm,setSubForm]=useState({planId:"",status:"ACTIVE"});
+  const [subOverview,setSubOverview]=useState<SubscriptionOverview|null>(null);
+  const showSubscription=async(id:string)=>{
+    if(subFor===id){setSubFor(null);return}
+    setSubFor(id);setSubOverview(null);
+    try{setSubOverview(await api<SubscriptionOverview>(`/admin/restaurants/${id}/subscription`))}
+    catch(err){setNotice({kind:"error",text:(err as Error).message});setSubFor(null)}
+  };
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [planEdits,setPlanEdits]=useState<Record<string,{monthlyPriceCents:string;monthlyEventQuota:string}>>({});
   const [newPlan,setNewPlan]=useState({name:"",monthlyPriceCents:"",monthlyEventQuota:""});
@@ -50,12 +59,6 @@ export function AdminRestaurants() {
   const saveNotes=async(id:string)=>{
     setActingOn(id);setNotice(null);
     try{await api(`/admin/restaurants/${id}/notes`,{method:"PATCH",body:JSON.stringify({adminNotes:notes})});setNotice({kind:"success",text:"Notes internes enregistrées."});setNotesFor(null);await load()}
-    catch(err){setNotice({kind:"error",text:(err as Error).message})}
-    finally{setActingOn(null)}
-  };
-  const saveSubscription=async(id:string)=>{
-    setActingOn(id);setNotice(null);
-    try{await api(`/admin/restaurants/${id}/subscription`,{method:"POST",body:JSON.stringify(subForm)});setNotice({kind:"success",text:"Abonnement mis à jour."});setSubFor(null);await load()}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setActingOn(null)}
   };
@@ -91,8 +94,8 @@ export function AdminRestaurants() {
         {r.specialConditions&&<p className="fine left">Conditions particulières : {r.specialConditions}</p>}
         {r.photos?.length>0&&<div className="event-photo-grid">{r.photos.map((p:any)=><img key={p.id} src={imgUrl(p.url)} alt="" style={{height:100,borderRadius:8,objectFit:"cover"}}/>)}</div>}
         <small>{RESTAURANT_STATUS_LABEL[r.status]}</small>
-        {r.status==="APPROVED"&&<p className="fine left">Abonnement : {r.subscription?`${r.subscription.plan.name} (${(r.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois) — ${SUBSCRIPTION_STATUS_LABEL[r.subscription.status]??r.subscription.status}`:"aucun"} <button type="button" className="link-button" onClick={()=>{setSubFor(r.id);setSubForm({planId:r.subscription?.planId??plans?.[0]?.id??"",status:r.subscription?.status??"ACTIVE"})}}>modifier</button></p>}
-        {subFor===r.id&&<div className="time-row"><select value={subForm.planId} onChange={e=>setSubForm({...subForm,planId:e.target.value})}>{(plans??[]).map(p=><option key={p.id} value={p.id}>{p.name} ({(p.monthlyPriceCents/100).toFixed(0)} €/mois, {p.monthlyEventQuota==null?"illimité":`${p.monthlyEventQuota} évt.`})</option>)}</select><select value={subForm.status} onChange={e=>setSubForm({...subForm,status:e.target.value})}><option value="TRIALING">Essai</option><option value="ACTIVE">Actif</option><option value="PAST_DUE">Impayé</option><option value="CANCELLED">Résilié</option><option value="INCOMPLETE">Incomplet</option></select><button className="button small" disabled={actingOn===r.id} onClick={()=>saveSubscription(r.id)}>Enregistrer</button></div>}
+        {r.status==="APPROVED"&&<p className="fine left">Abonnement : {r.subscription?`${r.subscription.plan.name} — ${SUBSCRIPTION_STATUS_LABEL[r.subscription.status]??r.subscription.status}`:"aucun"} <button type="button" className="link-button" aria-expanded={subFor===r.id} onClick={()=>showSubscription(r.id)}>{subFor===r.id?"masquer":"consulter"}</button></p>}
+        {subFor===r.id&&<div className="panel admin-subscription">{subOverview?<SubscriptionSummary overview={subOverview}/>:<div className="skeleton skeleton-panel"/>}<p className="fine left">Consultation seule : le restaurateur gère son abonnement depuis son espace.</p></div>}
         <p className="fine left">Notes internes : {r.adminNotes||"—"} <button type="button" className="link-button" onClick={()=>{setNotesFor(r.id);setNotes(r.adminNotes??"")}}>modifier</button></p>
         {notesFor===r.id&&<div className="time-row"><textarea value={notes} onChange={e=>setNotes(e.target.value)}/><button className="button small" disabled={actingOn===r.id} onClick={()=>saveNotes(r.id)}>Enregistrer</button></div>}
       </div>

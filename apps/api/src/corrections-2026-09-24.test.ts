@@ -1,6 +1,7 @@
 import { EVENT_VIEWER_STATUS_LABEL, eventViewerStatus, upcomingEventsInOrder } from "@nour/shared";
 import { describe, expect, it } from "vitest";
-import { NOT_BOOKABLE_MESSAGE, isEventBookable, planChangeDirection } from "./domain.js";
+import { subscriptionChangeTiming } from "@nour/shared";
+import { NOT_BOOKABLE_MESSAGE, isEventBookable } from "./domain.js";
 import { parisDay, sanitizeGeneratedArticle, sanitizeInstagramCaption } from "./services/blog-content.js";
 
 // Règles critiques des corrections web du 2026-09-24 testables sans base ni serveur.
@@ -44,11 +45,19 @@ describe("événement de démonstration jamais réservable (§8)", () => {
   });
 });
 
-describe("sens d'un changement de formule restaurateur (§1.4)", () => {
-  it("Standard → Premium est une montée (immédiate), Premium → Standard une descente (à l'échéance)", () => {
-    const standard = { monthlyPriceCents: 6900 }, premium = { monthlyPriceCents: 8900 };
-    expect(planChangeDirection(standard, premium)).toBe("UPGRADE");
-    expect(planChangeDirection(premium, standard)).toBe("DOWNGRADE");
+describe("changement de formule ou de périodicité restaurateur (§1.4, décision du 2026-09-25)", () => {
+  const standard = 6900, premium = 8900;
+  const at = (monthlyPriceCents: number, billingPeriod: "MONTHLY" | "ANNUAL") => ({ monthlyPriceCents, billingPeriod });
+  it("formule supérieure ou passage à l'annuel : immédiat", () => {
+    expect(subscriptionChangeTiming(at(standard, "MONTHLY"), at(premium, "MONTHLY"))).toBe("IMMEDIATE");
+    expect(subscriptionChangeTiming(at(premium, "MONTHLY"), at(premium, "ANNUAL"))).toBe("IMMEDIATE");
+    expect(subscriptionChangeTiming(at(standard, "MONTHLY"), at(premium, "ANNUAL"))).toBe("IMMEDIATE");
+  });
+  it("formule inférieure ou passage au mensuel : à la fin de la période payée", () => {
+    expect(subscriptionChangeTiming(at(premium, "MONTHLY"), at(standard, "MONTHLY"))).toBe("AT_PERIOD_END");
+    expect(subscriptionChangeTiming(at(premium, "ANNUAL"), at(premium, "MONTHLY"))).toBe("AT_PERIOD_END");
+    // Même vers une formule plus chère : quitter l'annuel n'écourte jamais l'année payée.
+    expect(subscriptionChangeTiming(at(standard, "ANNUAL"), at(premium, "MONTHLY"))).toBe("AT_PERIOD_END");
   });
 });
 
