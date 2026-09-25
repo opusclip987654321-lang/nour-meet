@@ -137,10 +137,17 @@ export async function loadSettings(prisma: PrismaClient): Promise<Settings> {
 // relecture périodique rattrape tout message perdu.
 export const SETTINGS_CHANGED_MESSAGE = "nour:settings-changed";
 const SETTINGS_REFRESH_MS = 30_000;
+// Canal IPC réel par défaut ; remplaçable dans les tests (le processus de test a son propre IPC).
+export const settingsChannel = {
+  broadcast: () => { if (process.connected) process.send?.({ type: SETTINGS_CHANGED_MESSAGE }, undefined, {}, () => {}); },
+  subscribe: (onMessage: (message: unknown) => void) => { process.on("message", onMessage); return () => { process.off("message", onMessage); }; }
+};
 export function watchSettings(prisma: PrismaClient, onError: (err: unknown) => void) {
   const reload = () => { loadSettings(prisma).catch(onError); };
-  process.on("message", message => { if ((message as { type?: string } | null)?.type === SETTINGS_CHANGED_MESSAGE) reload(); });
-  setInterval(reload, SETTINGS_REFRESH_MS).unref();
+  const unsubscribe = settingsChannel.subscribe(message => { if ((message as { type?: string } | null)?.type === SETTINGS_CHANGED_MESSAGE) reload(); });
+  const timer = setInterval(reload, SETTINGS_REFRESH_MS);
+  timer.unref();
+  return () => { unsubscribe(); clearInterval(timer); };
 }
 
 export function getSettings(): Settings { return cache; }
@@ -150,7 +157,7 @@ export async function updateSetting<K extends SettingKey>(prisma: PrismaClient, 
   const parsed = SETTINGS_SCHEMA[key].schema.parse(value);
   await prisma.appSetting.upsert({ where: { key }, update: { value: parsed as any, updatedBy }, create: { key, value: parsed as any, updatedBy } });
   cache = { ...cache, [key]: parsed };
-  if (process.connected) process.send?.({ type: SETTINGS_CHANGED_MESSAGE }, undefined, {}, () => {});
+  settingsChannel.broadcast();
   return parsed as Settings[K];
 }
 

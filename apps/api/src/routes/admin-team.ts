@@ -5,6 +5,7 @@ import { normalizePhoneNumber } from "../phone.js";
 import { audit } from "../services/audit.js";
 import { TokenUser, currentId, ownRestaurant, roles } from "../services/auth.js";
 import { notify } from "../services/notify.js";
+import { links } from "../services/links.js";
 
 // Personnel d'accueil (rôle RECEPTION) : un restaurateur ne peut créer ce personnel que pour son
 // propre établissement, et ce personnel n'obtient AUCUN droit hors scan des billets de cet
@@ -29,7 +30,7 @@ app.post("/admin/staff", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER)
   if (staffUser && staffUser.role !== UserRole.PARTICIPANT) return reply.code(409).send({ error: "Ce compte a déjà un rôle incompatible avec le statut de personnel d’accueil" });
   if (!staffUser) staffUser = await prisma.user.create({ data: { phone, displayName: input.displayName ?? "Personnel d’accueil", profile: { create: { interests: [] } } } });
   const updated = await prisma.user.update({ where: { id: staffUser.id }, data: { role: UserRole.RECEPTION, restaurantId } });
-  await notify(staffUser.id, "Accès accueil activé", "Vous pouvez désormais scanner les billets de votre établissement.", "/admin/scanner");
+  await notify(staffUser.id, "Accès accueil activé", "Vous pouvez désormais scanner les billets de votre établissement.", links.receptionScanner());
   await audit(currentId(request), "GRANT_STAFF_ACCESS", "User", staffUser.id, { restaurantId });
   return reply.code(201).send(updated);
 });

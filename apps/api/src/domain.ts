@@ -1,3 +1,4 @@
+import { subscriptionChangeTiming } from "@nour/shared";
 export function hasCapacity(capacity: number, confirmedCount: number) {
   return confirmedCount < capacity;
 }
@@ -67,6 +68,7 @@ export function isEventBookable(event: { isDemo: boolean }) {
 // Sens d'un changement de formule restaurateur (§1.4, corrections web 2026-09-24) : une formule plus
 // chère s'applique immédiatement avec prorata, une formule moins chère à la fin de la période payée.
 export type PlanChangeDirection = "UPGRADE" | "DOWNGRADE";
+// Même règle que subscriptionChangeTiming (@nour/shared), à périodicité égale : UPGRADE = immédiat.
 export function planChangeDirection(current: { monthlyPriceCents: number }, target: { monthlyPriceCents: number }): PlanChangeDirection {
-  return target.monthlyPriceCents > current.monthlyPriceCents ? "UPGRADE" : "DOWNGRADE";
+  return subscriptionChangeTiming({ ...current, billingPeriod: "MONTHLY" }, { ...target, billingPeriod: "MONTHLY" }) === "IMMEDIATE" && target.monthlyPriceCents !== current.monthlyPriceCents ? "UPGRADE" : "DOWNGRADE";
 }

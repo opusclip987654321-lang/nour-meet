@@ -61,7 +61,7 @@ const checkMinParticipantsThresholds = async () => {
     if (event._count.reservations >= (event.minParticipants ?? 0)) { await prisma.event.update({ where: { id: event.id }, data: { minParticipantsNotifiedAt: new Date() } }); continue; }
     await prisma.event.update({ where: { id: event.id }, data: { minParticipantsNotifiedAt: new Date() } });
     const windowHours = getSetting("MIN_PARTICIPANTS_DECISION_WINDOW_HOURS");
-    if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, "Minimum de participants non atteint", `« ${event.title} » n’a pas atteint son minimum de ${event.minParticipants} participants. Vous avez ${windowHours}h pour maintenir ou annuler, sans quoi l’événement sera maintenu par défaut.`, `/admin/events?highlight=${event.id}`);
+    if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, "Minimum de participants non atteint", `« ${event.title} » n’a pas atteint son minimum de ${event.minParticipants} participants. Vous avez ${windowHours}h pour maintenir ou annuler, sans quoi l’événement sera maintenu par défaut.`, links.restaurantEvent(event.id));
     const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
     await Promise.all(admins.map(a => notify(a.id, "Minimum de participants non atteint", `« ${event.title} » n’a pas atteint son minimum de participants.`, `/admin/events?highlight=${event.id}`)));
     await audit(undefined, "MIN_PARTICIPANTS_NOT_REACHED", "Event", event.id, { minParticipants: event.minParticipants, confirmedCount: event._count.reservations });

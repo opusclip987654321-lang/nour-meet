@@ -14,6 +14,7 @@ import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 import { claimReservation } from "../services/reservations.js";
 import { getSetting } from "../settings.js";
+import { retireDemoEventsIfRealOnesPublished } from "../services/demo-events.js";
 
 app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
@@ -120,7 +121,9 @@ app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER
     minAge: input.minAge, maxAge: input.maxAge,
     status: token.role === UserRole.ADMIN && input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT
   } });
-  await audit(currentId(request), "CREATE_EVENT", "Event", event.id); return event;
+  await audit(currentId(request), "CREATE_EVENT", "Event", event.id);
+  if (event.status === EventStatus.PUBLISHED) await retireDemoEventsIfRealOnesPublished(prisma);
+  return event;
 });
 // Modification d'un événement déjà créé. La capacité ne peut jamais descendre sous les places déjà
 // payées ou temporairement bloquées ; un changement de date alors qu'au moins une réservation est
@@ -275,8 +278,9 @@ app.post("/admin/events/:id/review-decision", { preHandler: roles(UserRole.ADMIN
     quotaConsumedNow = true;
   }
   const updated = await prisma.event.update({ where: { id }, data: { status: accept ? EventStatus.PUBLISHED : EventStatus.DRAFT, reviewedAt: new Date(), reviewNote: note ?? null, quotaConsumedAt: quotaConsumedNow ? new Date() : undefined } });
-  if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, accept ? "Événement publié" : "Événement renvoyé en brouillon", accept ? `« ${event.title} » est maintenant publié.` : `« ${event.title} » nécessite des modifications${note ? ` : ${note}` : "."}`, `/admin/events?highlight=${event.id}`);
+  if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, accept ? "Événement publié" : "Événement renvoyé en brouillon", accept ? `« ${event.title} » est maintenant publié.` : `« ${event.title} » nécessite des modifications${note ? ` : ${note}` : "."}`, links.restaurantEvent(event.id));
   await audit(currentId(request), accept ? "APPROVE_EVENT" : "REJECT_EVENT", "Event", id, { note, quotaConsumedNow });
+  if (accept && !event.isDemo) await retireDemoEventsIfRealOnesPublished(prisma);
   return updated;
 });
 // Action explicite d'un administrateur (§8.2) : la seule façon de rendre un quota déjà consommé,

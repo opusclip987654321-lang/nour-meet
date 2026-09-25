@@ -433,10 +433,11 @@ async function newOrganizer(displayName: string) {
   const admin = await adminToken();
   await addRestaurantPhoto(token);
   await api(`/admin/restaurants/${restaurant.id}/decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
-  // L'approbation ne crée plus d'abonnement (le restaurateur choisit sa formule) ; or une soirée ne
-  // peut être publiée qu'avec un abonnement actif : on l'attribue comme le ferait l'administration.
+  // L'approbation ne crée plus d'abonnement (le restaurateur choisit sa formule via Stripe) ; or une
+  // soirée ne peut être publiée qu'avec un abonnement actif. L'administration ne peut plus en attribuer
+  // un à la main (décision du 2026-09-25) : le test le crée directement en base, hors Stripe.
   const standard = await prisma.plan.findFirstOrThrow({ where: { name: "Standard", active: true } });
-  await api(`/admin/restaurants/${restaurant.id}/subscription`, { method: "POST", body: JSON.stringify({ planId: standard.id, status: "ACTIVE" }) }, admin);
+  await prisma.restaurantSubscription.create({ data: { restaurantId: restaurant.id, planId: standard.id, status: "ACTIVE", currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60_000) } });
   // Le rôle vient de changer côté serveur : un jeton fraîchement émis le reflète.
   const { body: reverify } = await api<{ token: string }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456" }) });
   token = reverify.token;
@@ -978,10 +979,25 @@ describe("majorité et acceptation des CGU/CGV", () => {
   });
 });
 
+// Décision du 2026-09-25 : une mise en relation n'est possible qu'entre personnes inscrites à une
+// même soirée — une candidature liée au même événement, quel qu'en soit le statut (présence non exigée).
+async function sameEvent(userIds: string[], statuses: ("PAYMENT_PENDING" | "CONFIRMED" | "CANCELLED")[] = [], flow: "DIRECT" | "SCREENING" = "DIRECT") {
+  const event = await prisma.event.create({ data: {
+    slug: `test-mise-en-relation-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: "Test mise en relation", category: flow === "DIRECT" ? "Networking" : "Speed dating", flow,
+    description: "Événement de test pour la mise en relation.", startsAt: new Date(Date.now() - 48 * 60 * 60_000), endsAt: new Date(Date.now() - 45 * 60 * 60_000),
+    district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 0, status: "PUBLISHED"
+  } });
+  createdEventIds.push(event.id);
+  for (const [i, userId] of userIds.entries()) await prisma.application.create({ data: { eventId: event.id, userId, status: statuses[i] ?? "CONFIRMED" } });
+  return event;
+}
+const shareCodeOf = async (userId: string) => (await prisma.profile.findUniqueOrThrow({ where: { userId } })).shareCode;
+
 describe("mise en relation fondée sur le consentement", () => {
   it("n'autorise ni relance après refus, ni double réponse, ni demande à soi-même", async () => {
     const a = await tracked("ContactA");
     const b = await tracked("ContactB");
+    await sameEvent([a.userId, b.userId]);
     expect((await api("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: a.userId }) }, a.token)).status).toBe(400);
 
     const first = await api<{ id: string }>("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: b.userId }) }, a.token);
@@ -998,10 +1014,66 @@ describe("mise en relation fondée sur le consentement", () => {
   });
 });
 
+describe("mise en relation limitée aux inscrits d'une même soirée (décision du 2026-09-25)", () => {
+  it("refuse code et demande sans soirée commune, côté serveur", async () => {
+    const a = await tracked("SansSoireeA");
+    const b = await tracked("SansSoireeB");
+    await sameEvent([a.userId]);
+    await sameEvent([b.userId]);
+    const lookup = await api<{ error: string }>(`/profiles/code/${await shareCodeOf(b.userId)}`, {}, a.token);
+    expect(lookup.status).toBe(403);
+    expect(JSON.stringify(lookup.body)).not.toContain("SansSoireeB");
+    expect((await api("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: b.userId }) }, a.token)).status).toBe(403);
+    expect(await prisma.contactRequest.count({ where: { requesterId: a.userId } })).toBe(0);
+  });
+
+  it("networking : un participant sans entretien est retrouvé par son code, même inscrit mais absent, puis la messagerie s'ouvre après acceptation", async () => {
+    const a = await directParticipant("NetworkA");
+    const b = await directParticipant("NetworkB");
+    createdUserIds.push(a.userId, b.userId);
+    // B s'était inscrit puis a annulé : l'inscription reste liée à la soirée, la règle reste satisfaite.
+    await sameEvent([a.userId, b.userId], ["CONFIRMED", "CANCELLED"]);
+    const lookup = await api<{ userId: string; validated: boolean }>(`/profiles/code/${(await shareCodeOf(b.userId)).toLowerCase()}`, {}, a.token);
+    expect(lookup.status).toBe(200);
+    expect(lookup.body.validated).toBe(false);
+    const sent = await api<{ id: string }>("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: b.userId }) }, a.token);
+    expect(sent.status).toBe(200);
+    // Aucune conversation avant l'acceptation.
+    expect(await prisma.conversationMember.count({ where: { userId: a.userId } })).toBe(0);
+    const accepted = await api<{ conversation: { id: string } }>(`/contacts/${sent.body.id}/respond`, { method: "POST", body: JSON.stringify({ accept: true }) }, b.token);
+    expect(accepted.status).toBe(200);
+    expect((await api(`/conversations/${accepted.body.conversation.id}/messages`, { method: "POST", body: JSON.stringify({ body: "Ravi de vous avoir croisé" }) }, a.token)).status).toBe(200);
+    // Aucune limite : A peut aussi demander à revoir une troisième personne de la même soirée.
+    const c = await directParticipant("NetworkC");
+    createdUserIds.push(c.userId);
+    const event = await sameEvent([a.userId, c.userId]);
+    expect(event.id).toBeTruthy();
+    expect((await api("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: c.userId }) }, a.token)).status).toBe(200);
+  });
+
+  it("un refus n'est jamais révélé à l'expéditeur : « Cette personne n'est pas disponible »", async () => {
+    const a = await tracked("RefusA");
+    const b = await tracked("RefusB");
+    await sameEvent([a.userId, b.userId], [], "SCREENING");
+    const sent = await api<{ id: string }>("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: b.userId }) }, a.token);
+    await api(`/contacts/${sent.body.id}/respond`, { method: "POST", body: JSON.stringify({ accept: false }) }, b.token);
+    const mine = await api<{ id: string; status: string }[]>("/me/contact-requests", {}, a.token);
+    expect(mine.body.find(r => r.id === sent.body.id)?.status).toBe("UNAVAILABLE");
+    expect(JSON.stringify(mine.body)).not.toContain("REFUSED");
+    const again = await api<{ error: string }>("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: b.userId }) }, a.token);
+    expect(again.status).toBe(409);
+    expect(again.body.error).toBe("Cette personne n’est pas disponible.");
+    // La personne qui a refusé voit, elle, sa propre décision.
+    const theirs = await api<{ id: string; status: string }[]>("/me/contact-requests", {}, b.token);
+    expect(theirs.body.find(r => r.id === sent.body.id)?.status).toBe("REFUSED");
+  });
+});
+
 describe("signalement et confidentialité entre participants", () => {
   it("valide la personne signalée, bloque les deux côtés et empêche toute nouvelle demande", async () => {
     const a = await tracked("SignalA");
     const b = await tracked("SignalB");
+    await sameEvent([a.userId, b.userId]);
     expect((await api("/reports", { method: "POST", body: JSON.stringify({ reportedId: a.userId, reason: "Test" }) }, a.token)).status).toBe(400);
     expect((await api("/reports", { method: "POST", body: JSON.stringify({ reportedId: "inexistant", reason: "Test" }) }, a.token)).status).toBe(404);
 

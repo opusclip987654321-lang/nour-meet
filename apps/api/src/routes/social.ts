@@ -27,14 +27,26 @@ app.get("/me/share-qr", { preHandler: auth }, async (request) => {
   return { code: profile.shareCode, qrDataUrl: await cachedQrDataUrl(profile.shareCode) };
 });
 
+// Mise en relation (décision du 2026-09-25) : un code personnel ne permet de retrouver QUE les
+// personnes inscrites à une même soirée — une candidature liée au même événement, quel que soit son
+// statut et sans exiger la présence effective (une personne inscrite mais absente garde ce droit).
+// Même règle pour le speed dating, l'amitié et le networking : l'entretien n'y joue aucun rôle.
+const SHARED_EVENT_REQUIRED = "Ce code ne correspond à aucune personne inscrite à une soirée où vous êtes aussi inscrit(e).";
+// Refus, blocage après signalement : jamais révélés à l'expéditeur, toujours ce message neutre.
+const UNAVAILABLE = "Cette personne n’est pas disponible.";
+const shareAnEvent = async (userA: string, userB: string) =>
+  !!(await prisma.application.findFirst({ where: { userId: userA, eventId: { not: null }, event: { applications: { some: { userId: userB } } } }, select: { id: true } }));
+
 // Débit strict : un code personnel ne se devine pas en essayant des valeurs à la chaîne.
 app.get("/profiles/code/:code", { preHandler: auth, config: { rateLimit: { max: smsVerification.mode === "mock" ? 1000 : 20, timeWindow: "10 minutes" } } }, async (request, reply) => {
   const { code } = z.object({ code: z.string() }).parse(request.params);
   // Code dicté ou recopié à la main : espaces et minuscules tolérés (les codes sont en majuscules).
   const profile = await prisma.profile.findUnique({ where: { shareCode: code.trim().toUpperCase() }, include: { user: true } });
-  if (!profile || !profile.validatedAt) return reply.code(404).send({ error: "Code invalide ou révoqué" });
+  if (!profile || profile.user.deletedAt || profile.user.suspendedAt) return reply.code(404).send({ error: "Code invalide ou révoqué" });
   if (profile.userId === currentId(request)) return reply.code(409).send({ error: "Il s’agit de votre propre code" });
-  return { userId: profile.userId, displayName: profile.user.displayName, photoUrl: profile.photoUrl, age: profileAge(profile.birthDate), city: profile.city, profession: profile.profession, interests: profile.interests, bio: profile.bio, validated: true };
+  // Aucun profil montré hors d'une soirée commune : un code trouvé ne suffit pas.
+  if (!(await shareAnEvent(currentId(request), profile.userId))) return reply.code(403).send({ error: SHARED_EVENT_REQUIRED });
+  return { userId: profile.userId, displayName: profile.user.displayName, photoUrl: profile.photoUrl, age: profileAge(profile.birthDate), city: profile.city, profession: profile.profession, interests: profile.interests, bio: profile.bio, validated: !!profile.validatedAt };
 });
 
 // Mise en relation fondée sur le consentement : une demande refusée ne peut jamais être relancée
@@ -43,12 +55,14 @@ app.get("/profiles/code/:code", { preHandler: auth, config: { rateLimit: { max: 
 app.post("/contacts/request", { preHandler: auth }, async (request, reply) => {
   const { recipientId } = z.object({ recipientId: z.string() }).parse(request.body); const requesterId = currentId(request);
   if (recipientId === requesterId) return reply.code(400).send({ error: "Vous ne pouvez pas vous envoyer une demande à vous-même." });
+  // Règle serveur, pas seulement d'interface : jamais de demande hors d'une soirée commune.
+  if (!(await shareAnEvent(requesterId, recipientId))) return reply.code(403).send({ error: SHARED_EVENT_REQUIRED });
   const existing = await prisma.contactRequest.findUnique({ where: { requesterId_recipientId: { requesterId, recipientId } } });
-  if (existing?.status === ContactRequestStatus.REFUSED) return reply.code(409).send({ error: "Cette personne a décliné votre demande : elle ne peut pas être renouvelée." });
+  if (existing?.status === ContactRequestStatus.REFUSED) return reply.code(409).send({ error: UNAVAILABLE });
   if (existing?.status === ContactRequestStatus.ACCEPTED) return reply.code(409).send({ error: "Vous êtes déjà en contact avec cette personne." });
   if (existing?.status === ContactRequestStatus.PENDING) return existing;
   // Une personne signalée par le destinataire ne peut plus lui envoyer de demande.
-  if (await prisma.report.findFirst({ where: { reporterId: recipientId, reportedId: requesterId }, select: { id: true } })) return reply.code(409).send({ error: "Cette personne n’accepte pas de demande de votre part." });
+  if (await prisma.report.findFirst({ where: { reporterId: recipientId, reportedId: requesterId }, select: { id: true } })) return reply.code(409).send({ error: UNAVAILABLE });
   const requestRow = existing
     ? await prisma.contactRequest.update({ where: { id: existing.id }, data: { status: ContactRequestStatus.PENDING } })
     : await prisma.contactRequest.create({ data: { requesterId, recipientId } });
@@ -58,7 +72,9 @@ app.post("/contacts/request", { preHandler: auth }, async (request, reply) => {
 
 app.get("/me/contact-requests", { preHandler: auth }, async (request) => {
   const userId = currentId(request);
-  return prisma.contactRequest.findMany({ where: { OR: [{ requesterId: userId }, { recipientId: userId }] }, include: { requester: { select: publicPerson }, recipient: { select: publicPerson } }, orderBy: { createdAt: "desc" } });
+  const rows = await prisma.contactRequest.findMany({ where: { OR: [{ requesterId: userId }, { recipientId: userId }] }, include: { requester: { select: publicPerson }, recipient: { select: publicPerson } }, orderBy: { createdAt: "desc" } });
+  // L'expéditeur ne voit jamais « refusée » : seulement « UNAVAILABLE » (« n'est pas disponible »).
+  return rows.map(r => r.requesterId === userId && r.status === ContactRequestStatus.REFUSED ? { ...r, status: "UNAVAILABLE" as const } : r);
 });
 
 app.post("/contacts/:id/respond", { preHandler: auth }, async (request, reply) => {

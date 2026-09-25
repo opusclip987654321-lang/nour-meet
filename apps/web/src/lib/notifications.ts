@@ -1,4 +1,5 @@
 import { api } from "../api";
+import { homeFor, restaurantEquivalent } from "./spaces";
 
 export type AppNotification = { id: string; title: string; body: string; linkPath: string | null; readAt: string | null; createdAt: string };
 
@@ -7,9 +8,13 @@ export type AppNotification = { id: string; title: string; body: string; linkPat
 // par l'API (services/links.ts) ; une ancienne notification sans chemin mène à l'espace du compte
 // plutôt que de rester un texte non cliquable.
 export const notificationHref = (n: Pick<AppNotification, "linkPath">, role: string | undefined) => {
+  // Notification envoyée à un restaurateur avant la séparation des espaces (lien /admin) : même
+  // section, dans son espace /restaurant.
+  if (n.linkPath && n.linkPath.startsWith("/admin") && role === "ORGANIZER") return restaurantEquivalent(n.linkPath);
   if (n.linkPath && n.linkPath.startsWith("/")) return n.linkPath;
   if (role === "PARTICIPANT") return "/dashboard?tab=reservations";
-  if (role === "ORGANIZER" || role === "ADMIN") return "/admin";
+  if (role === "ORGANIZER") return homeFor({ role });
+  if (role === "ADMIN") return "/admin";
   return "/notifications";
 };
 

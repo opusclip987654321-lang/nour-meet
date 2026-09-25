@@ -1,232 +1,155 @@
-# Politique de confidentialité — Nour Meet
+# Politique de confidentialité — Nūr Meet
 
-Dernière mise à jour : 24 septembre 2026
+Dernière mise à jour : 25 septembre 2026
 
 ## 1. Responsable du traitement
 
-Le responsable des traitements décrits dans la présente politique est :
-
-**NOUR MEET SASU**  
-Siège social : **[À COMPLÉTER]**  
-E-mail données personnelles : **contact@nourmeet.com**
-
-Les informations d'immatriculation définitives seront ajoutées avant la mise en production commerciale.
+Le responsable des traitements décrits ici est l'exploitant de Nūr Meet : **{{societe.nom}}** ({{societe.statut}}).  
+Dénomination et siège : **{{societe.denomination}}**.  
+Contact pour les données personnelles : **{{societe.email}}**.
 
 ## 2. Principes
 
-Nour Meet s'engage à traiter les données de manière licite, loyale et transparente, à limiter la collecte au nécessaire et à mettre en œuvre des mesures de sécurité adaptées.
+Nūr Meet ne collecte que les données nécessaires au service, les protège, et ne les vend à personne.
 
-Le service est réservé aux personnes âgées d'au moins **18 ans**.
+Le service est réservé aux personnes âgées d'au moins **18 ans** ; la date de naissance est vérifiée avant toute inscription à une soirée.
 
-Nour Meet n'a pas vocation à demander dans ses formulaires la religion, les convictions religieuses ou philosophiques, l'origine ethnique, l'orientation sexuelle, les opinions politiques, l'appartenance syndicale ou des données de santé.
-
-Les utilisateurs sont invités à ne pas insérer de telles informations dans les champs libres ou messages lorsqu'elles ne sont pas nécessaires.
+Aucun formulaire ne demande la religion, les convictions, l'origine, l'orientation sexuelle, les opinions politiques, l'appartenance syndicale ni la santé. Merci de ne pas saisir de telles informations dans les champs libres ou les messages.
 
 ## 3. Données traitées
 
-Selon l'utilisation du service, Nour Meet peut traiter :
+### Compte et connexion
+- adresse e-mail, ou identifiant et e-mail du compte Google si vous vous connectez avec Google ;
+- numéro de téléphone, vérifié une fois par SMS avant la première réservation ;
+- codes de connexion à usage unique (conservés sous forme chiffrée, valables quelques minutes) ;
+- preuve d'acceptation des CGU et CGV (version, date, adresse IP, navigateur).
 
-### Données d'identification et de compte
-- nom et prénom ;
-- date de naissance ou âge ;
-- sexe lorsque nécessaire au fonctionnement de l'événement ;
-- photographie de profil ;
-- ville ou zone géographique ;
-- adresse e-mail ;
-- numéro de téléphone ;
-- identifiants techniques de compte ;
-- statut de vérification.
+### Profil
+- prénom ou pseudonyme ;
+- date de naissance ;
+- ville, profession, centres d'intérêt, biographie (facultatifs) ;
+- sexe, lorsque la soirée répartit les places entre femmes et hommes ;
+- photo de profil (facultative) ;
+- statut de validation (badge « Vérifié »).
 
-### Données de candidature et d'événements
-- réponses aux questionnaires de candidature ;
-- disponibilités ;
-- préférences de types d'événements ;
-- statut d'acceptation ou de refus ;
-- réservation, présence, liste d'attente et alternatives ;
-- informations nécessaires à l'entretien de vérification ;
-- historique des événements et réservations.
+### Entretien de validation (soirées de rencontre)
+- quelques mots de motivation, le créneau choisi, la décision ;
+- des notes internes éventuelles de l'équipe, **jamais communiquées** à la personne concernée ni à des tiers ;
+- la date de décision, pour appliquer le délai de trois mois avant une nouvelle demande.
 
-Nour Meet évite de conserver des notes d'entretien plus détaillées que nécessaire et privilégie, lorsque possible, la conservation du seul résultat de vérification.
+### Soirées et réservations
+- inscriptions, réponses au questionnaire privé de rencontre (ou, facultativement, au questionnaire networking), listes d'attente et soirées comparables proposées ;
+- réservations, billets (QR code), passage à l'entrée ;
+- lien de partage utilisé pour venir sur une soirée, le cas échéant.
 
-### Paiements et facturation
-- montant ;
-- statut du paiement ;
-- référence de transaction ;
-- remboursements ;
-- informations de facturation nécessaires.
+### Paiements
+- montant, statut, date, remboursements et référence du paiement chez Stripe.
 
-Les données complètes de carte bancaire sont traitées par Stripe et ne sont pas destinées à être stockées par Nour Meet.
+Les données de carte bancaire sont saisies directement chez **Stripe** ; Nūr Meet ne les reçoit pas.
 
-### Communications
-- messages échangés lorsque la messagerie Nour Meet est utilisée ;
-- demandes au support ;
-- notifications envoyées ;
-- préférences de communication ;
-- preuve du consentement marketing.
+### Mise en relation et messagerie
+- votre **code personnel** et son QR code ;
+- demandes de contact envoyées et reçues, et leur statut ;
+- conversations et messages échangés après acceptation ;
+- signalements et décisions de modération.
+
+### Restaurateurs
+- nom de l'établissement, nom du responsable, SIRET déclaré, téléphone, adresse, description, conditions habituelles, photos ;
+- abonnement : formule, périodicité, statut, échéances et factures (gérés par Stripe) ;
+- comptes du personnel d'accueil (nom, téléphone).
+
+### Notifications
+- notifications affichées dans votre espace ;
+- e-mails de service ;
+- sur l'application mobile, si vous l'autorisez : l'identifiant de notification de votre téléphone.
 
 ### Données techniques
-- adresse IP ;
-- journaux de connexion ;
-- appareil, navigateur et système d'exploitation ;
-- données de sécurité et d'erreur ;
-- identifiants de session ;
-- données de cookies et traceurs selon les choix de l'utilisateur.
+- adresse IP et journaux techniques du serveur ;
+- rapports d'erreur (sans votre identité, sans le contenu de vos échanges) ;
+- mesure d'audience interne, **uniquement après votre accord** (voir la Politique de cookies).
 
 ## 4. Finalités et bases légales
 
-### Création et gestion du compte
-Finalités : création de compte, authentification, accès au service, gestion du profil.  
-Base légale : **exécution du contrat**.
+| Finalité | Base légale |
+|---|---|
+| Créer et gérer le compte, vous connecter, vérifier votre numéro | Exécution du contrat |
+| Valider les profils pour les soirées de rencontre (entretien) | Mesures précontractuelles et exécution du contrat |
+| Réserver, payer, émettre les billets, gérer listes d'attente, annulations et remboursements | Exécution du contrat ; obligations légales (comptabilité) |
+| Mettre en relation des personnes inscrites à une même soirée, messagerie | Exécution du contrat |
+| Informer des événements du compte (notifications, e-mails, push autorisés) | Exécution du contrat |
+| Sécurité, prévention des abus et de la fraude, modération des signalements | Intérêt légitime de Nūr Meet et de ses membres ; obligation légale le cas échéant |
+| Espace restaurateur, abonnements, facturation | Exécution du contrat ; obligations légales |
+| Mesure d'audience interne | Consentement |
+| Preuve de l'acceptation des conditions, défense en cas de litige | Intérêt légitime ; obligations légales |
 
-### Candidatures, validation et réservations
-Finalités : traiter les candidatures, organiser les entretiens, attribuer un statut de vérification, gérer les listes d'attente, réservations et alternatives.  
-Base légale : **mesures précontractuelles et exécution du contrat** ; certains contrôles de sécurité peuvent reposer sur l'**intérêt légitime** de Nour Meet à prévenir les abus.
+Nūr Meet n'envoie pas de prospection commerciale par e-mail ou SMS. Si cela devait changer, votre consentement préalable serait demandé.
 
-### Paiement et remboursement
-Finalités : encaissement, confirmation, remboursement, comptabilité et prévention des impayés.  
-Base légale : **exécution du contrat** et **obligations légales**.
+## 5. Qui voit quoi
 
-### Messagerie, support et notifications de service
-Finalités : permettre les échanges, répondre aux demandes, envoyer les informations indispensables relatives au compte ou à un événement.  
-Base légale : **exécution du contrat** et, pour la sécurité ou la qualité du service, **intérêt légitime**.
+- **Les autres participants** voient seulement votre prénom ou pseudonyme et votre photo, et, lorsqu'une personne inscrite à la même soirée saisit votre code : votre âge, votre ville, votre profession, vos centres d'intérêt et votre biographie si vous les avez renseignés. Ils ne voient **jamais** votre numéro ni votre e-mail.
+- **La mise en relation** n'est possible qu'entre personnes inscrites à une même soirée. Une conversation ne s'ouvre que si vous acceptez la demande. Si vous refusez, l'expéditeur voit seulement « Cette personne n'est pas disponible ».
+- **L'établissement qui accueille la soirée** reçoit uniquement votre prénom ou pseudonyme, votre catégorie lorsque la soirée répartit les places, et le statut de votre paiement et de votre billet. Jamais votre numéro, votre e-mail, vos réponses aux questionnaires ni vos messages.
+- **L'équipe Nūr Meet** (personnes habilitées) accède aux données nécessaires à ses missions : validation, organisation, support, modération, comptabilité.
+- **Les autorités**, lorsque la loi l'exige.
 
-### Sécurité, fraude et modération
-Finalités : protéger les comptes, prévenir les comportements abusifs, lutter contre la fraude, assurer la sécurité du service et traiter les signalements.  
-Base légale : **intérêt légitime** de Nour Meet à sécuriser la plateforme et ses utilisateurs ; **obligation légale** lorsque la réglementation l'impose.
+## 6. Prestataires
 
-### Prospection et marketing
-Finalités : envoyer des offres, newsletters, campagnes e-mail ou SMS et mesurer leur efficacité.  
-Base légale : **consentement** lorsqu'il est requis. L'utilisateur peut retirer ce consentement à tout moment.
+| Prestataire | Rôle | Localisation des traitements |
+|---|---|---|
+| OVHcloud | Hébergement du site, de l'API et de la base de données | France |
+| Stripe | Paiement des places, remboursements, abonnements restaurateurs et factures | Union européenne et États-Unis |
+| Twilio | Envoi du code de vérification par SMS | États-Unis |
+| Resend | Envoi des e-mails de service (codes de connexion, notifications) | États-Unis |
+| Google | Connexion avec un compte Google, à votre demande (identifiant, nom et e-mail du compte) | États-Unis |
+| Expo, puis Apple et Google | Acheminement des notifications push, si vous les autorisez (contenu générique, sans détail personnel) | États-Unis |
+| Sentry | Rapports d'erreurs techniques, sans identité ni contenu des échanges | États-Unis ou Union européenne selon la configuration |
 
-### Statistiques et publicité
-Finalités : mesure d'audience, analyse des parcours, optimisation marketing, attribution publicitaire et reciblage.  
-Base légale : **consentement** pour les traceurs qui l'exigent.
+Les services d'intelligence artificielle (OpenAI, Anthropic) et Instagram ne sont utilisés que pour les articles du journal et les illustrations du site : **aucune donnée de membre ne leur est transmise**.
 
-### Comptabilité et preuve
-Finalités : facturation, obligations fiscales et comptables, conservation de preuves en cas de litige.  
-Base légale : **obligation légale** et **intérêt légitime** à établir ou défendre des droits.
+## 7. Transferts hors de l'Union européenne
 
-## 5. Destinataires
-
-Dans la limite de leurs besoins, les données peuvent être accessibles :
-- aux personnes autorisées de Nour Meet ;
-- au restaurateur ou organisateur concerné, uniquement pour les informations nécessaires à l'événement ;
-- aux prestataires techniques intervenant pour le compte de Nour Meet ;
-- aux autorités ou juridictions lorsque la loi l'exige.
-
-Les organisateurs n'ont pas vocation à recevoir l'intégralité des réponses de candidature, des messages privés ou des informations internes de vérification.
-
-## 6. Principaux prestataires
-
-Nour Meet prévoit notamment d'utiliser :
-
-- **OVHcloud** : hébergement et infrastructure ;
-- **Stripe** : paiement et remboursement ;
-- **Twilio** : vérification du numéro de téléphone par SMS ;
-- **Google** : connexion avec un compte Google, à la demande de l'utilisateur (Google transmet l'identifiant du compte, le nom et l'adresse e-mail) ;
-- **Resend** : envoi d'e-mails transactionnels et, selon consentement, marketing ;
-- **Expo** (application mobile), puis **Apple** et **Google** : acheminement des notifications push, uniquement si l'utilisateur les autorise sur son téléphone. Le contenu transmis reste générique, sans détail de la demande ni de la soirée ; l'autorisation se retire à tout moment dans les réglages du téléphone ;
-- **Google Maps** : fonctionnalités cartographiques et d'adresses ;
-- **Mesure d'audience interne** (hébergée par Nour Meet, sans transmission à un tiers) : après consentement de l'utilisateur ;
-- **Meta Pixel** : mesure et publicité, après consentement ;
-- **TikTok Pixel** : mesure et publicité, après consentement ;
-- **Sentry** : détection d'erreurs, performance et sécurité technique.
-
-La liste est mise à jour lorsque les prestataires utilisés évoluent.
-
-## 7. Transferts hors Espace économique européen
-
-Certains prestataires peuvent traiter des données depuis des pays situés hors de l'Espace économique européen.
-
-Lorsque cela est nécessaire, Nour Meet s'appuie sur les mécanismes prévus par le RGPD, notamment une décision d'adéquation applicable, les clauses contractuelles types de la Commission européenne ou d'autres garanties appropriées.
-
-La situation exacte de chaque prestataire doit être vérifiée dans ses engagements contractuels et de protection des données au moment de son activation.
+Lorsqu'un prestataire traite des données hors de l'Espace économique européen, le transfert repose sur une décision d'adéquation (notamment le cadre UE–États-Unis pour les entreprises certifiées) ou sur les clauses contractuelles types de la Commission européenne.
 
 ## 8. Durées de conservation
 
-Nour Meet applique les durées suivantes comme politique cible, sous réserve des obligations légales particulières :
+| Données | Durée |
+|---|---|
+| Compte et profil | Tant que le compte est actif ; à la suppression du compte, anonymisation immédiate |
+| Compte inactif | Anonymisation après 2 ans sans connexion, après un avertissement |
+| Codes de connexion et liens de connexion de l'application | Quelques minutes, puis supprimés |
+| Entretien refusé | Décision conservée pour appliquer le délai de 3 mois, puis tant que le compte existe ; notes internes réduites au strict nécessaire |
+| Réservations, paiements, factures, preuves d'acceptation des CGV | 10 ans (obligations comptables), y compris après suppression du compte |
+| Messages | Tant que la conversation existe ; après suppression du compte d'un des deux membres, les messages déjà envoyés restent visibles pour l'autre sous la mention « Compte supprimé » |
+| Signalements et décisions de modération | Tant que nécessaire à la sécurité du service et à la preuve, 5 ans au plus |
+| Mesure d'audience interne | 13 mois au plus, puis supprimée automatiquement |
+| Journaux techniques et rapports d'erreur | 12 mois au plus |
 
-- **Compte actif et profil** : pendant la durée d'utilisation du compte ;
-- **Compte inactif** : suppression ou anonymisation après environ **2 ans d'inactivité**, après avertissement lorsque cela est possible, sauf données devant être archivées ;
-- **Candidature refusée** : informations détaillées supprimées ou réduites au strict nécessaire après **3 mois**, notamment pour permettre l'application d'un éventuel délai de nouvelle candidature ;
-- **Réservations et contrats** : conservation active pendant la relation puis archivage des éléments nécessaires pendant la durée de prescription applicable, généralement **5 ans** ;
-- **Factures et pièces comptables** : **10 ans** conformément aux obligations comptables applicables ;
-- **Messages privés** : conservation pendant la durée utile à la conversation et, sauf nécessité particulière ou signalement, suppression/anonymisation au plus tard **12 mois après le dernier échange** ou selon les fonctions de suppression proposées ;
-- **Journaux de sécurité** : en principe jusqu'à **12 mois**, sauf incident nécessitant une conservation plus longue pour établir les faits ;
-- **Données de prospection** : jusqu'au retrait du consentement et, au plus tard, selon les durées recommandées applicables à la relation commerciale, généralement **3 ans après la fin de la relation ou le dernier contact pertinent** ;
-- **Preuve du consentement ou de l'opposition** : aussi longtemps que nécessaire pour démontrer le respect du choix de la personne et gérer son opposition ;
-- **Cookies et traceurs** : selon la Politique de cookies.
+## 9. Suppression de compte et anonymisation
 
-Les données faisant l'objet d'une obligation de conservation sont placées, lorsque cela est approprié, en archivage intermédiaire avec accès restreint.
+Vous pouvez supprimer votre compte à tout moment depuis votre espace (sauf si une réservation est encore active). Nūr Meet efface alors immédiatement votre téléphone, votre e-mail, votre nom, votre profil, votre photo, vos réponses aux questionnaires, vos comptes de connexion et vos appareils de notification. Les données de paiement et de facturation sont conservées sous forme anonymisée pour les obligations comptables.
 
-## 9. Profil, visibilité et organisateurs
+Vous pouvez aussi **télécharger une copie** de vos données depuis votre espace (profil, candidatures, réservations, paiements).
 
-Certaines données de profil peuvent être visibles par d'autres utilisateurs selon les fonctionnalités du service et les paramètres proposés.
+## 10. Décisions automatisées
 
-Nour Meet doit limiter par défaut la visibilité aux informations nécessaires à l'expérience utilisateur.
-
-Les organisateurs reçoivent uniquement les informations utiles à l'accueil et à la gestion de la réservation.
-
-## 10. Alternatives et traitement algorithmique
-
-Nour Meet peut proposer automatiquement des alternatives sur la base de critères tels que le type d'événement, la tranche d'âge, la ville ou distance, la date, les disponibilités et les places restantes.
-
-L'utilisateur conserve le choix d'accepter ou de refuser ces propositions.
-
-Nour Meet n'a pas pour objectif d'utiliser ces mécanismes pour prendre une décision exclusivement automatisée produisant un effet juridique ou affectant de manière similaire et significative une personne.
+Aucune décision produisant des effets juridiques ou vous affectant de manière significative n'est prise de façon entièrement automatisée. Les soirées comparables proposées automatiquement (même format, même zone, places disponibles) restent de simples propositions, que vous acceptez ou non. La validation d'un profil est toujours décidée par une personne de l'équipe.
 
 ## 11. Sécurité
 
-Nour Meet met en œuvre des mesures adaptées au risque, notamment :
-- chiffrement des communications ;
-- contrôle des accès ;
-- gestion des secrets et mots de passe ;
-- sauvegardes ;
-- journalisation de sécurité ;
-- limitation des accès administratifs ;
-- mises à jour et correctifs ;
-- procédures de gestion des incidents.
-
-Aucun système informatique ne pouvant garantir un risque nul, Nour Meet réévalue régulièrement ces mesures.
+Nūr Meet met en œuvre des mesures adaptées : chiffrement des échanges (HTTPS), jetons de connexion à durée limitée et stockés de façon sécurisée sur mobile, codes à usage unique chiffrés, contrôle des accès par rôle, cloisonnement strict entre participants, restaurateurs et équipe, limitation des tentatives, journalisation, sauvegardes et correctifs réguliers.
 
 ## 12. Vos droits
 
-Selon les conditions prévues par la réglementation, vous pouvez exercer :
-- votre droit d'accès ;
-- votre droit de rectification ;
-- votre droit à l'effacement ;
-- votre droit à la limitation ;
-- votre droit d'opposition ;
-- votre droit à la portabilité ;
-- votre droit de retirer votre consentement à tout moment lorsque le traitement repose sur celui-ci ;
-- votre droit d'introduire une réclamation auprès de la CNIL.
+Vous disposez des droits d'accès, de rectification, d'effacement, de limitation, d'opposition, de portabilité, et du droit de retirer votre consentement à tout moment (mesure d'audience, notifications push). Vous pouvez aussi définir des directives sur le sort de vos données après votre décès.
 
-Pour exercer vos droits : **contact@nourmeet.com**.
+Pour les exercer : **{{societe.email}}**. Une vérification d'identité raisonnable peut être demandée.
 
-Nour Meet peut demander les informations raisonnablement nécessaires pour vérifier l'identité du demandeur lorsque cela est nécessaire.
+Vous pouvez introduire une réclamation auprès de la **CNIL** (www.cnil.fr).
 
-## 13. Communications marketing
+## 13. Mineurs
 
-Les communications indispensables au compte, à la sécurité, aux paiements ou aux réservations ne sont pas des communications publicitaires et peuvent être envoyées dans le cadre de l'exécution du service.
+Nūr Meet est réservé aux personnes de 18 ans et plus. Un compte créé par un mineur est suspendu et ses données supprimées, hors obligations légales.
 
-Les communications marketing sont gérées séparément. Lorsqu'un consentement est requis, elles ne sont envoyées qu'après obtention de ce consentement.
+## 14. Modifications
 
-Chaque communication marketing électronique comporte un moyen simple de se désinscrire.
-
-## 14. Mineurs
-
-Nour Meet est réservé aux personnes de 18 ans et plus.
-
-Si Nour Meet apprend qu'un compte a été créé par un mineur, il peut le suspendre et supprimer les données qui ne doivent pas être conservées légalement.
-
-## 15. Modification de la politique
-
-La présente politique peut être mise à jour pour tenir compte des évolutions du service, des prestataires ou de la réglementation.
-
-En cas de modification substantielle, les utilisateurs seront informés par un moyen approprié.
-
-## 16. Contact et réclamation CNIL
-
-Pour toute question : **contact@nourmeet.com**.
-
-Vous pouvez également saisir la Commission nationale de l'informatique et des libertés (CNIL) si vous estimez que vos droits ne sont pas respectés.
+Cette politique est mise à jour lorsque le service ou ses prestataires évoluent. En cas de changement important, vous en êtes informé(e) par un moyen approprié.

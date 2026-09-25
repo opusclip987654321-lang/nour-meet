@@ -164,10 +164,22 @@ export interface Paginated<T> {
   totalPages: number;
 }
 
+// Abonnement restaurateur (décision du 2026-09-25) : une seule règle, appliquée par l'API et
+// seulement affichée par le site et l'application. Immédiat (avec prorata facturé par Stripe) pour une
+// formule plus chère ou le passage du mensuel à l'annuel ; à la fin de la période déjà payée pour une
+// formule moins chère ou le passage de l'annuel au mensuel — jamais de période payée écourtée.
+export type BillingPeriod = "MONTHLY" | "ANNUAL";
+export type SubscriptionChangeTiming = "IMMEDIATE" | "AT_PERIOD_END";
+export function subscriptionChangeTiming(current: { monthlyPriceCents: number; billingPeriod: BillingPeriod }, target: { monthlyPriceCents: number; billingPeriod: BillingPeriod }): SubscriptionChangeTiming {
+  if (current.billingPeriod === "ANNUAL" && target.billingPeriod === "MONTHLY") return "AT_PERIOD_END";
+  if (target.monthlyPriceCents < current.monthlyPriceCents) return "AT_PERIOD_END";
+  return "IMMEDIATE";
+}
+
 // Versions en vigueur des textes juridiques (apps/web/src/legal/*.md) : à changer ici à chaque
 // modification substantielle d'un texte. L'API refuse alors toute action couverte par ce texte tant
 // qu'une nouvelle acceptation n'a pas été enregistrée (voir le modèle LegalAcceptance).
-export const LEGAL_VERSIONS = { CGU: "2026-09-23", CGV: "2026-09-23" } as const;
+export const LEGAL_VERSIONS = { CGU: "2026-09-25", CGV: "2026-09-25" } as const;
 
 // Service réservé aux personnes majeures (CGU §2) : l'âge est calculé en années révolues, à la
 // date du jour, jamais approximé en divisant une durée par 365,25 jours.

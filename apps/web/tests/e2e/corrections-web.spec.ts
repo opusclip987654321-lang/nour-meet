@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { forgetApplication } from "./helpers.js";
+import { republishDemoEvent, forgetApplication } from "./helpers.js";
 
 // Corrections web du 2026-09-24 : parcours visibles vérifiés dans un vrai navigateur, contre l'API et
 // la base du seed (comptes « Parcours participants » et données de démonstration).
@@ -49,7 +49,7 @@ test("catalogue : badge « Participe déjà » pour une place payée", async ({ 
 test.describe("événement de démonstration", () => {
   const PHONE = "+33600000042";
   const SLUG = "afterwork-independants-cafe-amel";
-  test.beforeAll(() => forgetApplication(PHONE, SLUG));
+  test.beforeAll(async () => { await republishDemoEvent(SLUG); await forgetApplication(PHONE, SLUG); });
   test.afterAll(() => forgetApplication(PHONE, SLUG));
   test("le parcours commence mais le paiement est bloqué avec un message clair", async ({ page }) => {
     await quickLogin(page, "Paiement en attente", /dashboard/);

@@ -15,5 +15,8 @@ export const links = {
   // Espace restaurateur et administration (comportement de référence déjà en place).
   subscription: () => "/restaurant?tab=subscription",
   restaurant: () => "/restaurant",
-  adminEvent: (eventId: string) => `/admin/events?highlight=${eventId}`
+  adminEvent: (eventId: string) => `/admin/events?highlight=${eventId}`,
+  // Décision du 2026-09-25 : le restaurateur n'a jamais de lien vers /admin, seulement vers son espace.
+  restaurantEvent: (eventId: string) => `/restaurant/soirees?highlight=${eventId}`,
+  receptionScanner: () => "/scanner"
 };

@@ -1,3 +1,4 @@
+import { subscriptionChangeTiming } from "@nour/shared";
 import * as ImagePicker from "expo-image-picker";
 import * as WebBrowser from "expo-web-browser";
 import { CalendarClock, Check, LogOut, Minus } from "lucide-react-native";
@@ -164,11 +165,19 @@ const planFeatures = (plan: Plan) => [
 // vers le haut, à l'échéance vers le bas) est appliquée par l'API ; cet écran l'explique avant
 // confirmation. Le paiement et le portail Stripe s'ouvrent dans le navigateur intégré, puis l'état est
 // relu chez Stripe (/subscription/sync) au retour.
-function Subscription({ restaurant, onChanged }: { restaurant: any; onChanged: () => void }) {
+// Même lecture que le site et l'administration (GET /restaurants/me/subscription) et même règle
+// d'application (subscriptionChangeTiming, @nour/shared) — décision du 2026-09-25.
+const INVOICE_STATUS: Record<string, string> = { paid: "Payée", open: "À régler", draft: "En préparation", void: "Annulée", uncollectible: "Impayée" };
+const periodLabel = (p?: string | null) => p === "ANNUAL" ? "annuelle" : "mensuelle";
+function Subscription({ restaurant, onChanged: onRestaurantChanged }: { restaurant: any; onChanged: () => void }) {
   const [plans, setPlans] = useState<Plan[] | null>(null);
-  const subscription = restaurant.subscription;
+  const [overview, setOverview] = useState<any>(null);
+  const subscription = overview?.subscription ?? null;
   const subscribed = !!subscription && subscription.status !== "CANCELLED";
-  const [period, setPeriod] = useState<Period>(subscribed ? subscription.billingPeriod : "MONTHLY");
+  const [period, setPeriod] = useState<Period>("MONTHLY");
+  const loadOverview = () => api<any>("/restaurants/me/subscription").then(o => { setOverview(o); if (o.subscription && o.subscription.status !== "CANCELLED") setPeriod(o.subscription.billingPeriod); }).catch(() => setOverview({ subscription: null, eventsPublishedThisMonth: 0, invoices: [] }));
+  useEffect(() => { loadOverview(); }, []);
+  const onChanged = () => { loadOverview(); onRestaurantChanged(); };
   const [busy, setBusy] = useState<string | null>(null), [confirming, setConfirming] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: "error" | "success" | "info"; text: string } | null>(null);
   useEffect(() => { api<Plan[]>("/plans").then(setPlans).catch(() => setPlans([])); }, []);
@@ -195,9 +204,9 @@ function Subscription({ restaurant, onChanged }: { restaurant: any; onChanged: (
     await syncAfterBrowser();
   });
   const changePlan = (plan: Plan) => run(plan.id, async () => {
-    const result = await api<{ direction: "UPGRADE" | "DOWNGRADE"; subscription: any }>("/restaurants/me/subscription/change-plan", { method: "POST", body: JSON.stringify({ planId: plan.id }) });
+    const result = await api<{ direction: "UPGRADE" | "DOWNGRADE"; subscription: any }>("/restaurants/me/subscription/change-plan", { method: "POST", body: JSON.stringify({ planId: plan.id, billingPeriod: period }) });
     setConfirming(null);
-    setNotice({ kind: "success", text: result.direction === "UPGRADE" ? `Vous êtes passé en formule ${plan.name}. Le prorata a été facturé sur votre moyen de paiement.` : `Changement programmé : vous restez en formule ${subscription.plan.name} jusqu’au ${longDate(result.subscription.pendingChangeAt)}, puis passez en ${plan.name}.` });
+    setNotice({ kind: "success", text: result.direction === "UPGRADE" ? `C’est fait : formule ${plan.name}, facturation ${periodLabel(period)}. Le prorata a été facturé sur votre moyen de paiement.` : `Changement programmé : formule ${plan.name}, facturation ${periodLabel(period)}, à partir du ${longDate(result.subscription.pendingChangeAt)}.` });
     onChanged();
   });
   const cancelPendingChange = () => run("cancel-change", async () => { await api("/restaurants/me/subscription/cancel-plan-change", { method: "POST" }); setNotice({ kind: "success", text: `Changement annulé : vous conservez la formule ${subscription.plan.name}.` }); onChanged(); });
@@ -207,30 +216,39 @@ function Subscription({ restaurant, onChanged }: { restaurant: any; onChanged: (
   ]);
   const openPortal = () => run("portal", async () => { const { url } = await api<{ url: string }>("/restaurants/me/subscription/portal", { method: "POST" }); await WebBrowser.openBrowserAsync(url); onChanged(); });
 
-  const pendingPlan = subscribed && subscription.pendingPlanId ? plans?.find(p => p.id === subscription.pendingPlanId) : null;
+  const pendingPlan = subscribed ? subscription.pendingPlan : null;
+  if (!overview) return <Skeleton height={180} />;
   return <>
     {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
     {subscribed && <View style={s.panel}>
       <View style={[s.row, { justifyContent: "space-between" }]}><Text style={s.h3}>Mon abonnement</Text><Badge tone={subscription.status === "ACTIVE" || subscription.status === "TRIALING" ? "success" : "warning"} label={SUBSCRIPTION_STATUS_LABEL[subscription.status] ?? subscription.status} /></View>
       <Text style={s.small}>Formule <Text style={s.bodyStrong}>{subscription.plan.name}</Text> · facturation {subscription.billingPeriod === "ANNUAL" ? "annuelle" : "mensuelle"} · {subscription.cancelAtPeriodEnd ? `résiliation effective le ${longDate(subscription.currentPeriodEnd)}` : subscription.status === "TRIALING" ? `essai gratuit jusqu’au ${longDate(subscription.currentPeriodEnd)}` : `prochaine échéance le ${longDate(subscription.currentPeriodEnd)}`}</Text>
-      <Text style={s.small}>Ce mois-ci : {restaurant.currentMonthEventsPublished}{subscription.plan.monthlyEventQuota == null ? " soirée(s) publiée(s), sans limite" : ` / ${subscription.plan.monthlyEventQuota} soirées publiées`}</Text>
-      {pendingPlan && <View style={[s.row, { alignItems: "flex-start" }]}><CalendarClock size={18} color={T.ink2} /><Text style={[s.small, { flex: 1 }]}>Passage en formule {pendingPlan.name} le {longDate(subscription.pendingChangeAt)}. Vous gardez la formule {subscription.plan.name} jusqu’à cette date.</Text></View>}
+      <Text style={s.small}>Ce mois-ci : {overview.eventsPublishedThisMonth}{subscription.plan.monthlyEventQuota == null ? " soirée(s) publiée(s), sans limite" : ` / ${subscription.plan.monthlyEventQuota} soirées publiées`}</Text>
+      {pendingPlan && <View style={[s.row, { alignItems: "flex-start" }]}><CalendarClock size={18} color={T.ink2} /><Text style={[s.small, { flex: 1 }]}>Passage en formule {pendingPlan.name} (facturation {periodLabel(subscription.pendingBillingPeriod ?? subscription.billingPeriod)}) le {longDate(subscription.pendingChangeAt)}.</Text></View>}
       {subscription.status === "PAST_DUE" && <Notice kind="error">Le dernier prélèvement a échoué. Mettez à jour votre moyen de paiement pour conserver votre formule.</Notice>}
       <View style={[s.row, { flexWrap: "wrap" }]}>
-        {subscription.stripeCustomerId && <Button small variant="secondary" title="Moyen de paiement et factures" disabled={!!busy} onPress={openPortal} />}
-        {pendingPlan && <Button small variant="secondary" title={`Conserver ${subscription.plan.name}`} busy={busy === "cancel-change"} onPress={cancelPendingChange} />}
+        {subscription.hasBillingAccount && <Button small variant="secondary" title="Moyen de paiement" disabled={!!busy} onPress={openPortal} />}
+        {pendingPlan && <Button small variant="secondary" title="Annuler le changement programmé" busy={busy === "cancel-change"} onPress={cancelPendingChange} />}
         {!subscription.cancelAtPeriodEnd && <Button small variant="ghost" title="Résilier" busy={busy === "cancel"} onPress={cancelSubscription} />}
       </View>
     </View>}
-    <Text style={s.h2}>{subscribed ? "Les formules" : "Choisissez votre formule"}</Text>
-    <Text style={s.small}>Prix hors taxes. {!subscription ? `Essai gratuit de ${restaurant.trialDays ?? 7} jours, carte requise, résiliable avant l’échéance.` : "Sans engagement au-delà de la période en cours."}</Text>
-    {!subscribed && <View style={s.row}><Chip label="Mensuel" active={period === "MONTHLY"} onPress={() => setPeriod("MONTHLY")} /><Chip label="Annuel · 2 mois offerts" active={period === "ANNUAL"} onPress={() => setPeriod("ANNUAL")} /></View>}
+    {overview.invoices.length > 0 && <View style={s.panel}>
+      <Text style={s.h3}>Factures</Text>
+      {overview.invoices.map((i: any) => <View key={i.id} style={[s.row, { justifyContent: "space-between", flexWrap: "wrap" }]}>
+        <Text style={s.small}>{longDate(i.createdAt)} · {money(i.amountCents)} · {INVOICE_STATUS[i.status ?? ""] ?? i.status}</Text>
+        {(i.hostedUrl || i.pdfUrl) && <Button small variant="ghost" title="Voir" onPress={() => WebBrowser.openBrowserAsync(i.hostedUrl ?? i.pdfUrl)} />}
+      </View>)}
+    </View>}
+    <Text style={s.h2}>{subscribed ? "Changer de formule ou de périodicité" : "Choisissez votre formule"}</Text>
+    <Text style={s.small}>Prix hors taxes. {!subscription ? `Essai gratuit de ${restaurant.trialDays ?? 7} jours, carte requise, résiliable avant l’échéance.` : "Formule supérieure ou passage à l’annuel : immédiat, au prorata. Formule inférieure ou passage au mensuel : à la fin de la période déjà payée."}</Text>
+    <View style={s.row}><Chip label="Mensuel" active={period === "MONTHLY"} onPress={() => { setPeriod("MONTHLY"); setConfirming(null); }} /><Chip label="Annuel · 2 mois offerts" active={period === "ANNUAL"} onPress={() => { setPeriod("ANNUAL"); setConfirming(null); }} /></View>
     {plans === null ? [0, 1].map(i => <Skeleton key={i} height={380} />) : plans.map(plan => {
       const price = priceFor(plan, period);
-      const isCurrent = subscribed && subscription.planId === plan.id;
-      const isPending = subscribed && subscription.pendingPlanId === plan.id;
+      const isCurrent = subscribed && subscription.plan.id === plan.id && subscription.billingPeriod === period;
+      const isPending = subscribed && subscription.pendingPlan?.id === plan.id && (subscription.pendingBillingPeriod ?? subscription.billingPeriod) === period;
       const featured = plan.highlightTier === "priority";
-      const upgrade = subscribed && plan.monthlyPriceCents > subscription.plan.monthlyPriceCents;
+      const timing = subscribed ? subscriptionChangeTiming({ monthlyPriceCents: subscription.plan.monthlyPriceCents, billingPeriod: subscription.billingPeriod }, { monthlyPriceCents: plan.monthlyPriceCents, billingPeriod: period }) : null;
+      const changeLabel = subscribed && subscription.plan.id === plan.id ? (period === "ANNUAL" ? "Passer en annuel" : "Passer en mensuel") : "Changer de formule";
       const onNight = featured;
       const ink = onNight ? T.onNight : T.ink, ink2 = onNight ? T.onNight2 : T.ink2;
       return <View key={plan.id} style={[featured ? s.nightPanel : s.panel, isCurrent && { borderWidth: 2, borderColor: T.saffron }]}>
@@ -248,14 +266,16 @@ function Subscription({ restaurant, onChanged }: { restaurant: any; onChanged: (
         </View>)}</View>
         {isCurrent ? <Button variant="secondary" title="Offre actuelle" disabled />
           : isPending ? <Text style={[s.meta, { color: ink2 }]}>Changement déjà programmé.</Text>
-            : subscribed && subscription.stripeSubscriptionId
+            : subscribed && subscription.managedByStripe
               ? confirming === plan.id
                 ? <View style={{ gap: S[2] }}>
-                  <Text style={[s.small, { color: ink }]}>{upgrade ? `Passage immédiat en ${plan.name}. Stripe facture aujourd’hui la différence au prorata de la période en cours.` : `Vous gardez ${subscription.plan.name} jusqu’au ${longDate(subscription.currentPeriodEnd)}, puis passez en ${plan.name} à l’échéance.`}</Text>
+                  <Text style={[s.small, { color: ink }]}>{timing === "IMMEDIATE" ? `Passage immédiat : ${plan.name}, facturation ${periodLabel(period)}. Stripe facture aujourd’hui la différence au prorata.` : `Vous gardez ${subscription.plan.name} (facturation ${periodLabel(subscription.billingPeriod)}) jusqu’au ${longDate(subscription.currentPeriodEnd)}, puis passez en ${plan.name}, facturation ${periodLabel(period)}.`}</Text>
                   <View style={s.row}><Button small variant={featured ? "accent" : "primary"} title="Confirmer" busy={busy === plan.id} onPress={() => changePlan(plan)} /><Button small variant="secondary" title="Annuler" disabled={!!busy} onPress={() => setConfirming(null)} /></View>
                 </View>
-                : <Button variant={featured ? "accent" : "secondary"} title="Changer de formule" disabled={!!busy || price == null} onPress={() => setConfirming(plan.id)} />
-              : <Button variant={featured ? "accent" : "primary"} title={subscribed ? "Changer de formule" : "Choisir cette formule"} busy={busy === plan.id} disabled={!!busy || price == null} onPress={() => checkout(plan.id)} />}
+                : <Button variant={featured ? "accent" : "secondary"} title={changeLabel} disabled={!!busy || price == null} onPress={() => setConfirming(plan.id)} />
+              : subscribed
+                ? <Text style={[s.meta, { color: ink2 }]}>Abonnement géré par l’équipe Nūr Meet : contactez-nous pour le modifier.</Text>
+                : <Button variant={featured ? "accent" : "primary"} title="Choisir cette formule" busy={busy === plan.id} disabled={!!busy || price == null} onPress={() => checkout(plan.id)} />}
       </View>;
     })}
     <Text style={s.meta}>Le choix de la formule ne publie rien automatiquement : chaque soirée reste soumise à validation par l’équipe Nūr Meet. Paiement sécurisé par Stripe.</Text>

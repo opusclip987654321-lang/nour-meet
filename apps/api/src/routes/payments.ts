@@ -89,7 +89,7 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
       await notify(userId, "Place confirmée", `Votre billet gratuit pour « ${event.title} » est disponible.`, links.ticket(reservation.id));
       if (event.controllerRestaurantId) {
         const controllerRestaurant = await prisma.restaurant.findUnique({ where: { id: event.controllerRestaurantId } });
-        if (controllerRestaurant) await notify(controllerRestaurant.ownerId, "Nouvelle inscription gratuite", `Une place gratuite pour « ${event.title} » vient d’être confirmée.`, links.adminEvent(event.id));
+        if (controllerRestaurant) await notify(controllerRestaurant.ownerId, "Nouvelle inscription gratuite", `Une place gratuite pour « ${event.title} » vient d’être confirmée.`, links.restaurantEvent(event.id));
       }
       await audit(userId, "FREE_RESERVATION_CONFIRMED", "Reservation", reservation.id);
     }
@@ -155,7 +155,7 @@ await app.register(async (webhooks) => {
             // C16 (ordre correctif 2026-09-20) : le restaurateur est informé d'une vente une seule
             // fois, ici, après confirmation réelle du webhook — jamais à la simple ouverture de la
             // page de paiement par le participant.
-            if (reservation.event.controllerRestaurant) await notify(reservation.event.controllerRestaurant.ownerId, "Nouvelle place vendue", `Un billet pour « ${reservation.event.title} » vient d’être payé.`, links.adminEvent(reservation.eventId));
+            if (reservation.event.controllerRestaurant) await notify(reservation.event.controllerRestaurant.ownerId, "Nouvelle place vendue", `Un billet pour « ${reservation.event.title} » vient d’être payé.`, links.restaurantEvent(reservation.eventId));
             await audit(reservation.userId, "PAYMENT_SUCCEEDED", "Reservation", reservationId, { amountCents: reservation.event.priceCents, paymentIntentId: intent.id });
             // Comptabilité 30/70 : neutralisée par défaut depuis le passage à l'abonnement mensuel
             // (§8.2 — voir ENABLE_COMMISSION_LEDGER). Les anciennes lignes restent en base, aucune

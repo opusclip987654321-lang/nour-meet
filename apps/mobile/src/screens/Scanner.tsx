@@ -58,11 +58,11 @@ export function Scanner() {
   </ScrollView>;
   return <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
     <Text style={s.h1} accessibilityRole="header">Revoir quelqu’un</Text>
-    <Text style={s.body}>Scannez le QR code personnel d’une personne rencontrée lors d’une soirée : rien ne s’ouvre sans son accord.</Text>
+    <Text style={s.body}>Scannez le QR code personnel d’une personne inscrite à la même soirée que vous : rien ne s’ouvre sans son accord.</Text>
     {camera.active ? <View style={cameraBox}><CameraView style={StyleSheet.absoluteFill} barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={({ data }) => { if (!busy) lookup(data); }} /><View style={scanGuide} /></View>
       : <CameraPlaceholder hint="Cadrez le QR code personnel." onPress={camera.open} />}
     {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
-    <Field label="Ou saisir le code" value={code} onChangeText={setCode} placeholder="Code reçu lors de la soirée" autoCapitalize="characters" autoCorrect={false} />
+    <Field label="Ou saisir le code" value={code} onChangeText={setCode} placeholder="Ex. NOUR-3F9A-C21B-07E4" autoCapitalize="characters" autoCorrect={false} />
     <Button variant="secondary" title="Rechercher le profil" busy={busy} disabled={!code.trim()} icon={<Search size={18} color={T.ink} />} onPress={() => lookup()} />
   </ScrollView>;
 }

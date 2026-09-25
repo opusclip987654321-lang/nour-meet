@@ -8,7 +8,7 @@ import { F, R, S, T, s } from "../theme";
 // Mise en relation après une soirée (même logique que ContactsPanel côté site) : demandes reçues à
 // accepter ou décliner, demandes envoyées, puis conversations — une conversation ne s'ouvre qu'après
 // acceptation, et une conversation bloquée par un signalement reste en lecture seule.
-const STATUS_LABEL: Record<string, string> = { PENDING: "En attente de réponse", ACCEPTED: "Acceptée", REFUSED: "Déclinée", CANCELLED: "Annulée" };
+const STATUS_LABEL: Record<string, string> = { PENDING: "En attente de réponse", ACCEPTED: "Acceptée", REFUSED: "Déclinée", CANCELLED: "Annulée", UNAVAILABLE: "Cette personne n’est pas disponible" };
 const time = (v: string) => new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(v));
 
 export function Messages({ user }: { user: any }) {

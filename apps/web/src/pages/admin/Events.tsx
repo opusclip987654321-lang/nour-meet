@@ -8,6 +8,7 @@ import { Layout } from "../../components/Layout";
 import { CategoryBadge, Loading, Notice } from "../../components/ui";
 import { dateTime, imgUrl } from "../../lib/format";
 import { EVENT_STATUS_LABEL, QUOTA_CATEGORY_LABEL } from "../../lib/labels";
+import { spacePath } from "../../lib/spaces";
 import { AdminNav } from "./AdminNav";
 
 // Prix saisis en euros (« 35 » ou « 29,50 »), comme dans l'application mobile — stockés en centimes.
@@ -34,7 +35,7 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
     try{
       await api("/admin/events",{method:"POST",body:JSON.stringify({...form,flow:form.flow||undefined,minAge:form.minAge?Number(form.minAge):undefined,maxAge:form.maxAge?Number(form.maxAge):undefined,minParticipants:form.minParticipants?Number(form.minParticipants):undefined,minParticipantsDeadline:form.minParticipantsDeadline?new Date(form.minParticipantsDeadline).toISOString():undefined,startsAt:new Date(form.startsAt).toISOString(),endsAt:new Date(form.endsAt).toISOString()})});
       setNotice({kind:"success",text:user?.role==="ORGANIZER"?"Brouillon créé. Ajoutez vos photos puis soumettez-le à validation.":"Événement créé."});
-      setTimeout(()=>navigate("/admin/events"),1200);
+      setTimeout(()=>navigate(spacePath(user?.role,"events")),1200);
     }catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setSubmitting(false)}
   };

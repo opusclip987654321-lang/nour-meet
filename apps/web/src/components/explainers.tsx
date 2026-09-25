@@ -46,7 +46,7 @@ function CodeCard() {
 }
 
 const CONTACT_STEPS = [
-  { icon: QrCode, title: "Montrez votre QR code", text: "Chacun a son code personnel dans son espace." },
+  { icon: QrCode, title: "Montrez votre QR code", text: "Chaque participant a son code personnel, networking compris." },
   { icon: ScanLine, title: "L’autre le scanne ou le saisit", text: "Avec l’application, ou en tapant le code sur le site." },
   { icon: Send, title: "Une demande vous arrive", text: "Vous voyez qui vous écrit, et vous décidez." },
   { icon: MessageCircle, title: "Vous acceptez : on se reparle", text: "La conversation s’ouvre, sans échanger vos numéros." }
@@ -58,7 +58,7 @@ export function ContactExplainer({ headingLevel = 2 }: { headingLevel?: 2 | 3 })
     <div className="contact-inner">
       <div className="contact-head">
         <Title id="contact-title">Sur place, échangez vos codes. Ensuite, c’est vous qui décidez.</Title>
-        <p>Pas de numéro à donner, pas de gêne : si l’intérêt est réciproque, vous vous retrouvez sur Nūr Meet.</p>
+        <p>Entre personnes inscrites à la même soirée. Pas de numéro à donner : si l’intérêt est réciproque, vous vous retrouvez sur Nūr Meet.</p>
       </div>
       <div className="contact-visual">
         <Picture name="ai-echange-code" className="contact-photo" sizes="(max-width: 900px) 92vw, 50vw"/>
@@ -72,7 +72,7 @@ export function ContactExplainer({ headingLevel = 2 }: { headingLevel?: 2 | 3 })
           <ul className="check-list">
             <li><CheckCircle2 size={20} aria-hidden="true"/><span>Vos échanges restent dans votre espace, sur le site et dans l’application.</span></li>
             <li><CheckCircle2 size={20} aria-hidden="true"/><span>Votre numéro et votre e-mail ne sont jamais montrés.</span></li>
-            <li><CheckCircle2 size={20} aria-hidden="true"/><span>Une demande refusée reste sans suite : aucune relance possible.</span></li>
+            <li><CheckCircle2 size={20} aria-hidden="true"/><span>Sans accord, rien ne s’ouvre, et aucune relance n’est possible.</span></li>
           </ul>
           <Link className="button accent" to="/events">Trouver ma soirée</Link>
         </div>

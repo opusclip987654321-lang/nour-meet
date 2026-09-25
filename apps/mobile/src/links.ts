@@ -29,7 +29,14 @@ export function routeFromPath(path: string | null | undefined): Route {
     case "blog": return parts[1] ? { name: "blog", slug: parts[1] } : { name: "blog" };
     case "concept": return { name: "concept" };
     case "notifications": return { name: "notifications" };
-    case "restaurant": return { name: "restaurant", tab: params.get("tab") === "subscription" ? "subscription" : "establishment" };
+    // Espace restaurateur du site (décision du 2026-09-25) : /restaurant/soirees et /participants
+    // mènent à « Mes soirées », /restaurant/scanner au scanner, le reste à la fiche ou à l'abonnement.
+    case "restaurant":
+      if (parts[1] === "soirees" || parts[1] === "participants") return { name: "restaurant", tab: "events", focus: params.get("highlight") ?? undefined };
+      if (parts[1] === "scanner") return { name: "scan" };
+      if (parts[1]) return { name: "web", path };
+      return { name: "restaurant", tab: params.get("tab") === "subscription" ? "subscription" : "establishment" };
+    case "scanner": return { name: "scan" };
     // Soirées d'un restaurateur (création, validation, participants) : onglet « Mes soirées ».
     case "admin": return parts[1] === "events" || parts[1] === "attendees" ? { name: "restaurant", tab: "events", focus: params.get("highlight") ?? undefined } : { name: "web", path };
     case "dashboard": {

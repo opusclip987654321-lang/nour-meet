@@ -104,6 +104,12 @@ describe("jeton de paiement de la page /pay (15 min)", () => {
     expect((await api("/me", {}, paymentToken)).status).toBe(403);
     expect((await api("/me/applications", {}, paymentToken)).status).toBe(403);
     expect((await api("/auth/mobile-handoff", { method: "POST", body: JSON.stringify({ redirect: "nourmeet://auth", challenge: "a".repeat(43) }) }, paymentToken)).status).toBe(403);
+    // Moindre privilège : ni messagerie, ni billets, ni profil, ni administration, ni notifications.
+    for (const [method, path] of [["GET", "/conversations"], ["GET", "/me/tickets"], ["GET", "/me/contact-requests"], ["GET", "/me/share-qr"], ["PATCH", "/me/profile"], ["GET", "/notifications"], ["GET", "/admin/settings"], ["GET", "/restaurants/me"], ["POST", `/me/applications/${application.id}/cancel`]] as const) {
+      expect((await api(path, { method, ...(method === "GET" ? {} : { body: "{}" }) }, paymentToken)).status, `${method} ${path}`).toBe(403);
+    }
+    // Aucun effet de bord : l'inscription n'a pas été annulée par la tentative ci-dessus.
+    expect((await prisma.application.findUniqueOrThrow({ where: { id: application.id } })).status).toBe("PAYMENT_PENDING");
     // Le jeton de session normal, lui, garde tous ses droits.
     expect((await api("/me", {}, user.token)).status).toBe(200);
   });
