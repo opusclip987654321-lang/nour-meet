@@ -19,6 +19,9 @@ const at = (daysFromNow: number, hours: number, minutes = 0) => {
 };
 
 async function main() {
+  // v2 §7 : comptes et scénarios de test uniquement en local — jamais mélangés à une base de production
+  // (la production n'utilise que prisma/seed-demo.ts pour ses soirées de démonstration marquées isDemo).
+  if (process.env.NODE_ENV === "production") throw new Error("Seed de développement refusé : NODE_ENV=production.");
   const admin = await prisma.user.upsert({
     where: { phone: "+33600000001" },
     update: {},

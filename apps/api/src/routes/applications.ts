@@ -1,13 +1,14 @@
-import { eventRequiresScreening, isAdult } from "@nour/shared";
+import { eventRequiresScreening, isAdult, parisDateTime, parisDayKey } from "@nour/shared";
 import { ApplicationStatus, PaymentStatus, QuotaCategory, TicketStatus } from "@prisma/client";
 import { z } from "zod";
 import { assertPhoneVerified } from "../services/session.js";
-import { app, prisma } from "../context.js";
+import { app, httpError, prisma } from "../context.js";
 import { interviewRetryDate, refundEligibility, resolvePriceCents } from "../domain.js";
 import { ADULT_ONLY_ERROR } from "../services/account.js";
 import { audit } from "../services/audit.js";
 import { auth, currentId } from "../services/auth.js";
 import { applicationAmountCents, defaultCategoryImage } from "../services/events.js";
+import { availableInterviewSlots, bookInterviewSlot } from "../services/interview-calendar.js";
 import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 import { executeRefund } from "../services/payments.js";
@@ -141,27 +142,43 @@ app.post("/me/global-interview", { preHandler: auth }, async (request, reply) =>
   return reply.code(201).send(application);
 });
 
-app.get("/interview-slots", { preHandler: auth }, async () =>
-  prisma.screeningCall.findMany({ where: { eventId: null, applicationId: null, startsAt: { gt: new Date() } }, orderBy: { startsAt: "asc" } })
-);
+// Calendrier ouvert par défaut (v2 §11) : créneaux calculés à la volée, semaine par semaine.
+app.get("/interview-slots", { preHandler: auth }, async (request) => {
+  const query = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), days: z.coerce.number().int().min(1).max(42).default(14) }).parse(request.query);
+  return availableInterviewSlots(query.from ?? parisDayKey(new Date()), query.days);
+});
+
+const slotInput = z.object({ startsAt: z.string().datetime() });
 
 app.post("/applications/:id/schedule", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const { slotId } = z.object({ slotId: z.string() }).parse(request.body);
+  const { startsAt } = slotInput.parse(request.body);
   const userId = currentId(request);
-  const application = await prisma.application.findFirstOrThrow({ where: { id, userId } });
+  const application = await prisma.application.findFirstOrThrow({ where: { id, userId, eventId: null } });
   if (application.status !== ApplicationStatus.PENDING_CALL) return reply.code(409).send({ error: "Un entretien est déjà programmé pour cette démarche" });
-  // L'UPDATE conditionné par applicationId: null est atomique côté PostgreSQL : si deux participants
-  // réservent le même créneau au même instant, un seul verra count === 1, l'autre reçoit un 409.
   const slot = await prisma.$transaction(async (tx) => {
-    const updated = await tx.screeningCall.updateMany({ where: { id: slotId, eventId: application.eventId, applicationId: null }, data: { applicationId: application.id } });
-    if (updated.count !== 1) return null;
-    await tx.application.update({ where: { id }, data: { status: ApplicationStatus.CALL_SCHEDULED } });
-    return tx.screeningCall.findUniqueOrThrow({ where: { id: slotId } });
+    // Le statut est repris sous verrou : deux onglets qui réservent en même temps n'obtiennent qu'un seul rendez-vous.
+    const claimed = await tx.application.updateMany({ where: { id, status: ApplicationStatus.PENDING_CALL }, data: { status: ApplicationStatus.CALL_SCHEDULED } });
+    if (claimed.count !== 1) throw httpError(409, "Un entretien est déjà programmé pour cette démarche");
+    return bookInterviewSlot(tx, id, new Date(startsAt));
   });
-  if (!slot) return reply.code(409).send({ error: "Ce créneau vient d’être réservé par un autre participant. Choisissez-en un autre." });
-  await notify(userId, "Entretien planifié", `Votre appel est prévu le ${slot.startsAt.toLocaleString("fr-FR")}.`, links.interview());
+  await notify(userId, "Entretien planifié", `Votre appel est prévu le ${parisDateTime(slot.startsAt)}.`, links.interview());
   return { scheduled: true, slot };
+});
+
+// « Modifier mon créneau » (v2 §12) : déplacement atomique, distinct de l'annulation. L'ancien horaire
+// n'est libéré que si le nouveau est effectivement obtenu ; la demande d'entretien reste la même.
+app.post("/me/global-interview/reschedule", { preHandler: auth }, async (request, reply) => {
+  const { startsAt } = slotInput.parse(request.body);
+  const userId = currentId(request);
+  const application = await prisma.application.findFirst({ where: { userId, eventId: null, status: ApplicationStatus.CALL_SCHEDULED }, include: { call: true }, orderBy: { createdAt: "desc" } });
+  if (!application?.call) return reply.code(409).send({ error: "Aucun entretien programmé à déplacer" });
+  if (application.call.startsAt <= new Date()) return reply.code(409).send({ error: "Cet entretien a déjà commencé : il ne peut plus être déplacé." });
+  if (application.call.startsAt.getTime() === new Date(startsAt).getTime()) return reply.code(409).send({ error: "C’est déjà l’horaire de votre entretien." });
+  const slot = await prisma.$transaction(tx => bookInterviewSlot(tx, application.id, new Date(startsAt), application.call!.id));
+  await notify(userId, "Entretien déplacé", `Votre appel est désormais prévu le ${parisDateTime(slot.startsAt)}.`, links.interview());
+  await audit(userId, "RESCHEDULE_OWN_INTERVIEW", "Application", application.id, { from: application.call.startsAt, to: slot.startsAt });
+  return { rescheduled: true, slot };
 });
 
 // Montant à annoncer sur la page de paiement autonome (/pay/:applicationId), lu pour cette
@@ -206,6 +223,9 @@ app.post("/me/applications/:id/cancel", { preHandler: auth }, async (request, re
     }
     await tx.application.update({ where: { id }, data: { status: ApplicationStatus.CANCELLED } });
     await tx.waitlistEntry.deleteMany({ where: { applicationId: id } });
+    // « Annuler ma demande d'entretien » (v2 §12) : le créneau réservé redevient disponible, et une
+    // nouvelle demande pourra être faite (seul un refus impose un délai).
+    if (!application.eventId) await tx.screeningCall.updateMany({ where: { applicationId: id, startsAt: { gt: new Date() } }, data: { applicationId: null } });
   });
   if (activeReservation) await offerNextWaitlistEntry(activeReservation.eventId, activeReservation.quotaCategory);
   await audit(userId, "CANCEL_APPLICATION", "Application", id);
@@ -226,7 +246,9 @@ app.post("/me/applications/:id/cancel", { preHandler: auth }, async (request, re
       : hadSucceededPayment
         ? "Votre annulation a été prise en compte. Le remboursement sera examiné manuellement par notre équipe."
         : "Votre candidature a été annulée.";
-  await notify(userId, "Candidature annulée", message, links.reservation(id));
+  // Une demande d'entretien annulée n'a pas de carte d'inscription : la notification mène à l'onglet Entretien.
+  if (!application.eventId) await notify(userId, "Demande d’entretien annulée", "Votre demande d’entretien est annulée et le créneau libéré. Vous pourrez en refaire une quand vous le souhaitez.", links.interview());
+  else await notify(userId, "Candidature annulée", message, links.reservation(id));
   return reply.send({ cancelled: true, refunded, refundedAmountCents, eligible });
 });
 

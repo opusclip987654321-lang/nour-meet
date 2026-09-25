@@ -4,6 +4,7 @@ import { CalendarClock, Check, FileText, Minus } from "lucide-react";
 import { ReactNode, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { DevTestCards } from "../components/DevTestCards";
 import { Notice } from "../components/ui";
 import { longDate, money } from "../lib/format";
 import { SUBSCRIPTION_STATUS_LABEL } from "../lib/labels";
@@ -197,6 +198,7 @@ export function RestaurantSubscriptionPanel({ restaurant, onChanged }: { restaur
         </article>;
       })}</div>}
     {!subscribed && overview.invoices.length > 0 && <div className="panel"><InvoiceList invoices={overview.invoices}/></div>}
+    <DevTestCards/>
     <p className="fine left">Le choix de la formule ne publie rien automatiquement : chaque soirée reste soumise à validation par l’équipe Nūr Meet. Paiement sécurisé par Stripe.</p>
   </div>;
 }

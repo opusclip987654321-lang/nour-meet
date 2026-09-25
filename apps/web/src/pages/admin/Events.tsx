@@ -1,5 +1,4 @@
 import { Inbox, X } from "lucide-react";
-import { EVENT_CATEGORIES, EVENT_ZONES } from "@nour/shared";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../api";
@@ -10,30 +9,20 @@ import { dateTime, imgUrl } from "../../lib/format";
 import { EVENT_STATUS_LABEL, QUOTA_CATEGORY_LABEL } from "../../lib/labels";
 import { spacePath } from "../../lib/spaces";
 import { AdminNav } from "./AdminNav";
-
-// Prix saisis en euros (« 35 » ou « 29,50 »), comme dans l'application mobile — stockés en centimes.
-// Le texte tapé est gardé tel quel pendant la frappe (« 29, » ne doit pas redevenir « 29 »).
-function EuroInput({ cents, onChange, required }: { cents: number; onChange: (cents: number) => void; required?: boolean }) {
-  const format = (c: number) => (c / 100).toFixed(2).replace(".", ",").replace(",00", "");
-  const [text, setText] = useState(format(cents));
-  useEffect(() => { setText(prev => { const n = Number(prev.replace(",", ".")); return Number.isFinite(n) && Math.round(n * 100) === cents ? prev : format(cents); }); }, [cents]);
-  return <input required={required} inputMode="decimal" pattern="[0-9]+([,.][0-9]{1,2})?" value={text} onChange={e => { setText(e.target.value); const n = Number(e.target.value.replace(",", ".")); if (Number.isFinite(n) && n >= 0) onChange(Math.round(n * 100)); }}/>;
-}
+import { EuroInput, EventForm, emptyEventForm, eventFormPayload, type EventFormState } from "../../components/EventForm";
 
 export function AdminCreateEvent() {
   const {user}=useAuth();
   const navigate=useNavigate();
-const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].name,flow:"" as ""|"SCREENING"|"DIRECT",description:"",startsAt:"",endsAt:"",district:"",address:"",zone:EVENT_ZONES[0],minAge:"",maxAge:"",capacity:20,priceCents:3000,includesDrink:false,includesStarter:false,includesMain:false,includesDessert:false,perksDescription:"",minParticipants:"",minParticipantsDeadline:""});
+const [form,setForm]=useState<EventFormState>(emptyEventForm);
   const [submitting,setSubmitting]=useState(false);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [restaurantInfo,setRestaurantInfo]=useState<any>(null);
   useEffect(()=>{if(user?.role==="ORGANIZER")api<any>("/restaurants/me").then(setRestaurantInfo).catch(()=>{})},[user?.role]);
-  const slugify=(t:string)=>t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
-
   const submit=async(e:FormEvent)=>{
     e.preventDefault();setSubmitting(true);setNotice(null);
     try{
-      await api("/admin/events",{method:"POST",body:JSON.stringify({...form,flow:form.flow||undefined,minAge:form.minAge?Number(form.minAge):undefined,maxAge:form.maxAge?Number(form.maxAge):undefined,minParticipants:form.minParticipants?Number(form.minParticipants):undefined,minParticipantsDeadline:form.minParticipantsDeadline?new Date(form.minParticipantsDeadline).toISOString():undefined,startsAt:new Date(form.startsAt).toISOString(),endsAt:new Date(form.endsAt).toISOString()})});
+      await api("/admin/events",{method:"POST",body:JSON.stringify(eventFormPayload(form))});
       setNotice({kind:"success",text:user?.role==="ORGANIZER"?"Brouillon créé. Ajoutez vos photos puis soumettez-le à validation.":"Événement créé."});
       setTimeout(()=>navigate(spacePath(user?.role,"events")),1200);
     }catch(err){setNotice({kind:"error",text:(err as Error).message})}
@@ -45,29 +34,7 @@ const [form,setForm]=useState({title:"",slug:"",category:EVENT_CATEGORIES[0].nam
     {user?.role==="ORGANIZER"&&restaurantInfo&&!["ACTIVE","TRIALING"].includes(restaurantInfo.subscription?.status)&&<Notice kind="info">Aucun abonnement actif : vous pouvez préparer et soumettre votre soirée, mais elle ne sera publiée qu’avec une formule active. <Link className="text-link" to="/restaurant?tab=subscription">Choisir une formule</Link></Notice>}
     {user?.role==="ORGANIZER"&&restaurantInfo?.subscription&&<Notice kind="info">Abonnement « {restaurantInfo.subscription.plan.name} » ({(restaurantInfo.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois) — {restaurantInfo.currentMonthEventsPublished}{restaurantInfo.subscription.plan.monthlyEventQuota==null?" événements publiés ce mois-ci (illimité)":`/${restaurantInfo.subscription.plan.monthlyEventQuota} événements publiés ce mois-ci`}. Un brouillon ne consomme le quota qu’à sa première publication.</Notice>}
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
-    <form className="panel form-grid" onSubmit={submit}>
-      <label>Titre<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value,slug:form.slug?form.slug:slugify(e.target.value)})}/></label>
-      <label>Identifiant (slug)<input required pattern="[a-z0-9-]+" value={form.slug} onChange={e=>setForm({...form,slug:e.target.value})}/></label>
-      <label>Catégorie<select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>{EVENT_CATEGORIES.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}</select></label>
-      {user?.role==="ADMIN"&&<label>Parcours d’inscription<select value={form.flow} onChange={e=>setForm({...form,flow:e.target.value as ""|"SCREENING"|"DIRECT"})}><option value="">Suggéré selon la catégorie</option><option value="SCREENING">Sélection (entretien requis)</option><option value="DIRECT">Accès direct (paiement immédiat)</option></select></label>}
-      <label>Zone<select value={form.zone} onChange={e=>setForm({...form,zone:e.target.value})}>{EVENT_ZONES.map(z=><option key={z} value={z}>{z}</option>)}</select></label>
-      <div className="time-row"><label>Âge minimum (facultatif)<input type="number" min={18} max={99} value={form.minAge} onChange={e=>setForm({...form,minAge:e.target.value})}/></label><label>Âge maximum (facultatif)<input type="number" min={18} max={99} value={form.maxAge} onChange={e=>setForm({...form,maxAge:e.target.value})}/></label></div>
-      <label className="wide">Description<textarea required minLength={20} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
-      <div className="time-row"><label>Début<input required type="datetime-local" value={form.startsAt} onChange={e=>setForm({...form,startsAt:e.target.value})}/></label><label>Fin<input required type="datetime-local" value={form.endsAt} onChange={e=>setForm({...form,endsAt:e.target.value})}/></label></div>
-      <label>Quartier / ville<input required value={form.district} onChange={e=>setForm({...form,district:e.target.value})}/></label>
-      <label>Adresse<input required value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></label>
-      <div className="time-row"><label>Capacité totale<input required type="number" min={5} max={500} value={form.capacity} onChange={e=>setForm({...form,capacity:Number(e.target.value)})}/></label><label>Prix (€, TTC)<EuroInput required cents={form.priceCents} onChange={c=>setForm({...form,priceCents:c})}/></label></div>
-      <div className="wide"><small>Prestations réellement incluses</small><div className="perks-checks">
-        <label><input type="checkbox" checked={form.includesDrink} onChange={e=>setForm({...form,includesDrink:e.target.checked})}/> Boisson</label>
-        <label><input type="checkbox" checked={form.includesStarter} onChange={e=>setForm({...form,includesStarter:e.target.checked})}/> Entrée</label>
-        <label><input type="checkbox" checked={form.includesMain} onChange={e=>setForm({...form,includesMain:e.target.checked})}/> Plat</label>
-        <label><input type="checkbox" checked={form.includesDessert} onChange={e=>setForm({...form,includesDessert:e.target.checked})}/> Dessert</label>
-      </div></div>
-      <label className="wide">Précisions sur les prestations<textarea value={form.perksDescription} onChange={e=>setForm({...form,perksDescription:e.target.value})} placeholder="Ex. : cocktail sans alcool à l’arrivée, buffet salé…"/></label>
-      <div className="time-row"><label>Minimum de participants (facultatif)<input type="number" min={1} value={form.minParticipants} onChange={e=>setForm({...form,minParticipants:e.target.value})}/></label>{form.minParticipants&&<label>Date limite de décision<input required type="datetime-local" value={form.minParticipantsDeadline} onChange={e=>setForm({...form,minParticipantsDeadline:e.target.value})}/></label>}</div>
-      <p className="fine wide">Les quotas hommes/femmes (Speed dating), les tarifs différenciés et la galerie photo se règlent après création, depuis « Mes événements ».</p>
-      <button className="button" disabled={submitting}>{submitting?"Création…":"Créer la soirée"}</button>
-    </form>
+    <EventForm form={form} setForm={setForm} showFlow={user?.role==="ADMIN"} submitting={submitting} submitLabel="Créer la soirée" onSubmit={submit}/>
   </div></section></Layout>;
 }
 

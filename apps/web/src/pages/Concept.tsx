@@ -5,12 +5,15 @@ import { api } from "../api";
 import { Picture } from "../components/brand";
 import { ContactExplainer, InterviewExplainer } from "../components/explainers";
 import { Layout } from "../components/Layout";
+import { ShareSiteButton } from "../components/ShareSite";
+import { useAuth } from "../auth";
 import { breadcrumbJsonLd, useSeo } from "../lib/seo";
 
 // Page « Comment ça marche » : le parcours réel de chaque format, étape par étape. Chaque phrase
 // décrit un mécanisme existant dans le produit (sélection, paiement, billet, mise en relation) ;
 // refonte du 2026-09-25 : phrases courtes, lisibles en diagonale, mêmes blocs que l'accueil.
 export function Concept() {
+  const {user}=useAuth();
   const [video,setVideo]=useState<{url:string;thumbnail:string;subtitles:string}|null>(null);
   // Les réglages vidéo sont publics par nature (contenu éditorial), mais /admin/settings est
   // réservé à l'administration : on lit les trois clés utiles depuis une petite route publique dédiée.
@@ -21,7 +24,7 @@ export function Concept() {
       <div className="concept-intro-copy">
         <h1>Comment fonctionne Nūr Meet</h1>
         <p className="page-lead">Vous choisissez une soirée, vous réservez, vous venez. Après, c’est vous qui décidez qui vous revoyez.</p>
-        <div className="hero-actions"><Link className="button" to="/events">Voir les prochaines soirées<ArrowRight size={18} aria-hidden="true"/></Link><Link className="button secondary" to="/login">Créer mon compte</Link></div>
+        <div className="hero-actions"><Link className="button" to="/events">Voir les prochaines soirées<ArrowRight size={18} aria-hidden="true"/></Link>{user?<ShareSiteButton/>:<Link className="button secondary" to="/login">Créer mon compte</Link>}</div>
       </div>
       {video?.url
         ?<video controls poster={video.thumbnail||undefined} className="concept-video" preload="metadata"><source src={video.url}/>{video.subtitles&&<track kind="subtitles" src={video.subtitles} srcLang="fr" label="Français" default/>}Votre navigateur ne lit pas cette vidéo : le résumé écrit figure ci-dessous.</video>

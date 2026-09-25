@@ -1,9 +1,11 @@
+import { INTERVIEW_HORIZON_DAYS, addDays, parisDateTime, parisTime, weekdayOf } from "@nour/shared";
 import { ApplicationStatus, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { app, httpError, prisma } from "../context.js";
 import { interviewRetryDate } from "../domain.js";
 import { audit } from "../services/audit.js";
 import { currentId, roles } from "../services/auth.js";
+import { bookInterviewSlot, bookedCallsBetween } from "../services/interview-calendar.js";
 import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 
@@ -51,51 +53,65 @@ app.post("/admin/profiles/:userId/revoke-validation", { preHandler: roles(UserRo
 // nouveau, pour ne jamais perdre le créneau d'origine si le nouveau est déjà pris entre-temps.
 app.post("/admin/global-interviews/:id/reschedule", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const { slotId } = z.object({ slotId: z.string() }).parse(request.body);
+  const { startsAt } = z.object({ startsAt: z.string().datetime() }).parse(request.body);
   const application = await prisma.application.findFirstOrThrow({ where: { id, eventId: null }, include: { call: true } });
   if (!application.call) return reply.code(409).send({ error: "Aucun entretien programmé pour cette candidature" });
-  const slot = await prisma.$transaction(async (tx) => {
-    await tx.screeningCall.update({ where: { id: application.call!.id }, data: { applicationId: null } });
-    const updated = await tx.screeningCall.updateMany({ where: { id: slotId, eventId: null, applicationId: null }, data: { applicationId: application.id } });
-    if (updated.count !== 1) throw httpError(409, "Ce créneau vient d’être réservé par un autre participant. Choisissez-en un autre.");
-    return tx.screeningCall.findUniqueOrThrow({ where: { id: slotId } });
-  });
-  await notify(application.userId, "Entretien reprogrammé", `Votre appel est désormais prévu le ${slot.startsAt.toLocaleString("fr-FR")}.`, links.interview());
-  await audit(currentId(request), "RESCHEDULE_GLOBAL_INTERVIEW", "Application", id, { slotId });
+  const slot = await prisma.$transaction(tx => bookInterviewSlot(tx, application.id, new Date(startsAt), application.call!.id));
+  await notify(application.userId, "Entretien reprogrammé", `Votre appel est désormais prévu le ${parisDateTime(slot.startsAt)}.`, links.interview());
+  await audit(currentId(request), "RESCHEDULE_GLOBAL_INTERVIEW", "Application", id, { startsAt: slot.startsAt });
   return { rescheduled: true, slot };
 });
 
-// Agenda central des entretiens : un seul agenda pour toute la plateforme, non lié à un événement.
-// Aujourd'hui réservé au super-admin (seul interlocuteur), sans agenda autonome pour les restaurateurs.
+// Agenda central des entretiens (v2 §11) : ouvert par défaut de 10h à 22h, l'équipe ne crée plus de
+// créneaux — elle ferme des périodes. Réservé au super-admin, jamais aux restaurateurs.
 app.get("/admin/interview-slots", { preHandler: roles(UserRole.ADMIN) }, async () =>
-  prisma.screeningCall.findMany({ where: { eventId: null }, include: { application: { include: { user: true } } }, orderBy: { startsAt: "asc" } })
+  prisma.screeningCall.findMany({ where: { eventId: null, applicationId: { not: null }, application: { status: { not: ApplicationStatus.CANCELLED } }, startsAt: { gt: new Date(Date.now() - 7 * 86_400_000) } }, include: { application: { include: { user: true } } }, orderBy: { startsAt: "asc" } })
 );
-app.post("/admin/interview-slots/generate", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
-  const input = z.object({
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    startTime: z.string().regex(/^\d{2}:\d{2}$/),
-    endTime: z.string().regex(/^\d{2}:\d{2}$/),
-    durationMinutes: z.number().int().min(5).max(180)
-  }).parse(request.body);
-  const dayStart = new Date(`${input.date}T${input.startTime}:00`);
-  const dayEnd = new Date(`${input.date}T${input.endTime}:00`);
-  if (dayEnd <= dayStart) return reply.code(400).send({ error: "L’heure de fin doit être après l’heure de début" });
-  if (dayStart < new Date()) return reply.code(400).send({ error: "Impossible de proposer des créneaux dans le passé" });
-  const candidates: { startsAt: Date; endsAt: Date }[] = [];
-  for (let cursor = dayStart.getTime(); cursor + input.durationMinutes * 60_000 <= dayEnd.getTime(); cursor += input.durationMinutes * 60_000) {
-    candidates.push({ startsAt: new Date(cursor), endsAt: new Date(cursor + input.durationMinutes * 60_000) });
-  }
-  if (candidates.length === 0) return reply.code(400).send({ error: "Aucun créneau ne peut être généré avec ces horaires" });
-  const existing = await prisma.screeningCall.findMany({ where: { eventId: null, startsAt: { gte: dayStart, lt: dayEnd } }, select: { startsAt: true } });
-  const existingTimes = new Set(existing.map(s => s.startsAt.getTime()));
-  const toCreate = candidates.filter(c => !existingTimes.has(c.startsAt.getTime()));
-  if (toCreate.length > 0) await prisma.screeningCall.createMany({ data: toCreate.map(c => ({ startsAt: c.startsAt, endsAt: c.endsAt })) });
-  await audit(currentId(request), "GENERATE_INTERVIEW_SLOTS", "ScreeningCall", undefined, { date: input.date, created: toCreate.length });
-  return reply.code(201).send({ created: toCreate.length, skipped: candidates.length - toCreate.length });
+
+app.get("/admin/interview-blocks", { preHandler: roles(UserRole.ADMIN) }, async () =>
+  prisma.interviewBlock.findMany({ where: { endsAt: { gt: new Date() } }, orderBy: { startsAt: "asc" }, take: 500 })
+);
+
+// Fermer une période : un jour, plusieurs jours, des heures précises, ou seulement certains jours de la
+// semaine d'une période (ex. tous les dimanches d'octobre). Les dates et heures sont celles de Paris.
+// Une plage continue = une seule ligne ; seuls les jours de semaine choisis donnent une ligne par jour.
+const blockInput = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+  reason: z.string().trim().max(200).optional()
+}).refine(v => v.endDate >= v.startDate, { message: "La date de fin doit être après la date de début", path: ["endDate"] })
+  .refine(v => !v.startTime === !v.endTime, { message: "Indiquez l’heure de début et l’heure de fin, ou aucune des deux", path: ["endTime"] })
+  .refine(v => !v.startTime || v.endTime! > v.startTime, { message: "L’heure de fin doit être après l’heure de début", path: ["endTime"] });
+const minutesOf = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+
+app.post("/admin/interview-blocks", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const input = blockInput.parse(request.body);
+  const dayCount = Math.round((Date.parse(input.endDate) - Date.parse(input.startDate)) / 86_400_000) + 1;
+  if (dayCount > INTERVIEW_HORIZON_DAYS + 1) return reply.code(400).send({ error: "Période trop longue : un an au maximum." });
+  const perDay = !!input.startTime || !!input.weekdays?.length;
+  const days = Array.from({ length: dayCount }, (_, i) => addDays(input.startDate, i)).filter(d => !input.weekdays?.length || input.weekdays.includes(weekdayOf(d)));
+  if (days.length === 0) return reply.code(400).send({ error: "Aucun jour de la période ne correspond aux jours choisis." });
+  const ranges = perDay
+    ? days.map(d => ({ startsAt: parisTime(d, input.startTime ? minutesOf(input.startTime) : 0), endsAt: input.endTime ? parisTime(d, minutesOf(input.endTime)) : parisTime(addDays(d, 1), 0) }))
+    : [{ startsAt: parisTime(input.startDate, 0), endsAt: parisTime(addDays(input.endDate, 1), 0) }];
+  const adminId = currentId(request);
+  await prisma.interviewBlock.createMany({ data: ranges.map(r => ({ ...r, reason: input.reason || null, createdById: adminId })) });
+  // Les rendez-vous déjà pris dans la période ne sont ni déplacés ni annulés : ils sont signalés pour
+  // que l'équipe décide (reprogrammer ou maintenir l'appel).
+  // Une seule requête sur toute la période, puis tri en mémoire des rendez-vous tombant dans une plage.
+  const booked = await bookedCallsBetween(ranges[0].startsAt, ranges[ranges.length - 1].endsAt);
+  const conflicts = booked.filter(c => ranges.some(r => c.startsAt < r.endsAt && r.startsAt < c.endsAt));
+  await audit(adminId, "BLOCK_INTERVIEW_PERIOD", "InterviewBlock", undefined, { ...input, created: ranges.length, conflicts: conflicts.length });
+  return reply.code(201).send({ created: ranges.length, conflicts: conflicts.map(c => ({ applicationId: c.application!.id, displayName: c.application!.user.displayName, startsAt: c.startsAt })) });
 });
-app.delete("/admin/interview-slots/:id", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+
+app.delete("/admin/interview-blocks/:id", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const deleted = await prisma.screeningCall.deleteMany({ where: { id, eventId: null, applicationId: null } });
-  if (deleted.count === 0) return reply.code(409).send({ error: "Ce créneau est réservé ou introuvable : il ne peut pas être supprimé" });
+  const deleted = await prisma.interviewBlock.deleteMany({ where: { id } });
+  if (deleted.count === 0) return reply.code(404).send({ error: "Période introuvable" });
+  await audit(currentId(request), "UNBLOCK_INTERVIEW_PERIOD", "InterviewBlock", id);
   return reply.code(204).send();
 });

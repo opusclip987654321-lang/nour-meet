@@ -64,7 +64,7 @@ app.get("/admin/dashboard", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZ
     ]);
     acceptanceRate = decidedInterviews > 0 ? Math.round((acceptedInterviews / decidedInterviews) * 100) : null;
   }
-  const upcomingInterviews = restaurant ? null : await prisma.screeningCall.count({ where: { eventId: null, startsAt: { gt: new Date() }, completedAt: null } });
+  const upcomingInterviews = restaurant ? null : await prisma.screeningCall.count({ where: { eventId: null, applicationId: { not: null }, application: { status: ApplicationStatus.CALL_SCHEDULED }, startsAt: { gt: new Date() }, completedAt: null } });
   const pendingRestaurantApplications = restaurant ? null : await prisma.restaurant.count({ where: { status: "PENDING" } });
   const subscriptionsByStatus = restaurant ? null : await prisma.restaurantSubscription.groupBy({ by: ["status"], _count: true });
   const pendingPayments = restaurant ? null : await prisma.payment.count({ where: { status: PaymentStatus.PENDING, createdAt: createdRange } });

@@ -10,6 +10,27 @@ import { spacePath } from "../lib/spaces";
 import { SUBSCRIPTION_STATUS_LABEL } from "../lib/labels";
 import { RestaurantSubscriptionPanel } from "./RestaurantSubscription";
 
+// Onboarding (v2 §5) : pendant l'examen de la demande, le restaurateur peut déjà préparer son premier
+// événement (brouillon), puis choisir son abonnement. Le texte reste prudent : c'est l'équipe qui valide,
+// jamais le paiement qui « garantit » une validation.
+function PendingNextStep() {
+  const [state,setState]=useState<{draft:any|null}|null|undefined>(undefined);
+  useEffect(()=>{api<{draft:any|null}>("/restaurants/me/onboarding").then(setState).catch(()=>setState(null))},[]);
+  if(state===undefined)return <div className="panel skeleton-panel" aria-hidden="true"/>;
+  if(state===null)return null;
+  return <div className="panel onboarding-next">
+    {state.draft?<>
+      <h2>Votre premier événement est prêt.</h2>
+      <p>Choisissez votre abonnement pour pouvoir le soumettre et le mettre en ligne.</p>
+      <div className="onboarding-actions"><Link className="button" to="/restaurant/premier-evenement">Choisir mon abonnement</Link><Link className="button secondary" to="/restaurant/premier-evenement?etape=evenement">Modifier mon événement</Link></div>
+    </>:<>
+      <h2>Votre restaurant est en attente de validation.</h2>
+      <p>Souhaitez-vous créer votre premier événement dès maintenant ?</p>
+      <div className="onboarding-actions"><Link className="button" to="/restaurant/premier-evenement">Créer mon premier événement</Link></div>
+    </>}
+  </div>;
+}
+
 const emptyRestaurantForm={name:"",managerName:"",siret:"",description:"",district:"",address:"",phone:"",desiredCapacity:"",desiredSchedule:"",averagePricePerPersonCents:"",defaultMinParticipants:"",priceIncludesDrink:false,priceIncludesStarter:false,priceIncludesMain:false,priceIncludesDessert:false,priceNotes:"",proposesCategoryPricing:false,allowsPrivatization:false,specialConditions:""};
 function RestaurantApplication() {
   const [restaurant,setRestaurant]=useState<any>(null);
@@ -70,7 +91,7 @@ function RestaurantApplication() {
       <div className="event-photo-grid">{(restaurant?.photos??[]).map((p:any)=><div key={p.id} className="event-photo"><img src={imgUrl(p.url)} alt=""/><button type="button" className="link-button" onClick={()=>removePhoto(p.id)}>Retirer</button></div>)}</div>
       {photoCount<8&&<label className="fine">Ajouter une photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>e.target.files?.[0]&&uploadPhoto(e.target.files[0])}/></label>}
     </div>;
-  if(restaurant?.status==="PENDING") return <div className="stack"><div className="panel"><Notice kind="info">Votre demande pour « {restaurant.name} » est en cours d’examen.</Notice>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}</div>{gallery}</div>;
+  if(restaurant?.status==="PENDING") return <div className="stack"><div className="panel"><Notice kind="info">Votre demande pour « {restaurant.name} » est en cours d’examen.</Notice>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}</div><PendingNextStep/>{gallery}</div>;
   if(restaurant?.status==="APPROVED") return <div className="stack">
     <div className="panel"><Notice kind="success">Votre établissement « {restaurant.name} » est approuvé. <Link className="text-link" to={spacePath("ORGANIZER","overview")}>Tableau de bord de mes soirées</Link></Notice>
       {restaurant.subscription&&<p className="fine">Formule « {restaurant.subscription.plan.name} » — {SUBSCRIPTION_STATUS_LABEL[restaurant.subscription.status]??restaurant.subscription.status} — {restaurant.currentMonthEventsPublished}{restaurant.subscription.plan.monthlyEventQuota==null?" soirée(s) publiée(s) ce mois-ci (illimité)":`/${restaurant.subscription.plan.monthlyEventQuota} soirées publiées ce mois-ci`}. <Link to="/restaurant?tab=subscription">Voir mon abonnement</Link></p>}

@@ -1,4 +1,4 @@
-import { UserRole } from "@prisma/client";
+import { EventStatus, UserRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -11,6 +11,7 @@ import { auth, currentId, roles } from "../services/auth.js";
 import { notify } from "../services/notify.js";
 import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, subscriptionOverview, syncSubscriptionFromStripe } from "../services/subscriptions.js";
 import { getSetting } from "../settings.js";
+import { eventCreateData, eventCreateSchema } from "../services/event-drafts.js";
 
 // Jamais les notes internes de l'administration, le taux de commission, l'auteur de la décision ni le
 // marquage démo dans une réponse destinée au restaurateur : informations internes de Nūr Meet
@@ -44,6 +45,8 @@ app.post("/restaurants/apply", { preHandler: auth, config: { rateLimit: { max: s
   const existing = await prisma.restaurant.findUnique({ where: { ownerId: userId } });
   if (existing?.status === "APPROVED") return reply.code(409).send({ error: "Vous êtes déjà restaurateur" });
   if (existing?.status === "PENDING") return reply.code(409).send({ error: "Votre demande est déjà en cours d’examen" });
+  // Une suspension n'est levée que par l'équipe Nūr Meet, jamais par une nouvelle demande.
+  if (existing?.status === "SUSPENDED") return reply.code(403).send({ error: "Votre établissement est suspendu : contactez l’équipe Nūr Meet." });
   const restaurant = await prisma.restaurant.upsert({
     where: { ownerId: userId },
     update: { ...input, status: "PENDING", submittedAt: new Date(), rejectionReason: null, reviewedBy: null },
@@ -310,4 +313,56 @@ app.get("/restaurants/me/connected-account", { preHandler: roles(UserRole.ORGANI
   const account = await prisma.connectedAccount.findUnique({ where: { restaurantId: restaurant.id } });
   if (!account) return reply.code(404).send({ error: "Aucun compte connecté" });
   return account;
+});
+
+// Onboarding restaurateur (décision v2 §5) : un établissement encore EN ATTENTE peut préparer SON
+// PREMIER brouillon de soirée, et seulement celui-là. Aucun droit restaurateur n'est accordé avant la
+// validation (le compte reste PARTICIPANT) : ces routes vérifient elles-mêmes la propriété et le statut,
+// et n'ouvrent ni publication, ni soumission, ni aucune autre fonction de l'espace restaurateur.
+const pendingOnboarding = async (userId: string) => {
+  const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: userId } });
+  if (!restaurant) throw httpError(404, "Aucune demande restaurateur");
+  const draft = await prisma.event.findFirst({ where: { controllerRestaurantId: restaurant.id }, orderBy: { createdAt: "asc" } });
+  return { restaurant, draft };
+};
+const slugTaken = (err: unknown) => (err as { code?: string }).code === "P2002";
+
+app.get("/restaurants/me/onboarding", { preHandler: auth }, async (request) => {
+  const { restaurant, draft } = await pendingOnboarding(currentId(request));
+  const subscription = await prisma.restaurantSubscription.findUnique({ where: { restaurantId: restaurant.id }, select: { status: true } });
+  return { restaurantStatus: restaurant.status, draft, subscriptionStatus: subscription?.status ?? null };
+});
+
+app.post("/restaurants/me/onboarding-event", { preHandler: auth, config: { rateLimit: { max: 20, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const input = eventCreateSchema.parse(request.body);
+  const { restaurant } = await pendingOnboarding(currentId(request));
+  if (restaurant.status !== "PENDING") return reply.code(409).send({ error: "Votre établissement est déjà examiné : créez vos soirées depuis votre espace restaurateur." });
+  try {
+    // Un seul brouillon, même sous requêtes simultanées : verrou par établissement, puis revérification.
+    const event = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(4212, hashtext(${restaurant.id}))`;
+      if (await tx.event.count({ where: { controllerRestaurantId: restaurant.id } }) > 0) throw httpError(409, "Votre premier événement est déjà préparé : vous pouvez le modifier.");
+      return tx.event.create({ data: eventCreateData(input, { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, status: EventStatus.DRAFT }) });
+    });
+    await audit(currentId(request), "CREATE_ONBOARDING_EVENT", "Event", event.id);
+    return reply.code(201).send(event);
+  } catch (err) {
+    if (slugTaken(err)) return reply.code(409).send({ error: "Cette adresse de page est déjà utilisée : modifiez le titre ou l'identifiant." });
+    throw err;
+  }
+});
+
+app.put("/restaurants/me/onboarding-event", { preHandler: auth, config: { rateLimit: { max: 30, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const input = eventCreateSchema.parse(request.body);
+  const { restaurant, draft } = await pendingOnboarding(currentId(request));
+  if (restaurant.status !== "PENDING" || !draft || draft.status !== EventStatus.DRAFT) return reply.code(409).send({ error: "Ce brouillon ne peut plus être modifié ici." });
+  try {
+    const { status: _status, controllerRestaurantId: _c, venueRestaurantId: _v, ...data } = eventCreateData(input, { controllerRestaurantId: restaurant.id, venueRestaurantId: restaurant.id, status: EventStatus.DRAFT });
+    const event = await prisma.event.update({ where: { id: draft.id }, data });
+    await audit(currentId(request), "UPDATE_ONBOARDING_EVENT", "Event", event.id);
+    return event;
+  } catch (err) {
+    if (slugTaken(err)) return reply.code(409).send({ error: "Cette adresse de page est déjà utilisée : modifiez le titre ou l'identifiant." });
+    throw err;
+  }
 });

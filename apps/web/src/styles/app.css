@@ -302,9 +302,52 @@
 
 .calendar-days button {
   flex: 0 0 auto;
-  padding: 0 var(--s-4);
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: var(--s-2) var(--s-4);
   font-size: var(--fs-sm);
   text-transform: capitalize;
+}
+
+.calendar-days button small {
+  color: inherit;
+  opacity: 0.75;
+  font-size: var(--fs-xs);
+  text-transform: none;
+}
+
+.calendar-days button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Navigation semaine par semaine (v2 §11) */
+.calendar-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2) var(--s-4);
+  margin-bottom: var(--s-3);
+}
+
+.calendar-head h3 {
+  margin: 0;
+}
+
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.calendar-slot-skeleton {
+  height: 44px;
+  border-radius: var(--r-sm);
 }
 
 .calendar-days button.active {
@@ -1843,4 +1886,388 @@
 
 .skeleton-pricing {
   min-height: 420px;
+}
+
+/* Profil (décision v2 §1) : centres d'intérêt en liste fermée, confirmation flottante */
+.interest-picker {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--s-3);
+  min-width: 0;
+}
+
+.interest-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+.interest-head span {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+
+.interest-selected,
+.interest-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.interest-selected .chip,
+.interest-chips .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+.interest-options {
+  display: grid;
+  gap: var(--s-3);
+  max-height: 280px;
+  overflow-y: auto;
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.interest-group {
+  display: grid;
+  gap: var(--s-2);
+}
+
+.interest-group small {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: max(var(--s-5), env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  max-width: min(92vw, 480px);
+  padding: var(--s-3) var(--s-5);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-lg);
+  font-weight: 600;
+  animation: toast-in var(--t-base) var(--ease);
+}
+
+.toast.success {
+  background: var(--success-bg);
+  color: var(--success-ink);
+}
+
+.toast.error {
+  background: var(--danger-bg);
+  color: var(--danger-ink);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
+
+.photo-cta-hint {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+/* Contacts sur le site : page d'explication, la messagerie vit dans l'application (décision v2 §3) */
+.contacts-app {
+  display: grid;
+  gap: var(--s-5);
+}
+
+.contacts-app-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--s-4);
+  align-items: start;
+}
+
+.contacts-app-head svg {
+  color: var(--saffron-ink);
+}
+
+.contacts-app-head h2 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--fs-h3);
+}
+
+.contacts-app-head p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.contacts-app-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+
+.contacts-app-steps li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: var(--s-3);
+  align-items: start;
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.contacts-app-steps li > svg {
+  color: var(--saffron-ink);
+  margin-top: 4px;
+}
+
+.contacts-app-steps b {
+  display: block;
+}
+
+.contacts-app-steps span:not(.mini-step-num) {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.contacts-app-store {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.contacts-app-store p {
+  margin: 0;
+  flex: 1 1 280px;
+  color: var(--ink-2);
+}
+
+.skeleton-qr {
+  width: 152px;
+  height: 152px;
+}
+
+@media (max-width: 640px) {
+  .contacts-app-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Onboarding restaurateur (décision v2 §5) : trois étapes, jamais mélangées dans un même formulaire */
+.onboarding-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-5);
+  margin: 0 0 var(--s-4);
+  padding: 0;
+  list-style: none;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+.onboarding-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.onboarding-steps li.current {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.onboarding-steps li.done {
+  color: var(--success);
+}
+
+.onboarding-step-num {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  line-height: 1;
+}
+
+.onboarding-steps li.current .onboarding-step-num {
+  border-color: var(--saffron);
+  background: var(--saffron);
+  color: var(--on-saffron);
+}
+
+.onboarding-steps li.done .onboarding-step-num {
+  border-color: var(--success);
+  background: var(--success-bg);
+}
+
+.onboarding-status {
+  display: inline-block;
+  margin: 0 0 var(--s-3);
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--r-pill);
+  background: var(--warning-bg);
+  color: var(--warning-ink);
+  font-size: var(--fs-sm);
+}
+
+.onboarding-draft {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+
+.onboarding-draft > div {
+  display: grid;
+  gap: var(--s-1);
+  min-width: 0;
+}
+
+.onboarding-draft span {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.onboarding-next h2 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--fs-h3);
+}
+
+.onboarding-next p {
+  margin: 0 0 var(--s-4);
+  color: var(--ink-2);
+}
+
+.onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+
+/* Inscription à régler (v2 §9) : un montant, une phrase, un bouton */
+.reservation-pay {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--s-1);
+}
+
+.reservation-amount {
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
+  color: var(--ink);
+}
+
+.reservation-actions .link-button {
+  align-self: center;
+}
+
+/* Entretien (v2 §12–§13) : explication en tête, actions « modifier » et « annuler » séparées */
+.interview-intro h2 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--fs-h3);
+}
+
+.interview-intro p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.interview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+/* Agenda admin (v2 §11) : périodes fermées et entretiens réservés */
+.weekday-picker {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.weekday-picker legend {
+  margin-bottom: var(--s-2);
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.weekday-picker div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.weekday-picker button {
+  min-width: 48px;
+  min-height: 40px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.weekday-picker button.active {
+  border-color: var(--night);
+  background: var(--night);
+  color: var(--on-night);
+}
+
+.block-list {
+  display: grid;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.block-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.block-list span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+.block-list small {
+  color: var(--ink-3);
 }

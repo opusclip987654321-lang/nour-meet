@@ -1,10 +1,11 @@
 import { CalendarDays, CheckCircle2, Hourglass, Inbox, Ticket } from "lucide-react-native";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, ScrollView, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Image, ScrollView, Text, View } from "react-native";
 import { api } from "../api";
+import { CallCalendar } from "../components/CallCalendar";
 import { PhoneVerification } from "../components/PhoneVerification";
 import { Badge, Button, CategoryBadge, Chip, Empty, Field, Loading, Notice, Skeleton } from "../components/ui";
-import { dayLabel, imgUrl, longDate, money, shortDate, timeLabel } from "../format";
+import { imgUrl, longDate, money, shortDate } from "../format";
 import { APPLICATION_STATUS_LABEL } from "../labels";
 import { EspaceTab, Navigate } from "../links";
 import { payByCard } from "../payment";
@@ -55,25 +56,31 @@ function Reservations({ user, focus, navigate, onUserChanged }: { user: any; foc
     {apps === null ? <><Skeleton height={140} /><Skeleton height={140} /></>
       : eventApps.length === 0 ? <Empty icon={<Inbox size={24} color={T.ink3} />} title="Aucune inscription pour le moment" text="Choisissez une soirée : elle apparaîtra ici avec son statut." />
         : eventApps.map(a => {
+          // Un seul statut et un seul bouton principal quand il reste à payer (v2 §9), comme sur le site.
           const waitlisted = !!a.waitlistEntry && a.status === "PAYMENT_PENDING";
+          const toPay = a.status === "PAYMENT_PENDING" && !waitlisted;
+          const amount = a.amountCents ?? a.event.priceCents;
           const offersForEvent = pendingOffers.filter(o => o.originalEventId === a.eventId);
           const focused = focus === a.id;
           return <View key={a.id} onLayout={register(a.id)} style={[s.card, focused && { borderColor: T.saffron, borderWidth: 2 }]} testID={focused ? "focused-reservation" : undefined}>
             <View style={{ flexDirection: "row", gap: S[3] }}>
               <Image source={{ uri: imgUrl(a.event.imageUrl) }} style={{ width: 72, height: 72, borderRadius: R.sm, backgroundColor: T.surface2 }} />
               <View style={{ flex: 1, gap: 4 }}>
-                <View style={[s.row, { flexWrap: "wrap" }]}><CategoryBadge category={a.event.category} />{waitlisted ? <Badge tone="warning" label="Liste d’attente" icon={<Hourglass size={13} color={T.warning} />} /> : <Text style={s.meta}>{APPLICATION_STATUS_LABEL[a.status] ?? a.status}</Text>}</View>
+                <View style={[s.row, { flexWrap: "wrap" }]}><CategoryBadge category={a.event.category} />{waitlisted ? <Badge tone="warning" label="Liste d’attente" icon={<Hourglass size={13} color={T.warning} />} /> : !toPay && <Text style={s.meta}>{APPLICATION_STATUS_LABEL[a.status] ?? a.status}</Text>}</View>
                 <Text style={s.h3}>{a.event.title}</Text>
                 <Text style={s.meta}>{shortDate(a.event.startsAt)} · {a.event.district}</Text>
               </View>
             </View>
             {a.call && a.status === "CALL_SCHEDULED" && <Text style={s.small}>Entretien : {shortDate(a.call.startsAt)}</Text>}
             {waitlisted && <Text style={s.small}>Soirée complète pour le moment : dès qu’une place se libère, vous êtes prévenu(e) et elle revient à la première personne qui finalise son paiement.</Text>}
-            {a.status === "PAYMENT_PENDING" && (waitlisted
-              ? <Button small variant="secondary" title="Voir la soirée" onPress={() => navigate({ name: "events", slug: a.event.slug })} />
-              : !user.phoneVerified ? <PhoneVerification onVerified={onUserChanged} />
-                : (a.amountCents ?? a.event.priceCents) === 0 ? <Button small title="Confirmer ma place (gratuit)" onPress={() => navigate({ name: "events", slug: a.event.slug })} />
-                  : <Button small title={`Payer par carte · ${money(a.amountCents ?? a.event.priceCents)}`} busy={busyId === a.id} onPress={() => act(a.id, async () => { await payByCard(a.id, a.event.id, a.amountCents ?? a.event.priceCents); return "Paiement en cours de confirmation : votre billet apparaîtra dans « Billets »."; })} />)}
+            {waitlisted && <Button small variant="secondary" title="Voir la soirée" onPress={() => navigate({ name: "events", slug: a.event.slug })} />}
+            {toPay && <View style={{ gap: 2 }}>
+              <Text style={s.h2}>{amount === 0 ? "Gratuit" : money(amount)}</Text>
+              <Text style={s.small}>{a.event.flow === "SCREENING" ? "Votre candidature est acceptée." : "Votre place vous attend."}</Text>
+            </View>}
+            {toPay && (!user.phoneVerified ? <PhoneVerification onVerified={onUserChanged} />
+              : amount === 0 ? <Button title="Confirmer ma place" onPress={() => navigate({ name: "events", slug: a.event.slug })} />
+                : <Button title={`Payer ${money(amount)}`} busy={busyId === a.id} onPress={() => act(a.id, async () => { await payByCard(a.id, a.event.id, amount); return "Paiement en cours de confirmation : votre billet apparaîtra dans « Billets »."; })} />)}
             {!["REFUSED", "CANCELLED"].includes(a.status) && <Button small variant="ghost" title="Annuler ma participation" busy={busyId === a.id} onPress={() => act(a.id, async () => {
               const r = await api<{ refunded: boolean; refundedAmountCents: number | null; eligible: boolean | null }>(`/me/applications/${a.id}/cancel`, { method: "POST" });
               return r.refunded ? `Participation annulée. ${money(r.refundedAmountCents!)} ont été remboursés intégralement.` : r.eligible === false ? "Participation annulée. Conformément à notre politique, aucun remboursement n’est possible à 24 heures ou moins de l’événement." : "Participation annulée.";
@@ -81,8 +88,14 @@ function Reservations({ user, focus, navigate, onUserChanged }: { user: any; foc
             {offersForEvent.length > 0 && <View style={{ gap: S[2], marginTop: S[2] }}>
               <Text style={s.bodyStrong}>Soirées similaires proposées pour vous</Text>
               {offersForEvent.map(o => <View key={o.id} style={[s.card, { backgroundColor: T.saffronSoft, borderColor: T.saffronSoft }]}>
-                <Text style={s.bodyStrong}>{o.alternativeEvent.title}</Text>
-                <Text style={s.meta}>{shortDate(o.alternativeEvent.startsAt)} · {o.alternativeEvent.district} · {o.alternativeEvent.priceCents === 0 ? "Gratuit" : money(o.alternativeEvent.priceCents)}</Text>
+                <View style={{ flexDirection: "row", gap: S[3] }}>
+                  <Image source={{ uri: imgUrl(o.alternativeEvent.imageUrl) }} style={{ width: 64, height: 64, borderRadius: R.sm, backgroundColor: T.surface2 }} />
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={s.bodyStrong}>{o.alternativeEvent.title}</Text>
+                    <Text style={s.meta}>{shortDate(o.alternativeEvent.startsAt)} · {o.alternativeEvent.district}</Text>
+                    <Text style={s.bodyStrong}>{o.alternativeEvent.priceCents === 0 ? "Gratuit" : money(o.alternativeEvent.priceCents)}</Text>
+                  </View>
+                </View>
                 <View style={[s.row, { gap: S[2] }]}>
                   <Button small title="Accepter" busy={busyId === o.id} style={{ flex: 1 }} onPress={() => act(o.id, async () => { await api(`/alternative-offers/${o.id}/respond`, { method: "POST", body: JSON.stringify({ accept: true }) }); return "Place réservée : réglez votre billet avant expiration."; })} />
                   <Button small variant="secondary" title="Refuser" style={{ flex: 1 }} onPress={() => act(o.id, async () => { await api(`/alternative-offers/${o.id}/respond`, { method: "POST", body: JSON.stringify({ accept: false }) }); return "Proposition refusée."; })} />
@@ -123,39 +136,45 @@ function Tickets({ focus, navigate }: { focus?: string; navigate: Navigate }) {
 
 function Interview({ user, onUserChanged }: { user: any; onUserChanged: () => void }) {
   const [status, setStatus] = useState<any>(undefined), [motivation, setMotivation] = useState("");
-  const [slots, setSlots] = useState<any[]>([]), [loadingSlots, setLoadingSlots] = useState(false), [activeDay, setActiveDay] = useState<string | null>(null), [schedulingId, setSchedulingId] = useState<string | null>(null);
+  const [schedulingId, setSchedulingId] = useState<string | null>(null), [moving, setMoving] = useState(false);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const load = () => api<any>("/me/global-interview").then(setStatus).catch(() => setStatus(null));
   useEffect(() => { load(); }, []);
-  useEffect(() => {
-    if (!status || status.status !== "PENDING_CALL" || status.call) { setSlots([]); return; }
-    setLoadingSlots(true);
-    api<any[]>("/interview-slots").then(list => { setSlots(list); setActiveDay(list[0] ? new Date(list[0].startsAt).toDateString() : null); }).catch(() => setSlots([])).finally(() => setLoadingSlots(false));
-  }, [status?.status, status?.call]);
-  const slotsByDay = useMemo(() => { const map = new Map<string, any[]>(); for (const slot of slots) { const key = new Date(slot.startsAt).toDateString(); map.set(key, [...(map.get(key) ?? []), slot]); } return map; }, [slots]);
   const run = async (action: () => Promise<void>) => { setBusy(true); setMessage(null); try { await action(); } catch (e) { setMessage({ kind: "error", text: (e as Error).message }); } finally { setBusy(false); } };
+  const pick = (action: (startsAt: string) => Promise<string>) => async (startsAt: string) => {
+    setSchedulingId(startsAt); setMessage(null);
+    try { setMessage({ kind: "success", text: await action(startsAt) }); } catch (e) { setMessage({ kind: "error", text: (e as Error).message }); } finally { setSchedulingId(null); }
+  };
+  const schedule = pick(async startsAt => { const r = await api<any>(`/applications/${status.id}/schedule`, { method: "POST", body: JSON.stringify({ startsAt }) }); setStatus({ ...status, status: "CALL_SCHEDULED", call: r.slot }); return "Votre entretien est confirmé."; });
+  // « Modifier mon créneau » (v2 §12) : déplacement atomique, distinct de l'annulation.
+  const move = pick(async startsAt => { const r = await api<any>("/me/global-interview/reschedule", { method: "POST", body: JSON.stringify({ startsAt }) }); setStatus({ ...status, call: r.slot }); setMoving(false); return "Votre entretien a été déplacé."; });
+  const cancelRequest = () => run(async () => { await api(`/me/applications/${status.id}/cancel`, { method: "POST" }); setMoving(false); await load(); setMessage({ kind: "success", text: "Votre demande d’entretien est annulée. Vous pourrez en refaire une quand vous le souhaitez." }); });
   if (status === undefined) return <Loading />;
   const requestForm = !user.phoneVerified ? <PhoneVerification onVerified={onUserChanged} /> : <View style={{ gap: S[3] }}>
     <Field label="Votre motivation" multiline value={motivation} onChangeText={setMotivation} placeholder="Expliquez en quelques lignes ce que vous recherchez…" />
     <Button title="Demander mon entretien" busy={busy} onPress={() => run(async () => { if (motivation.trim().length < 30) throw new Error("Expliquez votre motivation en au moins 30 caractères."); await api("/me/global-interview", { method: "POST", body: JSON.stringify({ motivation }) }); setMotivation(""); await load(); })} />
   </View>;
+  const cancelButton = <Button small variant="ghost" title="Annuler ma demande d’entretien" busy={busy} onPress={cancelRequest} />;
   return <ScrollView contentContainerStyle={s.content}>
     <Text style={s.h1} accessibilityRole="header">Entretien de validation</Text>
-    <Text style={s.small}>Obligatoire une seule fois, avant votre première soirée de rencontre (speed dating).</Text>
+    {/* v2 §13 : dire concrètement ce qu'est l'entretien, pour rassurer. */}
+    <Text style={s.bodyStrong}>Un entretien téléphonique de 15 minutes avec un membre de l’équipe Nūr Meet.</Text>
+    <Text style={s.small}>Il est réalisé une seule fois afin de valider votre profil pour les soirées de speed dating. Les événements networking ne nécessitent pas cet entretien.</Text>
     {message && <Notice kind={message.kind}>{message.text}</Notice>}
     {user.profile?.validatedAt ? <Notice kind="success">Votre profil est validé : vous pouvez vous inscrire directement aux soirées.</Notice>
-      : !status || status.status == null ? requestForm
+      : !status || status.status == null || status.status === "CANCELLED" ? requestForm
         : status.status === "REFUSED" ? (status.retryAvailableAt && new Date(status.retryAvailableAt) > new Date()
           ? <><Notice kind="error">Votre profil n’a pas été validé.</Notice><Text style={s.small}>Vous pourrez redemander un entretien à partir du {longDate(status.retryAvailableAt)}.</Text></>
           : requestForm)
-          : status.status === "PENDING_CALL" && !status.call ? <View style={[s.panel, { gap: S[3] }]}>
-            <Text style={s.h3}>Choisissez votre appel</Text>
-            {loadingSlots ? <ActivityIndicator color={T.night} /> : slots.length === 0 ? <Text style={s.small}>Aucun créneau disponible pour le moment. L’équipe Nūr Meet publie régulièrement de nouveaux créneaux : revenez un peu plus tard.</Text>
-              : <><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: S[2] }}>{[...slotsByDay.keys()].map(day => <Chip key={day} label={dayLabel(day)} active={activeDay === day} onPress={() => setActiveDay(day)} />)}</ScrollView>
-                <View style={[s.row, { flexWrap: "wrap" }]}>{(slotsByDay.get(activeDay ?? "") ?? []).map(slot => <Chip key={slot.id} label={schedulingId === slot.id ? "…" : timeLabel(slot.startsAt)} active={false} onPress={async () => { setSchedulingId(slot.id); setMessage(null); try { const r = await api<any>(`/applications/${status.id}/schedule`, { method: "POST", body: JSON.stringify({ slotId: slot.id }) }); setStatus({ ...status, status: "CALL_SCHEDULED", call: r.slot }); setMessage({ kind: "success", text: "Votre entretien est confirmé." }); } catch (e) { setMessage({ kind: "error", text: (e as Error).message }); } finally { setSchedulingId(null); } }} />)}</View></>}
-            <Button small variant="ghost" title="Annuler ma demande" busy={busy} onPress={() => run(async () => { await api(`/me/applications/${status.id}/cancel`, { method: "POST" }); await load(); })} />
-          </View>
-            : status.call ? <View style={s.panel}><Badge tone="success" label="Entretien programmé" icon={<CheckCircle2 size={13} color={T.success} />} /><Text style={s.h2}>{shortDate(status.call.startsAt)}</Text><Text style={s.small}>L’équipe Nūr Meet vous appellera à cette heure, puis vous serez informé(e) de la décision.</Text><Button small variant="ghost" title="Annuler" busy={busy} onPress={() => run(async () => { await api(`/me/applications/${status.id}/cancel`, { method: "POST" }); await load(); })} /></View>
+          : status.status === "PENDING_CALL" && !status.call ? <><CallCalendar onSelect={schedule} schedulingId={schedulingId} />{cancelButton}</>
+            : status.call ? <View style={[s.panel, { gap: S[2] }]}>
+              <Badge tone="success" label="Entretien programmé" icon={<CheckCircle2 size={13} color={T.success} />} />
+              <Text style={s.h2}>{shortDate(status.call.startsAt)}</Text>
+              <Text style={s.small}>Un membre de l’équipe Nūr Meet vous appellera à cette heure, puis vous serez informé(e) de la décision.</Text>
+              {status.status === "CALL_SCHEDULED" && new Date(status.call.startsAt) > new Date() && (moving
+                ? <><CallCalendar title="Choisissez votre nouveau créneau" onSelect={move} schedulingId={schedulingId} exclude={new Date(status.call.startsAt).toISOString()} /><Button small variant="secondary" title="Garder mon créneau actuel" onPress={() => setMoving(false)} /></>
+                : <><Button small title="Modifier mon créneau" onPress={() => { setMoving(true); setMessage(null); }} />{cancelButton}</>)}
+            </View>
               : <Empty icon={<CalendarDays size={24} color={T.ink3} />} title="Entretien en cours de traitement" />}
   </ScrollView>;
 }

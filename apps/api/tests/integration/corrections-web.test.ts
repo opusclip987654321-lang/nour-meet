@@ -399,3 +399,108 @@ describe("réglages de l'administration appliqués sans redémarrage (décision 
     }
   });
 });
+
+describe("onboarding restaurateur en 3 étapes (décision v2 §5, Stripe test)", () => {
+  const eventBody = (slug: string) => ({
+    title: "Premier dîner networking", slug, category: "Networking", description: "Un premier dîner pour rencontrer les indépendants du quartier.",
+    startsAt: day(30).toISOString(), endsAt: day(30, 22).toISOString(), district: "Paris 10e", address: "5 rue de test", zone: "Paris intra-muros",
+    capacity: 20, priceCents: 3000
+  });
+  async function pendingRestaurant(name: string) {
+    const owner = await participant(name);
+    const { body: restaurant } = await api<{ id: string }>("/restaurants/apply", { method: "POST", body: JSON.stringify({ name: `${name} Resto`, managerName: name, siret: "12345678900019" }) }, owner.token);
+    await addRestaurantPhoto(owner.token);
+    return { ...owner, restaurantId: restaurant.id };
+  }
+  const sendCheckoutWebhook = async (subscriptionId: string, customerId: string, restaurantId: string, planId: string) => {
+    const payload = JSON.stringify({ id: `evt_test_${Date.now()}_${Math.random()}`, object: "event", type: "checkout.session.completed", data: { object: { id: "cs_test_onboarding", object: "checkout.session", subscription: subscriptionId, customer: customerId, metadata: { restaurantId, planId, billingPeriod: "MONTHLY" } } } });
+    return fetch(`${API_URL}/webhooks/stripe`, { method: "POST", headers: { "Content-Type": "application/json", "Stripe-Signature": signStripeWebhook(payload).header }, body: payload });
+  };
+
+  it("premier brouillon sans droits restaurateur, puis validation automatique après un vrai paiement, sans doublon", async () => {
+    const owner = await pendingRestaurant("OnboardOk");
+    const slug = `premier-diner-${Date.now()}`;
+    const created = await api<{ id: string; status: string }>("/restaurants/me/onboarding-event", { method: "POST", body: JSON.stringify(eventBody(slug)) }, owner.token);
+    expect(created.status).toBe(201);
+    createdEventIds.push(created.body.id);
+    expect(created.body.status).toBe("DRAFT");
+    // Un seul brouillon d'onboarding, modifiable.
+    expect((await api("/restaurants/me/onboarding-event", { method: "POST", body: JSON.stringify(eventBody(`${slug}-2`)) }, owner.token)).status).toBe(409);
+    expect((await api("/restaurants/me/onboarding-event", { method: "PUT", body: JSON.stringify({ ...eventBody(slug), capacity: 24 }) }, owner.token)).status).toBe(200);
+    // Aucune autre fonction restaurateur avant le paiement.
+    expect((await api("/admin/events", {}, owner.token)).status).toBe(403);
+    expect((await api("/admin/events", { method: "POST", body: JSON.stringify(eventBody(`${slug}-3`)) }, owner.token)).status).toBe(403);
+    expect((await api(`/admin/events/${created.body.id}/submit-for-review`, { method: "POST" }, owner.token)).status).toBe(403);
+    expect((await api("/admin/staff", {}, owner.token)).status).toBe(403);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: owner.userId } })).role).toBe("PARTICIPANT");
+
+    const standard = await prisma.plan.findFirstOrThrow({ where: { name: "Standard", active: true } });
+    const customer = await stripe.customers.create({ name: "Onboarding test", payment_method: "pm_card_visa", invoice_settings: { default_payment_method: "pm_card_visa" }, metadata: { restaurantId: owner.restaurantId } });
+    const subscription = await stripe.subscriptions.create({ customer: customer.id, items: [{ price: standard.stripePriceMonthlyId! }], metadata: { restaurantId: owner.restaurantId } });
+    expect((await sendCheckoutWebhook(subscription.id, customer.id, owner.restaurantId, standard.id)).status).toBe(200);
+    // Webhook rejoué : aucune seconde transition.
+    expect((await sendCheckoutWebhook(subscription.id, customer.id, owner.restaurantId, standard.id)).status).toBe(200);
+
+    expect((await prisma.restaurant.findUniqueOrThrow({ where: { id: owner.restaurantId } })).status).toBe("APPROVED");
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: owner.userId } })).role).toBe("ORGANIZER");
+    // Le premier brouillon attend la validation de l'équipe : jamais publié automatiquement.
+    expect((await prisma.event.findUniqueOrThrow({ where: { id: created.body.id } })).status).toBe("PENDING_REVIEW");
+    expect(await prisma.auditLog.count({ where: { action: "AUTO_APPROVE_RESTAURANT_AFTER_PAYMENT", entityId: owner.restaurantId } })).toBe(1);
+    expect(await prisma.notification.count({ where: { userId: owner.userId, title: "Établissement validé" } })).toBe(1);
+    await stripe.subscriptions.cancel(subscription.id);
+  }, 60_000);
+
+  it("paiement non abouti : aucune validation automatique", async () => {
+    const owner = await pendingRestaurant("OnboardKo");
+    const standard = await prisma.plan.findFirstOrThrow({ where: { name: "Standard", active: true } });
+    const customer = await stripe.customers.create({ name: "Onboarding refusé", metadata: { restaurantId: owner.restaurantId } });
+    // Sans moyen de paiement valide : l'abonnement reste « incomplete » chez Stripe.
+    const subscription = await stripe.subscriptions.create({ customer: customer.id, items: [{ price: standard.stripePriceMonthlyId! }], payment_behavior: "default_incomplete", metadata: { restaurantId: owner.restaurantId } });
+    expect(subscription.status).toBe("incomplete");
+    expect((await sendCheckoutWebhook(subscription.id, customer.id, owner.restaurantId, standard.id)).status).toBe(200);
+    expect((await prisma.restaurant.findUniqueOrThrow({ where: { id: owner.restaurantId } })).status).toBe("PENDING");
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: owner.userId } })).role).toBe("PARTICIPANT");
+    await stripe.subscriptions.cancel(subscription.id).catch(() => {});
+  }, 60_000);
+
+  // Revue de sécurité v2 : la validation automatique exige un vrai encaissement et une première demande.
+  it("essai gratuit sans débit : aucune validation automatique", async () => {
+    const owner = await pendingRestaurant("OnboardTrial");
+    const standard = await prisma.plan.findFirstOrThrow({ where: { name: "Standard", active: true } });
+    const customer = await stripe.customers.create({ name: "Onboarding essai", payment_method: "pm_card_visa", invoice_settings: { default_payment_method: "pm_card_visa" }, metadata: { restaurantId: owner.restaurantId } });
+    const subscription = await stripe.subscriptions.create({ customer: customer.id, items: [{ price: standard.stripePriceMonthlyId! }], trial_period_days: 14, metadata: { restaurantId: owner.restaurantId } });
+    expect(subscription.status).toBe("trialing");
+    expect((await sendCheckoutWebhook(subscription.id, customer.id, owner.restaurantId, standard.id)).status).toBe(200);
+    expect((await prisma.restaurant.findUniqueOrThrow({ where: { id: owner.restaurantId } })).status).toBe("PENDING");
+    await stripe.subscriptions.cancel(subscription.id).catch(() => {});
+  }, 60_000);
+
+  it("après un refus, une nouvelle demande payée repasse toujours par l’équipe ; une suspension ne se lève pas seule", async () => {
+    const owner = await pendingRestaurant("OnboardRefuse");
+    const admin = await adminToken();
+    expect((await api(`/admin/restaurants/${owner.restaurantId}/decision`, { method: "POST", body: JSON.stringify({ accept: false, reason: "Dossier incomplet" }) }, admin)).status).toBeLessThan(300);
+    expect((await api("/restaurants/apply", { method: "POST", body: JSON.stringify({ name: "OnboardRefuse Resto", managerName: "OnboardRefuse", siret: "12345678900019" }) }, owner.token)).status).toBe(201);
+    const standard = await prisma.plan.findFirstOrThrow({ where: { name: "Standard", active: true } });
+    const customer = await stripe.customers.create({ name: "Onboarding après refus", payment_method: "pm_card_visa", invoice_settings: { default_payment_method: "pm_card_visa" }, metadata: { restaurantId: owner.restaurantId } });
+    const subscription = await stripe.subscriptions.create({ customer: customer.id, items: [{ price: standard.stripePriceMonthlyId! }], metadata: { restaurantId: owner.restaurantId } });
+    expect(subscription.status).toBe("active");
+    expect((await sendCheckoutWebhook(subscription.id, customer.id, owner.restaurantId, standard.id)).status).toBe(200);
+    expect((await prisma.restaurant.findUniqueOrThrow({ where: { id: owner.restaurantId } })).status).toBe("PENDING");
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: owner.userId } })).role).toBe("PARTICIPANT");
+    await stripe.subscriptions.cancel(subscription.id).catch(() => {});
+
+    await prisma.restaurant.update({ where: { id: owner.restaurantId }, data: { status: "SUSPENDED" } });
+    expect((await api("/restaurants/apply", { method: "POST", body: JSON.stringify({ name: "OnboardRefuse Resto", managerName: "OnboardRefuse", siret: "12345678900019" }) }, owner.token)).status).toBe(403);
+  }, 60_000);
+
+  it("un seul brouillon même sous requêtes simultanées, et des dates invalides donnent un 400", async () => {
+    const owner = await pendingRestaurant("OnboardConc");
+    const results = await Promise.all(Array.from({ length: 5 }, (_, i) => api<{ id?: string }>("/restaurants/me/onboarding-event", { method: "POST", body: JSON.stringify(eventBody(`conc-${Date.now()}-${i}`)) }, owner.token)));
+    expect(results.filter(r => r.status === 201)).toHaveLength(1);
+    createdEventIds.push(...results.flatMap(r => r.body.id ? [r.body.id] : []));
+    expect(await prisma.event.count({ where: { controllerRestaurantId: owner.restaurantId } })).toBe(1);
+    const other = await pendingRestaurant("OnboardDates");
+    expect((await api("/restaurants/me/onboarding-event", { method: "POST", body: JSON.stringify({ ...eventBody(`dates-${Date.now()}`), startsAt: "abc" }) }, other.token)).status).toBe(400);
+    expect((await api("/restaurants/me/onboarding-event", { method: "POST", body: JSON.stringify({ ...eventBody(`dates-${Date.now()}`), endsAt: day(29).toISOString() }) }, other.token)).status).toBe(400);
+  }, 60_000);
+});

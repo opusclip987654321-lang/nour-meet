@@ -146,60 +146,8 @@ describe("entretien global : porte d’entrée obligatoire avant toute inscripti
   });
 });
 
-describe("reprogrammation d’un entretien par l’administration, avec notification (§13/§14)", () => {
-  it("libère l’ancien créneau et notifie le participant du nouveau", async () => {
-    const participant = await directParticipant("RescheduleTest");
-    createdUserIds.push(participant.userId);
-    const { body: interview } = await api<{ id: string }>("/me/global-interview", { method: "POST", body: JSON.stringify({ motivation: "Motivation suffisamment longue pour passer la validation du formulaire soumis." }) }, participant.token);
-
-    const base = Date.now() + 5 * 86_400_000;
-    const [slotA, slotB] = await Promise.all([
-      prisma.screeningCall.create({ data: { startsAt: new Date(base), endsAt: new Date(base + 900_000) } }),
-      prisma.screeningCall.create({ data: { startsAt: new Date(base + 3_600_000), endsAt: new Date(base + 4_500_000) } })
-    ]);
-    await api(`/applications/${interview.id}/schedule`, { method: "POST", body: JSON.stringify({ slotId: slotA.id }) }, participant.token);
-
-    const admin = await adminToken();
-    const reschedule = await api<{ rescheduled: boolean; slot: { id: string } }>(`/admin/global-interviews/${interview.id}/reschedule`, { method: "POST", body: JSON.stringify({ slotId: slotB.id }) }, admin);
-    expect(reschedule.status).toBe(200);
-    expect(reschedule.body.slot.id).toBe(slotB.id);
-
-    const freedSlot = await prisma.screeningCall.findUniqueOrThrow({ where: { id: slotA.id } });
-    expect(freedSlot.applicationId).toBeNull();
-    const claimedSlot = await prisma.screeningCall.findUniqueOrThrow({ where: { id: slotB.id } });
-    expect(claimedSlot.applicationId).toBe(interview.id);
-
-    const notification = await prisma.notification.findFirstOrThrow({ where: { userId: participant.userId, title: "Entretien reprogrammé" } });
-    expect(notification).toBeTruthy();
-    await prisma.screeningCall.deleteMany({ where: { id: { in: [slotA.id, slotB.id] } } });
-  });
-
-  it("refuse de reprogrammer sur un créneau déjà pris par quelqu’un d’autre", async () => {
-    const participant = await directParticipant("RescheduleConflict");
-    createdUserIds.push(participant.userId);
-    const other = await directParticipant("RescheduleConflictOther");
-    createdUserIds.push(other.userId);
-    const { body: interview } = await api<{ id: string }>("/me/global-interview", { method: "POST", body: JSON.stringify({ motivation: "Motivation suffisamment longue pour passer la validation du formulaire soumis." }) }, participant.token);
-    const { body: otherInterview } = await api<{ id: string }>("/me/global-interview", { method: "POST", body: JSON.stringify({ motivation: "Motivation suffisamment longue pour passer la validation du formulaire soumis." }) }, other.token);
-
-    const base = Date.now() + 6 * 86_400_000;
-    const [mySlot, takenSlot] = await Promise.all([
-      prisma.screeningCall.create({ data: { startsAt: new Date(base), endsAt: new Date(base + 900_000) } }),
-      prisma.screeningCall.create({ data: { startsAt: new Date(base + 3_600_000), endsAt: new Date(base + 4_500_000) } })
-    ]);
-    await api(`/applications/${interview.id}/schedule`, { method: "POST", body: JSON.stringify({ slotId: mySlot.id }) }, participant.token);
-    await api(`/applications/${otherInterview.id}/schedule`, { method: "POST", body: JSON.stringify({ slotId: takenSlot.id }) }, other.token);
-
-    const admin = await adminToken();
-    const reschedule = await api(`/admin/global-interviews/${interview.id}/reschedule`, { method: "POST", body: JSON.stringify({ slotId: takenSlot.id }) }, admin);
-    expect(reschedule.status).toBe(409);
-
-    // Le créneau d'origine n'a jamais été libéré puisque la reprogrammation a échoué (transaction annulée).
-    const untouchedSlot = await prisma.screeningCall.findUniqueOrThrow({ where: { id: mySlot.id } });
-    expect(untouchedSlot.applicationId).toBe(interview.id);
-    await prisma.screeningCall.deleteMany({ where: { id: { in: [mySlot.id, takenSlot.id] } } });
-  });
-});
+// Reprogrammation d'un entretien (§13/§14) : couverte avec le calendrier ouvert par défaut (v2 §11)
+// dans interview-calendar.test.ts.
 
 describe("atomicité des quotas sous concurrence réelle", () => {
   it("n’accepte jamais deux paiements simultanés pour la dernière place d’une catégorie", async () => {

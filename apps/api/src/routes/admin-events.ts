@@ -1,4 +1,4 @@
-import { EVENT_CATEGORY_NAMES, EVENT_ZONES, eventRequiresScreening, suggestedFlowForCategory } from "@nour/shared";
+import { eventRequiresScreening } from "@nour/shared";
 import { EventStatus, PaymentStatus, QuotaCategory, TicketStatus, UserRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -15,6 +15,9 @@ import { notify } from "../services/notify.js";
 import { claimReservation } from "../services/reservations.js";
 import { getSetting } from "../settings.js";
 import { retireDemoEventsIfRealOnesPublished } from "../services/demo-events.js";
+import { shareEventOnInstagram } from "../services/instagram.js";
+import { instagramConfig } from "../services/social-config.js";
+import { eventCreateData, eventCreateSchema, perksInput } from "../services/event-drafts.js";
 
 app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
@@ -94,12 +97,8 @@ app.post("/admin/waitlist/:id/promote", { preHandler: roles(UserRole.ADMIN) }, a
   return result.reservation;
 });
 
-const perksInput = { includesDrink: z.boolean().default(false), includesStarter: z.boolean().default(false), includesMain: z.boolean().default(false), includesDessert: z.boolean().default(false), perksDescription: z.string().max(500).optional() };
 app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
-  const input = z.object({ venueRestaurantId: z.string().optional(), title: z.string().min(3), slug: z.string().regex(/^[a-z0-9-]+$/), category: z.enum(EVENT_CATEGORY_NAMES as [string, ...string[]]), flow: z.enum(["SCREENING", "DIRECT"]).optional(), description: z.string().min(20), startsAt: z.string(), endsAt: z.string(), district: z.string(), address: z.string(), zone: z.enum(EVENT_ZONES as [string, ...string[]]), minAge: z.number().int().min(18).max(99).optional(), maxAge: z.number().int().min(18).max(99).optional(), capacity: z.number().int().min(5).max(500), priceCents: z.number().int().min(0), publish: z.boolean().default(false), minParticipants: z.number().int().min(1).optional(), minParticipantsDeadline: z.string().optional(), ...perksInput })
-    // Minimum facultatif, mais la date limite devient obligatoire dès qu'un minimum est défini (§10).
-    .refine(v => !v.minParticipants || v.minParticipantsDeadline, { message: "Une date limite de décision est obligatoire dès qu'un minimum de participants est défini", path: ["minParticipantsDeadline"] })
-    .parse(request.body);
+  const input = eventCreateSchema.parse(request.body);
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
   // Un restaurateur ne prépare jamais qu'un brouillon : seul le super-admin peut publier (POST /admin/events/:id/review-decision).
@@ -110,17 +109,11 @@ app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER
     if (!venue || venue.status !== "APPROVED") return reply.code(400).send({ error: "Restaurant partenaire introuvable ou non approuvé" });
     venueRestaurantId = venue.id;
   }
-  const event = await prisma.event.create({ data: {
-    title: input.title, slug: input.slug, category: input.category, flow: (token.role === UserRole.ADMIN ? input.flow : undefined) ?? suggestedFlowForCategory(input.category), description: input.description,
-    startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), district: input.district, address: input.address, zone: input.zone,
-    capacity: input.capacity, priceCents: input.priceCents,
-    includesDrink: input.includesDrink, includesStarter: input.includesStarter, includesMain: input.includesMain, includesDessert: input.includesDessert, perksDescription: input.perksDescription,
-    controllerRestaurantId: restaurant?.id ?? null,
-    venueRestaurantId,
-    minParticipants: input.minParticipants, minParticipantsDeadline: input.minParticipantsDeadline ? new Date(input.minParticipantsDeadline) : undefined,
-    minAge: input.minAge, maxAge: input.maxAge,
+  const event = await prisma.event.create({ data: eventCreateData(input, {
+    controllerRestaurantId: restaurant?.id ?? null, venueRestaurantId,
+    flow: token.role === UserRole.ADMIN ? input.flow : undefined,
     status: token.role === UserRole.ADMIN && input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT
-  } });
+  }) });
   await audit(currentId(request), "CREATE_EVENT", "Event", event.id);
   if (event.status === EventStatus.PUBLISHED) await retireDemoEventsIfRealOnesPublished(prisma).catch(err => request.log.error(err, "Retrait des soirées de démonstration échoué"));
   return event;
@@ -282,7 +275,29 @@ app.post("/admin/events/:id/review-decision", { preHandler: roles(UserRole.ADMIN
   await audit(currentId(request), accept ? "APPROVE_EVENT" : "REJECT_EVENT", "Event", id, { note, quotaConsumedNow });
   // Le retrait des démonstrations ne doit jamais faire échouer une publication déjà enregistrée.
   if (accept && !event.isDemo) await retireDemoEventsIfRealOnesPublished(prisma).catch(err => request.log.error(err, "Retrait des soirées de démonstration échoué"));
+  // v2 §14 : un événement restaurateur réellement publié part sur Instagram, en arrière-plan — la
+  // réponse n'attend jamais Instagram, et un échec n'annule jamais la publication sur Nūr Meet.
+  const instagram = instagramConfig;
+  if (accept && instagram && event.controllerRestaurant && !event.isDemo) {
+    void shareEventOnInstagram(prisma, instagram, event.id, defaultCategoryImage(event.category))
+      .then(outcome => request.log.info({ eventId: event.id, outcome }, "Publication Instagram de l’événement"))
+      .catch(err => request.log.warn({ eventId: event.id, err: (err as Error).message }, "Publication Instagram de l’événement échouée"));
+  }
   return updated;
+});
+// Nouvel essai manuel après un échec (jamais une seconde publication : instagramMediaId + verrou).
+app.post("/admin/events/:id/instagram", { preHandler: roles(UserRole.ADMIN), config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  if (!instagramConfig) return reply.code(503).send({ error: "Instagram n’est pas configuré sur ce serveur." });
+  const event = await prisma.event.findUniqueOrThrow({ where: { id } });
+  try {
+    const result = await shareEventOnInstagram(prisma, instagramConfig, id, defaultCategoryImage(event.category));
+    if (result === "NOT_ELIGIBLE") return reply.code(409).send({ error: "Seul un événement restaurateur publié, à venir et hors démonstration peut être partagé sur Instagram." });
+    await audit(currentId(request), "SHARE_EVENT_INSTAGRAM", "Event", id, { result });
+    return { result };
+  } catch (err) {
+    return reply.code(502).send({ error: `Instagram a refusé la publication : ${(err as Error).message}` });
+  }
 });
 // Action explicite d'un administrateur (§8.2) : la seule façon de rendre un quota déjà consommé,
 // jamais automatique (une annulation ou une suppression ne le rend pas seule).

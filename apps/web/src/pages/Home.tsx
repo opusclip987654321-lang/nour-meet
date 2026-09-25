@@ -6,6 +6,8 @@ import { api } from "../api";
 import { Picture } from "../components/brand";
 import { ContactExplainer, InterviewExplainer } from "../components/explainers";
 import { Layout } from "../components/Layout";
+import { ShareSiteButton } from "../components/ShareSite";
+import { useAuth } from "../auth";
 import { EventCard, availabilityLabel, initials } from "../components/ui";
 import { imgUrl, money } from "../lib/format";
 import { SITE_NAME, SITE_URL, absoluteUrl, useSeo } from "../lib/seo";
@@ -67,6 +69,7 @@ const TRUST = [
 ];
 
 export function Home() {
+  const {user}=useAuth();
   const [events,setEvents]=useState<PublicEvent[]|null>(null);
   useEffect(()=>{api<Paginated<PublicEvent>>("/events?pageSize=6").then(r=>setEvents(r.items)).catch(()=>setEvents([]))},[]);
   // Organisation, site et FAQ : uniquement des informations visibles sur la page ou dans le pied de page.
@@ -193,8 +196,8 @@ export function Home() {
     <section className="final-cta" aria-labelledby="final-title">
       <div className="final-cta-inner">
         <h2 id="final-title">Votre prochaine rencontre commence à table.</h2>
-        <p>Créez votre compte en deux minutes, sans mot de passe.</p>
-        <div className="hero-actions"><Link className="button accent" to="/login">Créer mon compte</Link><Link className="button on-night" to="/events">Voir les soirées</Link></div>
+        <p>{user?"Faites découvrir Nūr Meet à une personne qui pourrait aimer ces soirées.":"Créez votre compte en deux minutes, sans mot de passe."}</p>
+        <div className="hero-actions">{user?<ShareSiteButton className="button accent"/>:<Link className="button accent" to="/login">Créer mon compte</Link>}<Link className="button on-night" to="/events">Voir les soirées</Link></div>
       </div>
     </section>
   </Layout>;

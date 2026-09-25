@@ -67,7 +67,7 @@ app.get("/llms.txt", async (_request, reply) => {
     "",
     "> Plateforme française de soirées en petit comité dans des restaurants partenaires à Paris et en Île-de-France : speed dating avec entretien de validation préalable, et soirées networking en accès direct. Service réservé aux personnes majeures.",
     "",
-    "Fonctionnement : on choisit une soirée, on réserve et paie sa place en ligne (paiement par carte via Stripe), on reçoit un billet avec QR code. Pour les soirées de rencontre, un court entretien de validation du profil a lieu une seule fois. Après la soirée, un échange ne s'ouvre que si les deux personnes l'acceptent. Annulation gratuite jusqu'à 24 heures avant le début, avec remboursement intégral.",
+    "Fonctionnement : on choisit une soirée, on réserve et paie sa place en ligne (paiement par carte via Stripe), on reçoit un billet avec QR code. Pour les soirées de speed dating, un entretien téléphonique de 15 minutes avec un membre de l'équipe valide le profil, une seule fois ; les soirées networking n'en demandent pas. Après la soirée, un échange dans l'application mobile ne s'ouvre que si les deux personnes l'acceptent. Annulation gratuite jusqu'à 24 heures avant le début, avec remboursement intégral.",
     "",
     "## Pages principales",
     `- [Prochaines soirées](${o}/events) : toutes les soirées à venir, avec lieu, date, prix et prestations comprises`,

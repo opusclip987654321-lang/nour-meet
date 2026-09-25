@@ -110,7 +110,7 @@ const initials = (name?: string | null) => {
 export function Avatar({ name, size = 48, photoUrl, verified }: { name: string; size?: number; photoUrl?: string | null; verified?: boolean }) {
   const img = photoUrl
     ? <Image source={{ uri: imgUrl(photoUrl) }} style={{ width: size, height: size, borderRadius: size / 2 }} />
-    : <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: T.night, alignItems: "center", justifyContent: "center" }}><Text style={{ fontFamily: F.textBold, color: T.onNight, fontSize: size * 0.34 }}>{initials(name)}</Text></View>;
+    : <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: T.night, alignItems: "center", justifyContent: "center" }}><Text style={{ fontFamily: F.textBold, color: T.onNight, fontSize: size * 0.34, lineHeight: Math.round(size * 0.34 * 1.15), textAlign: "center", includeFontPadding: false, textAlignVertical: "center" }}>{initials(name)}</Text></View>;
   if (!verified) return img;
   return <View>{img}<View style={{ position: "absolute", bottom: -2, right: -2, backgroundColor: T.success, borderRadius: 10, width: 20, height: 20, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: T.surface }}><Check size={11} color={T.onNight} strokeWidth={3} /></View></View>;
 }

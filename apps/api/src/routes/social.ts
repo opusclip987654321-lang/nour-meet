@@ -7,6 +7,7 @@ import { eventsOverlap } from "../domain.js";
 import { cachedQrDataUrl } from "../qr-cache.js";
 import { profileAge } from "../services/account.js";
 import { audit } from "../services/audit.js";
+import { defaultCategoryImage } from "../services/events.js";
 import { auth, currentId } from "../services/auth.js";
 import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
@@ -151,7 +152,15 @@ app.get("/loyalty", { preHandler: auth }, async (request) => {
   return { balance: entries.reduce((n, e) => n + e.points, 0), entries };
 });
 
-app.get("/me/alternative-offers", { preHandler: auth }, async (request) => prisma.alternativeOffer.findMany({ where: { userId: currentId(request) }, include: { alternativeEvent: true, originalEvent: true }, orderBy: { createdAt: "desc" } }));
+// Soirées proposées (v2 §10) : seulement ce qu'affiche la carte (photo, titre, date, quartier, prix),
+// avec la même image par défaut que le reste de l'espace personnel — jamais le marquage démo, la note de
+// relecture ni l'adresse exacte (elle figure sur le billet une fois la place confirmée).
+const offerEventSelect = { id: true, slug: true, title: true, startsAt: true, district: true, priceCents: true, category: true, imageUrl: true } as const;
+app.get("/me/alternative-offers", { preHandler: auth }, async (request) => {
+  const offers = await prisma.alternativeOffer.findMany({ where: { userId: currentId(request) }, include: { alternativeEvent: { select: offerEventSelect }, originalEvent: { select: offerEventSelect } }, orderBy: { createdAt: "desc" } });
+  const withImage = <E extends { imageUrl: string | null; category: string }>(e: E) => ({ ...e, imageUrl: e.imageUrl ?? defaultCategoryImage(e.category) });
+  return offers.map(o => ({ ...o, alternativeEvent: withImage(o.alternativeEvent), originalEvent: withImage(o.originalEvent) }));
+});
 
 app.post("/alternative-offers/:id/respond", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);

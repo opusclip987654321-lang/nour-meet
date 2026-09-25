@@ -47,7 +47,7 @@ function CodeCard() {
 
 const CONTACT_STEPS = [
   { icon: QrCode, title: "Montrez votre QR code", text: "Chaque participant a son code personnel, networking compris." },
-  { icon: ScanLine, title: "L’autre le scanne ou le saisit", text: "Avec l’application, ou en tapant le code sur le site." },
+  { icon: ScanLine, title: "L’autre le scanne ou le saisit", text: "Dans l’application mobile Nūr Meet." },
   { icon: Send, title: "Une demande vous arrive", text: "Vous voyez qui vous écrit, et vous décidez." },
   { icon: MessageCircle, title: "Vous acceptez : on se reparle", text: "La conversation s’ouvre, sans échanger vos numéros." }
 ];
@@ -70,7 +70,7 @@ export function ContactExplainer({ headingLevel = 2 }: { headingLevel?: 2 | 3 })
         <div>
           <h3>Le lendemain, la conversation continue</h3>
           <ul className="check-list">
-            <li><CheckCircle2 size={20} aria-hidden="true"/><span>Vos échanges restent dans votre espace, sur le site et dans l’application.</span></li>
+            <li><CheckCircle2 size={20} aria-hidden="true"/><span>Demandes et conversations se retrouvent dans l’application mobile.</span></li>
             <li><CheckCircle2 size={20} aria-hidden="true"/><span>Votre numéro et votre e-mail ne sont jamais montrés.</span></li>
             <li><CheckCircle2 size={20} aria-hidden="true"/><span>Sans accord, rien ne s’ouvre, et aucune relance n’est possible.</span></li>
           </ul>

@@ -3,6 +3,7 @@ import type { PublicEvent } from "@nour/shared";
 import { FormEvent, Suspense, lazy, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CalendarDays, Clock, Info, MapPin, ShieldCheck, Store, Ticket, Users, UserCheck } from "lucide-react";
+import { AltOfferCard } from "../components/AltOfferCard";
 import { ProgressiveBlur } from "../components/brand";
 import { PhoneVerification } from "../components/PhoneVerification";
 import { api } from "../api";
@@ -255,7 +256,7 @@ export function EventDetail() {
         <div className="booking-price">{event.priceTiers.length>0?<div className="quota-rows">{event.priceTiers.map(t=><div key={t.category} className="quota-row"><span>{t.category==="HOMME"?"Hommes":"Femmes"}</span><b>{money(t.amountCents)}</b></div>)}</div>:<><strong>{priceText}</strong>{!free&&<span>par personne, TTC</span>}</>}</div>
         <div className="booking-row"><span>Disponibilité</span><b>{availabilityLabel(event.availability)}</b></div>
         {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
-    {altOffers.map(altOffer=><div key={altOffer.id} className="alt-offer"><span className="eyebrow">Événement alternatif proposé</span><h3>{altOffer.alternativeEvent.title}</h3><p>{dateTime(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</p><p><b>{altOffer.alternativeEvent.priceCents===0?"Gratuit":money(altOffer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busy} onClick={()=>respondAltOffer(altOffer.id,true)}>Accepter</button><button className="button secondary" disabled={busy} onClick={()=>respondAltOffer(altOffer.id,false)}>Refuser</button></div></div>)}
+    {altOffers.map(altOffer=><AltOfferCard key={altOffer.id} offer={altOffer} busy={busy} onRespond={accept=>respondAltOffer(altOffer.id,accept)}/>)}
     {!user?<Link className="button full" to="/login">Se connecter pour vous inscrire</Link>
     :loadingApplication?<div className="calendar-state"><div className="spinner small"/><span>Chargement…</span></div>
     :application?<>

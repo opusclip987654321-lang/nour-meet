@@ -1855,3 +1855,32 @@ a.next-card:hover {
   color: var(--ink-3);
   font-size: var(--fs-xs);
 }
+
+/* Soirée proposée (v2 §10) : petite photo à gauche, décision en dessous */
+.alt-offer {
+  grid-template-columns: 72px minmax(0, 1fr);
+  column-gap: var(--s-3);
+  align-items: start;
+}
+
+.alt-offer-photo {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  background: var(--surface-2);
+}
+
+.alt-offer-body {
+  display: grid;
+  gap: var(--s-1);
+  min-width: 0;
+}
+
+.alt-offer-body h3 {
+  margin: 0;
+}
+
+.alt-offer .decision-buttons {
+  grid-column: 1 / -1;
+}

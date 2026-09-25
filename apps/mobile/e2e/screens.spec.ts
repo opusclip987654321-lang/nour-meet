@@ -1,4 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { devices, expect, test, type Page } from "@playwright/test";
+// Préparation en base partagée avec les e2e du site (soirée commune, remise à zéro des contacts).
+import { forgetContacts, forgetSharedEvent, shareAnEvent } from "../../web/tests/e2e/helpers.js";
 
 // Comptes de démonstration du seed (connexion SMS simulée, code 123456).
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -89,4 +91,39 @@ test("restaurateur : crée un brouillon complet depuis l'application puis le sou
   await page.getByText("Soumettre à validation").click();
   await expect(page.getByText("Soirée soumise à validation.")).toBeVisible();
   await expect(page.getByText("En attente de validation", { exact: true })).toBeVisible();
+});
+
+// Mise en relation (décision v2 §3) : la messagerie vit dans l'application. Deux personnes inscrites à
+// une même soirée : code personnel saisi, demande, acceptation, puis message — entièrement dans l'app.
+test.describe("messagerie dans l'application", () => {
+  const HOMME = "+33600000020", FEMME = "+33600000022";
+  test.beforeAll(async () => { await forgetContacts(HOMME, FEMME); await shareAnEvent(HOMME, FEMME); });
+  test.afterAll(async () => { await forgetContacts(HOMME, FEMME); await forgetSharedEvent(); });
+
+  test("code personnel, demande, acceptation puis message", async ({ browser }) => {
+    const femmeToken = await tokenFor(FEMME);
+    const { code } = await (await fetch(`${API_URL}/me/share-qr`, { headers: { Authorization: `Bearer ${femmeToken}` } })).json();
+
+    const homme = await (await browser.newContext({ ...devices["Pixel 7"] })).newPage();
+    await openAs(homme, HOMME);
+    await tab(homme, "Scanner");
+    await homme.getByLabel("Ou saisir le code").fill(code);
+    await homme.getByText("Rechercher le profil").click();
+    await homme.getByText("Envoyer une demande de contact").click();
+    await expect(homme.getByText(/Demande envoyée/)).toBeVisible();
+
+    const femme = await (await browser.newContext({ ...devices["Pixel 7"] })).newPage();
+    await openAs(femme, FEMME);
+    await tab(femme, "Messages");
+    await femme.getByText("Accepter", { exact: true }).click();
+    await femme.getByRole("button", { name: /Homme Validé/ }).click();
+    await femme.getByLabel("Votre message").fill("Ravie de vous avoir rencontré !");
+    await femme.getByLabel("Envoyer").click();
+    await expect(femme.getByText("Ravie de vous avoir rencontré !")).toBeVisible();
+
+    await homme.reload();
+    await tab(homme, "Messages");
+    await homme.getByRole("button", { name: /Femme Validée/ }).click();
+    await expect(homme.getByText("Ravie de vous avoir rencontré !")).toBeVisible();
+  });
 });

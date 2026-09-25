@@ -1,21 +1,25 @@
-import { MINIMUM_AGE, isAdult } from "@nour/shared";
+import { MINIMUM_AGE, isAdult, normalizeInterests } from "@nour/shared";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { File, Paths } from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import * as Sharing from "expo-sharing";
-import { LogOut } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { Camera, LogOut } from "lucide-react-native";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, Image, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { api } from "../api";
+import { InterestPicker } from "../components/InterestPicker";
 import { PhoneVerification } from "../components/PhoneVerification";
+import { Toast, type ToastMessage } from "../components/Toast";
 import { Avatar, Badge, Button, Chip, ConsentCheck, Field, Notice, legalLink } from "../components/ui";
 import { R, S, T, s } from "../theme";
 
 // Profil, numéro vérifié, code personnel et droits RGPD — mêmes règles que le site (âge minimum, CGU,
 // export, suppression par anonymisation).
 export function EspaceProfile({ user, onSaved, onLogout }: { user: any; onSaved: () => void; onLogout: () => void }) {
-  const [form, setForm] = useState({ displayName: user.displayName ?? "", email: user.email ?? "", birthDate: user.profile?.birthDate ? String(user.profile.birthDate).slice(0, 10) : "", city: user.profile?.city ?? "", profession: user.profile?.profession ?? "", interests: (user.profile?.interests ?? []).join(", "), bio: user.profile?.bio ?? "", quotaCategory: user.profile?.quotaCategory ?? "" });
-  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null), [busy, setBusy] = useState(false), [photoBusy, setPhotoBusy] = useState(false);
+  const [form, setForm] = useState({ displayName: user.displayName ?? "", email: user.email ?? "", birthDate: user.profile?.birthDate ? String(user.profile.birthDate).slice(0, 10) : "", city: user.profile?.city ?? "", profession: user.profile?.profession ?? "", interests: normalizeInterests(user.profile?.interests ?? []), bio: user.profile?.bio ?? "", quotaCategory: user.profile?.quotaCategory ?? "" });
+  const [toast, setToast] = useState<ToastMessage | null>(null), [busy, setBusy] = useState(false), [photoBusy, setPhotoBusy] = useState(false);
+  const setMessage = (m: { kind: "success" | "error"; text: string } | null) => { if (m) setToast({ ...m, id: Date.now() }); };
+  const clearToast = useCallback(() => setToast(null), []);
   const [confirmingDeletion, setConfirmingDeletion] = useState(false), [showDatePicker, setShowDatePicker] = useState(false), [acceptCgu, setAcceptCgu] = useState(false);
   const [qr, setQr] = useState<any>(null);
   useEffect(() => { api("/me/share-qr").then(setQr).catch(() => {}); }, []);
@@ -24,7 +28,7 @@ export function EspaceProfile({ user, onSaved, onLogout }: { user: any; onSaved:
     if (!isAdult(form.birthDate)) { setMessage({ kind: "error", text: `Nūr Meet est réservé aux personnes de ${MINIMUM_AGE} ans et plus : renseignez votre date de naissance.` }); return; }
     if (!user.cguAccepted && !acceptCgu) { setMessage({ kind: "error", text: "Vous devez accepter les conditions générales d’utilisation pour continuer." }); return; }
     setBusy(true);
-    try { await api("/me/profile", { method: "PATCH", body: JSON.stringify({ ...form, email: form.email || null, quotaCategory: form.quotaCategory || null, interests: form.interests.split(",").map((x: string) => x.trim()).filter(Boolean), ...(acceptCgu ? { acceptCgu: true } : {}) }) }); setMessage({ kind: "success", text: "Profil enregistré." }); onSaved(); }
+    try { await api("/me/profile", { method: "PATCH", body: JSON.stringify({ ...form, email: form.email || null, quotaCategory: form.quotaCategory || null, interests: form.interests, ...(acceptCgu ? { acceptCgu: true } : {}) }) }); setMessage({ kind: "success", text: "Profil enregistré." }); onSaved(); }
     catch (e) { setMessage({ kind: "error", text: (e as Error).message }); }
     finally { setBusy(false); }
   };
@@ -35,7 +39,7 @@ export function EspaceProfile({ user, onSaved, onLogout }: { user: any; onSaved:
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
     setPhotoBusy(true); setMessage(null);
-    try { const body = new FormData(); body.append("file", { uri: asset.uri, name: asset.fileName ?? "photo.jpg", type: asset.mimeType ?? "image/jpeg" } as any); await api("/me/profile-photo", { method: "POST", body }); onSaved(); }
+    try { const body = new FormData(); body.append("file", { uri: asset.uri, name: asset.fileName ?? "photo.jpg", type: asset.mimeType ?? "image/jpeg" } as any); await api("/me/profile-photo", { method: "POST", body }); setMessage({ kind: "success", text: "Photo enregistrée." }); onSaved(); }
     catch (e) { setMessage({ kind: "error", text: (e as Error).message }); }
     finally { setPhotoBusy(false); }
   };
@@ -50,13 +54,14 @@ export function EspaceProfile({ user, onSaved, onLogout }: { user: any; onSaved:
   };
   const confirmDeletion = async () => { setBusy(true); try { await api("/me/request-deletion", { method: "POST" }); onLogout(); } catch (e) { setMessage({ kind: "error", text: (e as Error).message }); setBusy(false); } };
 
-  return <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+  return <View style={{ flex: 1 }}><ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
     <Text style={s.h1} accessibilityRole="header">Mon profil</Text>
-    {message && <Notice kind={message.kind}>{message.text}</Notice>}
     <View style={[s.panel, { alignItems: "center" }]}>
       <Avatar name={user.displayName} size={96} photoUrl={user.profile?.photoUrl} verified={!!user.profile?.validatedAt} />
       <View style={[s.row, { gap: S[5] }]}>
-        <Pressable onPress={pickPhoto} disabled={photoBusy} style={{ minHeight: 44, justifyContent: "center" }}><Text style={s.link}>{photoBusy ? "Envoi…" : user.profile?.photoUrl ? "Changer la photo" : "Ajouter une photo"}</Text></Pressable>
+        {user.profile?.photoUrl
+          ? <Pressable onPress={pickPhoto} disabled={photoBusy} style={{ minHeight: 44, justifyContent: "center" }}><Text style={s.link}>{photoBusy ? "Envoi…" : "Changer la photo"}</Text></Pressable>
+          : <Button title={photoBusy ? "Envoi…" : "Ajouter une photo"} icon={<Camera size={18} color={T.onNight} />} busy={photoBusy} onPress={pickPhoto} />}
         {user.profile?.photoUrl && <Pressable onPress={removePhoto} disabled={photoBusy} style={{ minHeight: 44, justifyContent: "center" }}><Text style={[s.link, { color: T.danger }]}>Retirer</Text></Pressable>}
       </View>
       <Text style={[s.meta, { textAlign: "center" }]}>JPEG, PNG ou WEBP · 5 Mo maximum. Visible par les personnes avec qui vous échangez.</Text>
@@ -68,7 +73,7 @@ export function EspaceProfile({ user, onSaved, onLogout }: { user: any; onSaved:
       {showDatePicker && <View><DateTimePicker value={form.birthDate ? new Date(form.birthDate) : new Date(2000, 0, 1)} mode="date" display={Platform.OS === "ios" ? "spinner" : "default"} maximumDate={new Date()} onChange={(_, date) => { if (Platform.OS === "android") setShowDatePicker(false); if (date) setForm({ ...form, birthDate: date.toISOString().slice(0, 10) }); }} />{Platform.OS === "ios" && <Button small variant="secondary" title="Terminé" onPress={() => setShowDatePicker(false)} />}</View>}
       <Field label="Ville" value={form.city} onChangeText={v => setForm({ ...form, city: v })} />
       <Field label="Profession" value={form.profession} onChangeText={v => setForm({ ...form, profession: v })} />
-      <Field label="Centres d’intérêt" value={form.interests} onChangeText={v => setForm({ ...form, interests: v })} placeholder="Voyages, Art, Lecture" />
+      <InterestPicker value={form.interests} onChange={interests => setForm({ ...form, interests })} />
       <View style={{ gap: S[1] }}><Text style={s.label}>Sexe</Text><View style={[s.row, { flexWrap: "wrap" }]}>{([["", "Non renseigné"], ["HOMME", "Homme"], ["FEMME", "Femme"]] as const).map(([value, label]) => <Chip key={value} label={label} active={form.quotaCategory === value} onPress={() => setForm({ ...form, quotaCategory: value })} />)}</View></View>
       <Field label="Biographie" multiline value={form.bio} onChangeText={v => setForm({ ...form, bio: v })} />
       {!user.cguAccepted && <ConsentCheck checked={acceptCgu} onChange={setAcceptCgu}>Je certifie avoir {MINIMUM_AGE} ans ou plus et j’accepte les {legalLink("conditions générales d’utilisation", "cgu")}. Mes données sont traitées conformément à la {legalLink("politique de confidentialité", "confidentialite")}.</ConsentCheck>}
@@ -86,5 +91,5 @@ export function EspaceProfile({ user, onSaved, onLogout }: { user: any; onSaved:
         : <><Text style={s.small}>Vos coordonnées et informations personnelles seront anonymisées ; les paiements déjà effectués restent conservés à des fins comptables et légales. Cette action est irréversible. Annulez d’abord toute réservation active pour un événement à venir.</Text><Button small variant="danger" title="Confirmer la suppression définitive" busy={busy} onPress={confirmDeletion} /></>}
     </View>
     <Button variant="ghost" title="Se déconnecter" icon={<LogOut size={18} color={T.ink} />} onPress={onLogout} />
-  </ScrollView>;
+  </ScrollView><Toast toast={toast} onDone={clearToast} /></View>;
 }
