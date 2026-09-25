@@ -290,3 +290,26 @@ describe("publication quotidienne du blog sans doublon (§3.1)", () => {
     }
   });
 });
+
+describe("photo d'établissement obligatoire (audit 2026-09-25)", () => {
+  it("approbation refusée sans photo, fichier effacé au retrait, galerie fermée après refus", async () => {
+    const applicant = await participant("PhotoResto");
+    const { body: restaurant } = await api<{ id: string }>("/restaurants/apply", { method: "POST", body: JSON.stringify({ name: "PhotoResto Resto", managerName: "PhotoResto", siret: "12345678900019" }) }, applicant.token);
+    const admin = await adminToken();
+    const refused = await api<{ error: string }>(`/admin/restaurants/${restaurant.id}/decision`, { method: "POST", body: JSON.stringify({ accept: true }) }, admin);
+    expect(refused.status).toBe(409);
+
+    const upload = await addRestaurantPhoto(applicant.token);
+    expect(upload.status).toBe(201);
+    const url = (upload.body as { id: string; url: string }).url;
+    expect((await fetch(`${API_URL}${url}`)).status).toBe(200);
+    const removed = await api(`/restaurants/me/photos/${(upload.body as { id: string }).id}`, { method: "DELETE" }, applicant.token);
+    expect(removed.status).toBe(204);
+    expect((await fetch(`${API_URL}${url}`)).status).toBe(404);
+
+    await addRestaurantPhoto(applicant.token);
+    const rejected = await api(`/admin/restaurants/${restaurant.id}/decision`, { method: "POST", body: JSON.stringify({ accept: false, reason: "Test" }) }, admin);
+    expect(rejected.status).toBe(200);
+    expect((await addRestaurantPhoto(applicant.token)).status).toBe(403);
+  });
+});

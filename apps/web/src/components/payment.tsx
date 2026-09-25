@@ -122,14 +122,14 @@ export function PayStandalone(){
   const [error, setError] = useState(false);
   const [done, setDone] = useState(false);
   const [amountCents, setAmountCents] = useState<number | null>(null);
-  const eventId = searchParams.get("eventId") ?? "";
+  const [eventId, setEventId] = useState("");
   useEffect(() => {
     const session = searchParams.get("session");
     if (!session) { setError(true); setReady(true); return; }
     api<{ token: string }>("/auth/payment-session-exchange", { method: "POST", body: JSON.stringify({ token: session }) })
       // Montant relu auprès du serveur, jamais depuis l'URL : un paramètre absent affichait « gratuite ».
-      .then(r => { setToken(r.token); return api<{ amountCents: number | null }>(`/events/${eventId}/my-application`); })
-      .then(a => { if (a.amountCents == null) throw new Error("montant inconnu"); setAmountCents(a.amountCents); setReady(true); })
+      .then(r => { setToken(r.token); return api<{ amountCents: number; eventId: string }>(`/me/applications/${applicationId}/amount`); })
+      .then(a => { setAmountCents(a.amountCents); setEventId(a.eventId); setReady(true); })
       .catch(() => { setError(true); setReady(true); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- jeton à usage unique : échangé une seule fois au montage
   }, []);
