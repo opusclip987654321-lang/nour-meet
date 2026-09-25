@@ -6,7 +6,6 @@ import { notify } from "./notify.js";
 import { BillingPeriod, subscriptionChangeTiming } from "@nour/shared";
 import { mapStripeSubscriptionStatus } from "./payments.js";
 import { currentYearMonth } from "../domain.js";
-import { getSetting } from "../settings.js";
 
 // Changement de formule restaurateur (corrections web 2026-09-24, §1.4) : règle métier unique,
 // jamais dupliquée dans l'interface.
@@ -191,8 +190,7 @@ export const recordCheckoutSession = async (session: Stripe.Checkout.Session) =>
   const updated = await prisma.restaurantSubscription.findUniqueOrThrow({ where: { restaurantId }, include: { plan: true } });
   if (claimed && updated.stripeSubscriptionId === stripeSubscriptionId) {
     const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id: restaurantId } });
-    const trial = updated.status === SubscriptionStatus.TRIALING ? `, essai gratuit de ${getSetting("RESTAURANT_TRIAL_DAYS")} jours en cours` : "";
-    await notify(restaurant.ownerId, "Abonnement activé", `Votre abonnement « ${updated.plan.name} » (${billingPeriod === "ANNUAL" ? "annuel" : "mensuel"}) est confirmé${trial}.`, "/restaurant?tab=subscription");
+    await notify(restaurant.ownerId, "Abonnement activé", `Votre abonnement « ${updated.plan.name} » (${billingPeriod === "ANNUAL" ? "annuel" : "mensuel"}) est confirmé.`, "/restaurant?tab=subscription");
     await audit(restaurant.ownerId, "SUBSCRIPTION_CHECKOUT_COMPLETED", "RestaurantSubscription", updated.id, { planId, billingPeriod });
   }
   if (updated.stripeSubscriptionId === stripeSubscriptionId) await approveRestaurantAfterFirstPayment(restaurantId, { subscriptionStatus: updated.status });
@@ -243,6 +241,8 @@ export async function approveRestaurantAfterFirstPayment(restaurantId: string, e
   if (await prisma.auditLog.count({ where: { entity: "Restaurant", entityId: restaurantId, action: "REJECT_RESTAURANT" } }) > 0) return false;
   // Même exigence que l'approbation manuelle : au moins une photo de l'établissement.
   if (restaurant._count.photos === 0) {
+    // Plusieurs webhooks arrivent pour un même paiement : un seul rappel par jour.
+    if (await prisma.notification.count({ where: { userId: restaurant.ownerId, title: "Ajoutez une photo de votre établissement", createdAt: { gt: new Date(Date.now() - 86_400_000) } } }) > 0) return false;
     await notify(restaurant.ownerId, "Ajoutez une photo de votre établissement", "Au moins une photo de votre établissement est nécessaire pour finaliser l'examen de votre demande.", "/restaurant");
     return false;
   }

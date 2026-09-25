@@ -133,10 +133,8 @@ const checkTrialSubscriptionsDue = async () => {
   }
 };
 if (ownsBackgroundJobs) setInterval(() => { checkTrialSubscriptionsDue().catch(err => app.log.error(err)); }, 60_000);
-// Arbitrage tranché (point 1.3 des instructions définitives 2026-09-20, confirmé le 20/09) : le
-// prélèvement a lieu normalement à l'échéance de l'essai même si la candidature reste PENDING —
-// choix commercial de la formule et autorisation de publier restent deux choses distinctes. Stripe
-// gère seul cette échéance (trial_period_days) ; aucune intervention serveur n'est donc nécessaire.
+// Plus d'essai gratuit pour les nouveaux abonnements (décision du 2026-09-25) : seuls d'éventuels
+// abonnements souscrits avant cette date peuvent encore être en essai ; Stripe gère seul leur échéance.
 if (ownsBackgroundJobs) setInterval(() => { sendEventReminders().catch(err => app.log.error(err)); }, 60_000);
 
 // Programmation d'articles (§18) : ne publie jamais depuis DRAFT ou IN_REVIEW, uniquement un

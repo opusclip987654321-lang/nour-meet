@@ -2,7 +2,7 @@ import { subscriptionChangeTiming } from "@nour/shared";
 import type { BillingPeriod } from "@nour/shared";
 import { CalendarClock, Check, FileText, Minus } from "lucide-react";
 import { ReactNode, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { DevTestCards } from "../components/DevTestCards";
 import { Notice } from "../components/ui";
@@ -70,13 +70,15 @@ function InvoiceList({ invoices }: { invoices: Invoice[] }) {
 // au choix, y compris pour un abonnement en cours. La règle (immédiat ou à l'échéance) vient de
 // @nour/shared et est appliquée par l'API : cet écran l'annonce avant confirmation, puis affiche
 // l'état relu chez Stripe.
-export function RestaurantSubscriptionPanel({ restaurant, onChanged }: { restaurant: any; onChanged: () => void }) {
+export function RestaurantSubscriptionPanel({ onChanged }: { onChanged: () => void }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [overview, setOverview] = useState<SubscriptionOverview | null>(null);
   const subscription = overview?.subscription ?? null;
   const subscribed = !!subscription && subscription.status !== "CANCELLED";
   const [period, setPeriod] = useState<BillingPeriod>("MONTHLY");
+  // CGV partie B : acceptation exigée avant toute souscription ou tout changement de formule (paiement immédiat).
+  const [acceptCgv, setAcceptCgv] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: "error" | "success" | "info"; text: string } | null>(null);
@@ -112,11 +114,11 @@ export function RestaurantSubscriptionPanel({ restaurant, onChanged }: { restaur
     try { await action(); } catch (err) { setNotice({ kind: "error", text: (err as Error).message }); } finally { setBusy(null); }
   };
   const checkout = (planId: string) => run(planId, async () => {
-    const { url } = await api<{ url: string }>("/restaurants/me/subscription/checkout", { method: "POST", body: JSON.stringify({ planId, billingPeriod: period }) });
+    const { url } = await api<{ url: string }>("/restaurants/me/subscription/checkout", { method: "POST", body: JSON.stringify({ planId, billingPeriod: period, acceptCgv }) });
     window.location.href = url;
   });
   const changePlan = (plan: Plan) => run(plan.id, async () => {
-    const result = await api<{ direction: "UPGRADE" | "DOWNGRADE"; subscription: any }>("/restaurants/me/subscription/change-plan", { method: "POST", body: JSON.stringify({ planId: plan.id, billingPeriod: period }) });
+    const result = await api<{ direction: "UPGRADE" | "DOWNGRADE"; subscription: any }>("/restaurants/me/subscription/change-plan", { method: "POST", body: JSON.stringify({ planId: plan.id, billingPeriod: period, acceptCgv }) });
     setConfirming(null);
     setNotice({ kind: "success", text: result.direction === "UPGRADE" ? `C’est fait : formule ${plan.name}, facturation ${periodLabel(period)}. Le prorata a été facturé sur votre moyen de paiement.` : `Changement programmé : formule ${plan.name}, facturation ${periodLabel(period)}, à partir du ${longDate(result.subscription.pendingChangeAt)}.` });
     refresh();
@@ -137,7 +139,6 @@ export function RestaurantSubscriptionPanel({ restaurant, onChanged }: { restaur
   });
 
   if (!overview) return <div className="stack" aria-busy="true"><div className="panel skeleton skeleton-panel" /></div>;
-  const trialOffered = !subscription;
 
   return <div className="stack">
     {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
@@ -153,7 +154,8 @@ export function RestaurantSubscriptionPanel({ restaurant, onChanged }: { restaur
     <div className="pricing-head">
       <div>
         <h2>{subscribed ? "Changer de formule ou de périodicité" : "Choisissez votre formule"}</h2>
-        <p className="fine left">Prix hors taxes. {trialOffered ? `Essai gratuit de ${restaurant.trialDays ?? 7} jours, carte requise, résiliable avant l’échéance.` : "Formule supérieure ou passage à l’annuel : immédiat, au prorata. Formule inférieure ou passage au mensuel : à la fin de la période déjà payée."}</p>
+        <p className="fine left">Prix hors taxes. {!subscription ? "Paiement par carte à la souscription, puis à chaque échéance." : "Formule supérieure ou passage à l’annuel : immédiat, au prorata. Formule inférieure ou passage au mensuel : à la fin de la période déjà payée."}</p>
+        <label className="consent-check"><input type="checkbox" checked={acceptCgv} onChange={e => setAcceptCgv(e.target.checked)} /> <span>J’ai lu et j’accepte les <Link to="/legal/cgv" target="_blank">conditions générales de vente</Link> (partie B, abonnements restaurateurs).</span></label>
       </div>
       <div className="segmented" role="group" aria-label="Périodicité de facturation">
         <button type="button" aria-pressed={period === "MONTHLY"} className={period === "MONTHLY" ? "active" : undefined} onClick={() => { setPeriod("MONTHLY"); setConfirming(null); }}>Mensuel</button>
@@ -188,12 +190,12 @@ export function RestaurantSubscriptionPanel({ restaurant, onChanged }: { restaur
                   ? confirming === plan.id
                     ? <div className="pricing-confirm">
                       <p>{timing === "IMMEDIATE" ? `Passage immédiat : ${plan.name}, facturation ${periodLabel(period)}. Stripe facture aujourd’hui la différence au prorata.` : `Vous gardez ${subscription!.plan.name} (facturation ${periodLabel(subscription!.billingPeriod)}) jusqu’au ${longDate(subscription!.currentPeriodEnd)}, puis passez en ${plan.name}, facturation ${periodLabel(period)}.`}</p>
-                      <div className="decision-buttons"><button type="button" className={`button small${featured ? " accent" : ""}`} disabled={!!busy} onClick={() => changePlan(plan)}>{busy === plan.id ? "Confirmation…" : "Confirmer"}</button><button type="button" className="button small secondary" disabled={!!busy} onClick={() => setConfirming(null)}>Annuler</button></div>
+                      <div className="decision-buttons"><button type="button" className={`button small${featured ? " accent" : ""}`} disabled={!!busy || !acceptCgv} onClick={() => changePlan(plan)}>{busy === plan.id ? "Confirmation…" : "Confirmer"}</button><button type="button" className="button small secondary" disabled={!!busy} onClick={() => setConfirming(null)}>Annuler</button></div>
                     </div>
                     : <button type="button" className={`button full${featured ? " accent" : " secondary"}`} disabled={!!busy || price == null} onClick={() => setConfirming(plan.id)}>{changeLabel}</button>
                   : subscribed
                     ? <p className="fine">Abonnement géré par l’équipe Nūr Meet : contactez-nous pour le modifier.</p>
-                    : <button type="button" className={`button full${featured ? " accent" : ""}`} disabled={!!busy || price == null} onClick={() => checkout(plan.id)}>{busy === plan.id ? "Redirection…" : "Choisir cette formule"}</button>}
+                    : <button type="button" className={`button full${featured ? " accent" : ""}`} disabled={!!busy || price == null || !acceptCgv} onClick={() => checkout(plan.id)}>{busy === plan.id ? "Redirection…" : "Choisir cette formule"}</button>}
           </div>
         </article>;
       })}</div>}

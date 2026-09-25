@@ -2,7 +2,7 @@ import { EventStatus } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { app, prisma } from "../context.js";
-import { env } from "../env.js";
+import { SITE_ORIGIN } from "../env.js";
 import { paginated, paginationQuery, toSkipTake } from "../pagination.js";
 import { TokenUser, auth, currentId, optionalAuth } from "../services/auth.js";
 import { applicationAmountCents, publicEvent, viewerStatuses } from "../services/events.js";
@@ -58,7 +58,7 @@ app.post("/events/:id/share-link", { preHandler: auth }, async (request) => {
     update: {},
     create: { userId, eventId: id, code: randomUUID().replace(/-/g, "").slice(0, 12) }
   });
-  return { code: link.code, url: `${env.WEB_ORIGIN}/events/${event.slug}?ref=${link.code}` };
+  return { code: link.code, url: `${SITE_ORIGIN}/events/${event.slug}?ref=${link.code}` };
 });
 // §19/§20 : point public sans authentification, donc directement exposé à un abus par bot pour
 // gonfler artificiellement des statistiques de partage — limité par IP comme les autres routes

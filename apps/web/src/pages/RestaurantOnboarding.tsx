@@ -28,12 +28,11 @@ function Steps({ current }: { current: 1 | 2 | 3 }) {
 export function RestaurantOnboarding() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [state, setState] = useState<Onboarding | null | undefined>(undefined);
-  const [restaurant, setRestaurant] = useState<any>(null);
   const [form, setForm] = useState<EventFormState>(emptyEventForm);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const load = () => Promise.all([api<Onboarding>("/restaurants/me/onboarding"), api<any>("/restaurants/me")])
-    .then(([o, r]) => { setState(o); setRestaurant(r); if (o.draft) setForm(eventToForm(o.draft)); })
+  const load = () => api<Onboarding>("/restaurants/me/onboarding")
+    .then(o => { setState(o); if (o.draft) setForm(eventToForm(o.draft)); })
     .catch(() => setState(null));
   useEffect(() => { load(); }, []);
 
@@ -70,7 +69,7 @@ export function RestaurantOnboarding() {
         <div><b>{state.draft.title}</b><span>{dateTime(state.draft.startsAt)} · {state.draft.district} · {state.draft.priceCents === 0 ? "Gratuit" : money(state.draft.priceCents)} · {state.draft.capacity} places</span></div>
         <Link className="button secondary small" to="/restaurant/premier-evenement?etape=evenement">Modifier</Link>
       </div>
-      {restaurant && <RestaurantSubscriptionPanel restaurant={restaurant} onChanged={load} />}
+      <RestaurantSubscriptionPanel onChanged={load} />
     </>}
   </section></Layout>;
 }

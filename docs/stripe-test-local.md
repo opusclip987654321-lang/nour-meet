@@ -56,7 +56,7 @@ confirme : statut « Place confirmée », billet QR dans « Mes billets », noti
 
 **Restaurateur** — compte `+33600000002` (Maison Amana) : Mon établissement → Abonnement →
 « Choisir cette formule » → Stripe Checkout → carte `4242…` → retour sur le site : formule affichée
-« Offre actuelle » avec son statut Stripe (essai, actif…).
+« Offre actuelle » avec son statut Stripe (actif, paiement en échec…). Aucun essai gratuit : le premier paiement est encaissé à la souscription.
 - Standard → Premium : « Changer de formule » → confirmation → passage **immédiat**, le prorata est
   facturé tout de suite (visible dans Dashboard Stripe → Factures).
 - Premium → Standard : « Changer de formule » → la formule actuelle reste jusqu'à l'échéance, la date
