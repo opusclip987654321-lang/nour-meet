@@ -114,7 +114,9 @@ app.get("/me/global-interview", { preHandler: auth }, async (request) => {
   const latest = await prisma.application.findFirst({ where: { userId, eventId: null }, orderBy: { createdAt: "desc" }, include: { call: true } });
   if (!latest) return { status: null };
   const retryAvailableAt = latest.status === ApplicationStatus.REFUSED && latest.decidedAt ? interviewRetryDate(latest.decidedAt) : null;
-  return { ...latest, retryAvailableAt };
+  // §4.1 : un refus reste neutre — les notes de l'administration sont internes, jamais renvoyées.
+  const { notes: _notes, ...visible } = latest;
+  return { ...visible, retryAvailableAt };
 });
 app.post("/me/global-interview", { preHandler: auth }, async (request, reply) => {
   const { motivation } = z.object({ motivation: z.string().min(30).max(1200) }).parse(request.body);
@@ -176,10 +178,10 @@ app.get("/me/applications", { preHandler: auth }, async (request) => {
   // Même résolution d'image par défaut que les routes publiques (§ligne 307/1316) : un événement
   // sans photo uploadée ne doit jamais renvoyer imageUrl:null au front. amountCents : le montant
   // réellement débité (tarif différencié compris), jamais recalculé côté interface.
-  // L'événement renvoyé ne garde que ce qu'affiche l'espace personnel : jamais les tarifs bruts par
+  // Notes de l'administration : internes (§4.1), jamais renvoyées. L'événement renvoyé ne garde que ce qu'affiche l'espace personnel : jamais les tarifs bruts par
   // catégorie (ENABLE_GENDER_PRICING), le marquage démo, la note de relecture, ni l'adresse exacte
   // avant la confirmation de la place (elle figure sur le billet).
-  return applications.map(a => {
+  return applications.map(({ notes: _notes, ...a }) => {
     if (!a.event) return a;
     const { priceTiers, isDemo: _isDemo, reviewNote: _reviewNote, address, ...event } = a.event;
     return { ...a, amountCents: applicationAmountCents({ ...a.event, priceTiers }, a.quotaCategory), event: { ...event, address: a.status === ApplicationStatus.CONFIRMED ? address : null, imageUrl: a.event.imageUrl ?? defaultCategoryImage(a.event.category) } };

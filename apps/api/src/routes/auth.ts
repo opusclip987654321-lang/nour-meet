@@ -4,12 +4,14 @@ import { app, prisma, smsVerification } from "../context.js";
 import { env } from "../env.js";
 import { normalizePhoneNumber } from "../phone.js";
 import { audit } from "../services/audit.js";
-import { TokenUser, auth, currentId } from "../services/auth.js";
+import { auth, currentId } from "../services/auth.js";
 import { checkEmailLoginCode, normalizeEmail, sendEmailLoginCode, verifyGoogleCredential } from "../services/login.js";
 import { PKCE_CHALLENGE, PKCE_VERIFIER, hashHandoffCode, isAllowedAppRedirect, pkceChallenge } from "../services/app-redirect.js";
 import { loginResponse } from "../services/session.js";
 
-app.post("/auth/request-otp", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 3, timeWindow: "10 minutes" } } }, async (request) => {
+// Limites en mode simulé (SMS_MODE=mock, interdit en production) : assez hautes pour enchaîner les
+// suites de tests d'intégration et e2e sur une même API sans faux échec « Trop de tentatives ».
+app.post("/auth/request-otp", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 1000 : 3, timeWindow: "10 minutes" } } }, async (request) => {
   const input = z.object({ phone: z.string().min(8).max(30) }).parse(request.body);
   const phone = normalizePhoneNumber(input.phone);
   await smsVerification.sendCode(phone);
@@ -24,7 +26,7 @@ app.post("/auth/request-otp", { config: { rateLimit: { max: smsVerification.mode
   };
 });
 
-app.post("/auth/verify-otp", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+app.post("/auth/verify-otp", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 1000 : 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
   const input = z.object({ phone: z.string().min(8).max(30), code: z.string().regex(/^\d{6}$/), displayName: z.string().min(2).optional() }).parse(request.body);
   const phone = normalizePhoneNumber(input.phone);
   if (!await smsVerification.checkCode(phone, input.code)) return reply.code(401).send({ error: "Code incorrect ou expiré" });
@@ -53,12 +55,12 @@ const verifiedAccountFor = async (email: string) => {
   return null;
 };
 
-app.post("/auth/email/request-code", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 5, timeWindow: "10 minutes" } } }, async (request) => {
+app.post("/auth/email/request-code", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 1000 : 5, timeWindow: "10 minutes" } } }, async (request) => {
   const { email } = z.object({ email: z.string().email().max(200) }).parse(request.body);
   const result = await sendEmailLoginCode(email);
   return { sent: true, expiresInSeconds: 600, ...(result.devCode ? { devCode: result.devCode } : {}) };
 });
-app.post("/auth/email/verify", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+app.post("/auth/email/verify", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 1000 : 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
   const input = z.object({ email: z.string().email().max(200), code: z.string().regex(/^\d{6}$/), displayName: z.string().min(2).max(80).optional() }).parse(request.body);
   if (!await checkEmailLoginCode(input.email, input.code)) return reply.code(401).send({ error: "Code incorrect ou expiré" });
   const email = normalizeEmail(input.email);
@@ -71,7 +73,7 @@ app.post("/auth/email/verify", { config: { rateLimit: { max: smsVerification.mod
 
 // Connexion avec Google (2026-09-24). Un compte Nūr Meet existant avec la même adresse e-mail
 // (vérifiée par Google) est relié automatiquement plutôt que dupliqué.
-app.post("/auth/google", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 20, timeWindow: "10 minutes" } } }, async (request) => {
+app.post("/auth/google", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 1000 : 20, timeWindow: "10 minutes" } } }, async (request) => {
   const { credential } = z.object({ credential: z.string().min(20).max(5000) }).parse(request.body);
   const google = await verifyGoogleCredential(credential);
   const identity = await prisma.authIdentity.findUnique({ where: { provider_subject: { provider: "google", subject: google.subject } } });
@@ -92,14 +94,14 @@ app.post("/auth/google", { config: { rateLimit: { max: smsVerification.mode === 
 
 // Vérification du numéro, une seule fois (2026-09-24) : seul SMS encore envoyé, avant la première
 // inscription à une soirée. Un numéro ne peut appartenir qu'à un seul compte.
-app.post("/me/phone/request-code", { preHandler: auth, config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 3, timeWindow: "10 minutes" } } }, async (request, reply) => {
+app.post("/me/phone/request-code", { preHandler: auth, config: { rateLimit: { max: smsVerification.mode === "mock" ? 1000 : 3, timeWindow: "10 minutes" } } }, async (request, reply) => {
   const phone = normalizePhoneNumber(z.object({ phone: z.string().min(8).max(30) }).parse(request.body).phone);
   const owner = await prisma.user.findUnique({ where: { phone } });
   if (owner && owner.id !== currentId(request)) return reply.code(409).send({ error: "Ce numéro est déjà utilisé par un autre compte. Connectez-vous avec ce numéro, ou écrivez-nous à contact@nourmeet.com." });
   await smsVerification.sendCode(phone);
   return { sent: true, expiresInSeconds: 600, ...(smsVerification.mode === "mock" ? { devCode: env.DEV_OTP_CODE } : {}) };
 });
-app.post("/me/phone/verify", { preHandler: auth, config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+app.post("/me/phone/verify", { preHandler: auth, config: { rateLimit: { max: smsVerification.mode === "mock" ? 1000 : 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
   const input = z.object({ phone: z.string().min(8).max(30), code: z.string().regex(/^\d{6}$/) }).parse(request.body);
   const phone = normalizePhoneNumber(input.phone);
   if (!await smsVerification.checkCode(phone, input.code)) return reply.code(401).send({ error: "Code incorrect ou expiré" });
@@ -126,25 +128,26 @@ app.post("/me/payment-sessions", { preHandler: auth }, async (request, reply) =>
 // — jamais les 30 jours habituels — puisqu'il ne sert qu'à finaliser un paiement déjà en cours.
 app.post("/auth/payment-session-exchange", async (request, reply) => {
   const { token } = z.object({ token: z.string() }).parse(request.body);
-  const session = await prisma.paymentSession.findUnique({ where: { token } });
-  if (!session || session.usedAt || session.expiresAt < new Date()) return reply.code(401).send({ error: "Session de paiement invalide ou expirée" });
-  await prisma.paymentSession.update({ where: { id: session.id }, data: { usedAt: new Date() } });
+  // Usage unique garanti par une seule écriture conditionnelle : deux échanges simultanés du même
+  // jeton ne peuvent jamais obtenir chacun une session.
+  const now = new Date();
+  const claimed = await prisma.paymentSession.updateMany({ where: { token, usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now } });
+  if (claimed.count === 0) return reply.code(401).send({ error: "Session de paiement invalide ou expirée" });
+  const session = await prisma.paymentSession.findUniqueOrThrow({ where: { token } });
   const user = await prisma.user.findUniqueOrThrow({ where: { id: session.userId } });
-  const jwt = app.jwt.sign({ sub: user.id, role: user.role, scope: "payment" }, { expiresIn: "15m" });
+  const jwt = app.jwt.sign({ sub: user.id, role: user.role, scope: "payment", app: session.applicationId }, { expiresIn: "15m" });
   return { token: jwt, applicationId: session.applicationId };
 });
 
 // Connexion Google de l'application mobile (2026-09-24), voir services/app-redirect.ts.
 app.post("/auth/mobile-handoff", { preHandler: auth, config: { rateLimit: { max: 20, timeWindow: "10 minutes" } } }, async (request, reply) => {
   const { redirect, isNewUser, challenge } = z.object({ redirect: z.string().max(300), isNewUser: z.boolean().default(false), challenge: z.string().regex(PKCE_CHALLENGE) }).parse(request.body);
-  // Un jeton de paiement (15 min) ne doit jamais devenir une session de 90 jours.
-  if ((request.user as TokenUser & { scope?: string }).scope === "payment") return reply.code(403).send({ error: "Connexion non autorisée avec ce jeton." });
   if (!isAllowedAppRedirect(redirect, env.NODE_ENV === "production")) return reply.code(400).send({ error: "Retour vers l’application non autorisé." });
   const code = randomUUID().replace(/-/g, "");
   await prisma.loginHandoff.create({ data: { codeHash: hashHandoffCode(code), challenge, userId: currentId(request), isNewUser, expiresAt: new Date(Date.now() + 2 * 60_000) } });
   return { redirectUrl: `${redirect}${redirect.includes("?") ? "&" : "?"}code=${code}` };
 });
-app.post("/auth/mobile-handoff/exchange", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 100 : 20, timeWindow: "10 minutes" } } }, async (request, reply) => {
+app.post("/auth/mobile-handoff/exchange", { config: { rateLimit: { max: smsVerification.mode === "mock" ? 1000 : 20, timeWindow: "10 minutes" } } }, async (request, reply) => {
   const { code, verifier } = z.object({ code: z.string().regex(/^[0-9a-f]{32}$/), verifier: z.string().regex(PKCE_VERIFIER) }).parse(request.body);
   const found = await prisma.loginHandoff.findUnique({ where: { codeHash: hashHandoffCode(code) } });
   const handoff = found && found.challenge === pkceChallenge(verifier) ? found : null;

@@ -130,6 +130,19 @@ export async function loadSettings(prisma: PrismaClient): Promise<Settings> {
   return cache;
 }
 
+// Sous node:cluster, chaque processus a son propre cache : une modification faite par l'un restait
+// invisible aux autres jusqu'au redémarrage (un même réglage — durée d'essai Stripe, tarif homme/
+// femme — pouvait donc valoir deux choses selon la requête). Le processus qui enregistre prévient
+// les autres par le canal IPC du cluster (relayé par cluster-entry.ts), qui relisent la base ; une
+// relecture périodique rattrape tout message perdu.
+export const SETTINGS_CHANGED_MESSAGE = "nour:settings-changed";
+const SETTINGS_REFRESH_MS = 30_000;
+export function watchSettings(prisma: PrismaClient, onError: (err: unknown) => void) {
+  const reload = () => { loadSettings(prisma).catch(onError); };
+  process.on("message", message => { if ((message as { type?: string } | null)?.type === SETTINGS_CHANGED_MESSAGE) reload(); });
+  setInterval(reload, SETTINGS_REFRESH_MS).unref();
+}
+
 export function getSettings(): Settings { return cache; }
 export function getSetting<K extends SettingKey>(key: K): Settings[K] { return cache[key]; }
 
@@ -137,6 +150,7 @@ export async function updateSetting<K extends SettingKey>(prisma: PrismaClient, 
   const parsed = SETTINGS_SCHEMA[key].schema.parse(value);
   await prisma.appSetting.upsert({ where: { key }, update: { value: parsed as any, updatedBy }, create: { key, value: parsed as any, updatedBy } });
   cache = { ...cache, [key]: parsed };
+  if (process.connected) process.send?.({ type: SETTINGS_CHANGED_MESSAGE }, undefined, {}, () => {});
   return parsed as Settings[K];
 }
 

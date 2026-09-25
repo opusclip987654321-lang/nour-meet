@@ -42,7 +42,7 @@ app.get("/events/:id/my-application", { preHandler: auth }, async (request, repl
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId: currentId(request) } }, include: { call: true, reservation: { include: { payment: true } }, networkingAnswer: true, event: { include: { priceTiers: true } } } });
   if (!application) return reply.code(404).send({ error: "Aucune inscription pour cet événement" });
-  const { event, ...rest } = application;
+  const { event, notes: _notes, ...rest } = application;
   return { ...rest, amountCents: event ? applicationAmountCents(event, application.quotaCategory) : null };
 });
 

@@ -85,3 +85,26 @@ describe("adresse e-mail saisie dans un profil sans vérification", () => {
     expect((await prisma.user.findUnique({ where: { id: attacker.user.id } }))?.email).not.toBe(victimEmail);
   });
 });
+
+describe("jeton de paiement de la page /pay (15 min)", () => {
+  it("ne sert qu'au paiement de l'inscription pour laquelle il a été émis", async () => {
+    const user = await newUser();
+    const event = await prisma.event.findFirstOrThrow({ where: { status: "PUBLISHED", startsAt: { gt: new Date() } } });
+    const other = await prisma.event.findFirstOrThrow({ where: { status: "PUBLISHED", startsAt: { gt: new Date() }, id: { not: event.id } } });
+    const application = await prisma.application.create({ data: { eventId: event.id, userId: user.user.id, status: "PAYMENT_PENDING" } });
+    const otherApplication = await prisma.application.create({ data: { eventId: other.id, userId: user.user.id, status: "PAYMENT_PENDING" } });
+    const session = await api<{ token: string }>("/me/payment-sessions", { method: "POST", body: JSON.stringify({ applicationId: application.id }) }, user.token);
+    const exchanged = await api<{ token: string }>("/auth/payment-session-exchange", { method: "POST", body: JSON.stringify({ token: session.body.token }) });
+    const paymentToken = exchanged.body.token;
+
+    expect((await api(`/me/applications/${application.id}/amount`, {}, paymentToken)).status).toBe(200);
+    expect((await api(`/events/${event.id}/my-application`, {}, paymentToken)).status).toBe(200);
+    // Une autre inscription, le profil, la session glissante ou une connexion mobile : refusés.
+    expect((await api(`/me/applications/${otherApplication.id}/amount`, {}, paymentToken)).status).toBe(403);
+    expect((await api("/me", {}, paymentToken)).status).toBe(403);
+    expect((await api("/me/applications", {}, paymentToken)).status).toBe(403);
+    expect((await api("/auth/mobile-handoff", { method: "POST", body: JSON.stringify({ redirect: "nourmeet://auth", challenge: "a".repeat(43) }) }, paymentToken)).status).toBe(403);
+    // Le jeton de session normal, lui, garde tous ses droits.
+    expect((await api("/me", {}, user.token)).status).toBe(200);
+  });
+});

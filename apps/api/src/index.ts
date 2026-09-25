@@ -9,7 +9,7 @@
 // gestionnaire d'erreurs ou le rate-limit (constaté : ZodError renvoyée en 500 au lieu de 400).
 import { app, prisma } from "./context.js";
 import { env } from "./env.js";
-import { loadSettings } from "./settings.js";
+import { loadSettings, watchSettings } from "./settings.js";
 
 await import("./plugins.js");
 await import("./routes/public.js");
@@ -32,4 +32,5 @@ await import("./jobs.js");
 const close = async () => { await prisma.$disconnect(); await app.close(); };
 process.on("SIGINT", close); process.on("SIGTERM", close);
 await loadSettings(prisma);
+watchSettings(prisma, err => app.log.error(err));
 await app.listen({ port: env.API_PORT, host: "0.0.0.0" });

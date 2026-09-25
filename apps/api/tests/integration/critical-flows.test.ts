@@ -132,6 +132,10 @@ describe("entretien global : porte d’entrée obligatoire avant toute inscripti
     // §4.1 : un refus reste neutre, quel que soit le motif interne consigné par l'admin.
     const refusalNotification = await prisma.notification.findFirstOrThrow({ where: { userId: me.id, title: "Profil non validé" } });
     expect(refusalNotification.body).not.toMatch(/motif interne confidentiel/i);
+    const own = await api<Record<string, unknown>>("/me/global-interview", {}, token);
+    expect(own.body.notes).toBeUndefined();
+    const list = await api<Record<string, unknown>[]>("/me/applications", {}, token);
+    expect(JSON.stringify(list.body)).not.toMatch(/motif interne confidentiel/i);
 
     const retry = await api("/me/global-interview", { method: "POST", body: JSON.stringify({ motivation: "Nouvelle tentative avec une motivation suffisamment longue cette fois." }) }, token);
     expect(retry.status).toBe(409);

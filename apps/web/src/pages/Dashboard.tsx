@@ -143,8 +143,8 @@ function GlobalInterviewPanel() {
     :!status||status.status==null?requestForm
     :status.status==="REFUSED"?(
       status.retryAvailableAt && new Date(status.retryAvailableAt)>new Date()
-        ? <><Notice kind="error">Votre profil n’a pas été validé{status.notes?` : ${status.notes}`:"."}</Notice><p className="fine">Vous pourrez redemander un entretien à partir du {longDate(status.retryAvailableAt)}.</p></>
-        : <>{status.notes&&<Notice kind="error">{status.notes}</Notice>}{requestForm}</>
+        ? <><Notice kind="error">Votre profil n’a pas été validé.</Notice><p className="fine">Vous pourrez redemander un entretien à partir du {longDate(status.retryAvailableAt)}.</p></>
+        : requestForm
     )
     :status.status==="PENDING_CALL"&&!status.call?<><CallCalendar slots={slots} loading={loadingSlots} onSelect={schedule} schedulingId={schedulingId}/><button type="button" className="button secondary small" disabled={busy} onClick={cancel}>Annuler ma demande</button></>
     :status.call?<div className="call-scheduled"><span className="eyebrow">Entretien programmé</span><strong>{dateTime(status.call.startsAt)}</strong><p>Nūr Meet vous appellera à cette heure, puis vous serez informé(e) de la décision.</p><button type="button" className="button secondary small" disabled={busy} onClick={cancel}>Annuler</button></div>
