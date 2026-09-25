@@ -1,16 +1,16 @@
-import { EventStatus, UserRole } from "@prisma/client";
+import { EventStatus, LegalDocument, UserRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, app, deleteUploadedFile, httpError, prisma, restaurantUploadsDir, smsVerification, stripe } from "../context.js";
 import { currentYearMonth } from "../domain.js";
-import { env } from "../env.js";
+import { SITE_ORIGIN } from "../env.js";
+import { hasAcceptedCurrent, recordAcceptance } from "../services/account.js";
 import { audit } from "../services/audit.js";
 import { auth, currentId, roles } from "../services/auth.js";
 import { notify } from "../services/notify.js";
 import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, subscriptionOverview, syncSubscriptionFromStripe } from "../services/subscriptions.js";
-import { getSetting } from "../settings.js";
 import { eventCreateData, eventCreateSchema } from "../services/event-drafts.js";
 
 // Jamais les notes internes de l'administration, le taux de commission, l'auteur de la décision ni le
@@ -24,7 +24,7 @@ app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
   const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) }, include: { photos: { orderBy: { position: "asc" } }, subscription: { include: { plan: true } }, connectedAccount: true } });
   if (!restaurant) return reply.code(404).send({ error: "Aucune demande restaurateur" });
   const usage = await prisma.restaurantMonthlyUsage.findUnique({ where: { restaurantId_yearMonth: { restaurantId: restaurant.id, yearMonth: currentYearMonth() } } });
-  return { ...ownRestaurantView(restaurant), currentMonthEventsPublished: usage?.eventsPublished ?? 0, trialDays: getSetting("RESTAURANT_TRIAL_DAYS") };
+  return { ...ownRestaurantView(restaurant), currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
 });
 // §19/§20 : formulaire explicitement cité comme devant être protégé contre un abus automatisé,
 // au même titre que l'authentification et la génération IA.
@@ -175,24 +175,32 @@ app.post("/restaurants/me/subscription/portal", { preHandler: auth }, async (req
   const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
   const subscription = await prisma.restaurantSubscription.findUnique({ where: { restaurantId: restaurant.id } });
   if (!subscription?.stripeCustomerId) return reply.code(409).send({ error: "Aucun abonnement Stripe actif" });
-  const session = await stripe.billingPortal.sessions.create({ customer: subscription.stripeCustomerId, return_url: `${env.WEB_ORIGIN}/restaurant?tab=subscription` });
+  const session = await stripe.billingPortal.sessions.create({ customer: subscription.stripeCustomerId, return_url: `${SITE_ORIGIN}/restaurant?tab=subscription` });
   return { url: session.url };
 });
 // C06/C07/C08 (instructions définitives 2026-09-20) : vrai tunnel Stripe Checkout en mode
-// abonnement, carte obligatoire dès l'essai (Checkout collecte toujours le moyen de paiement),
-// essai (RESTAURANT_TRIAL_DAYS) géré par Stripe lui-même (trial_period_days) — jamais simulé par un simple
-// changement de statut local. Accessible dès le dépôt de candidature (PENDING), pas seulement une
+// abonnement, jamais simulé par un simple changement de statut local. Plus d'essai gratuit (décision du
+// 2026-09-25) : le premier paiement est encaissé à la souscription, et c'est lui qui valide
+// automatiquement une première demande restaurateur (v2 §5). Accessible dès le dépôt de candidature (PENDING), pas seulement une
 // fois approuvé : le choix commercial de la formule est distinct de l'autorisation de publier.
 app.post("/restaurants/me/subscription/checkout", { preHandler: auth }, async (request, reply) => {
   if (!stripe) return reply.code(503).send({ error: "Stripe n’est pas configuré sur ce serveur : paiement d’abonnement non opérationnel." });
   const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) }, include: { owner: true, subscription: true } });
-  const { planId, billingPeriod } = z.object({ planId: z.string(), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]) }).parse(request.body);
+  const { planId, billingPeriod, acceptCgv } = z.object({ planId: z.string(), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]), acceptCgv: z.boolean().optional() }).parse(request.body);
+  // Paiement immédiat (plus d'essai gratuit) : jamais d'encaissement pour un établissement refusé ou
+  // suspendu, ni pour une nouvelle demande après un refus tant que l'équipe n'a pas statué.
+  if (restaurant.status === "REJECTED" || restaurant.status === "SUSPENDED") return reply.code(409).send({ error: "Votre établissement n’est pas en mesure de souscrire un abonnement : contactez l’équipe Nūr Meet." });
+  if (restaurant.status === "PENDING" && await prisma.auditLog.count({ where: { entity: "Restaurant", entityId: restaurant.id, action: "REJECT_RESTAURANT" } }) > 0) return reply.code(409).send({ error: "Votre nouvelle demande doit d’abord être examinée par l’équipe Nūr Meet avant toute souscription." });
+  // CGV partie B : acceptation de la version en vigueur, prouvée, avant tout paiement d'abonnement.
+  const cgvContext = `subscription:${restaurant.id}`;
+  if (!acceptCgv && !(await hasAcceptedCurrent(restaurant.ownerId, LegalDocument.CGV, cgvContext))) return reply.code(422).send({ error: "Vous devez accepter les conditions générales de vente avant de souscrire.", cgvRequired: true });
   // Un abonnement en cours se modifie via /subscription/change-plan (prorata ou changement différé),
   // jamais par un second Checkout qui créerait un deuxième abonnement facturé en parallèle.
   if (restaurant.subscription?.stripeSubscriptionId && restaurant.subscription.status !== "CANCELLED") return reply.code(409).send({ error: "Un abonnement existe déjà pour cet établissement : utilisez « Changer de formule »." });
   const plan = await prisma.plan.findUniqueOrThrow({ where: { id: planId } });
   const priceId = billingPeriod === "ANNUAL" ? plan.stripePriceAnnualId : plan.stripePriceMonthlyId;
   if (!priceId) return reply.code(409).send({ error: `Formule ${plan.name} indisponible en facturation ${billingPeriod === "ANNUAL" ? "annuelle" : "mensuelle"} pour le moment.` });
+  if (acceptCgv) await recordAcceptance(request, restaurant.ownerId, LegalDocument.CGV, cgvContext);
   // Un seul client Stripe par établissement, et une seule session Checkout ouverte à la fois : deux
   // onglets payés en parallèle créeraient sinon deux abonnements facturés (revue de sécurité 2026-09-24).
   let customerId = restaurant.subscription?.stripeCustomerId ?? (await stripe.customers.search({ query: `metadata['restaurantId']:'${restaurant.id}'`, limit: 1 })).data[0]?.id;
@@ -207,13 +215,11 @@ app.post("/restaurants/me/subscription/checkout", { preHandler: auth }, async (r
     mode: "subscription",
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
-    // L'essai gratuit n'est offert qu'une fois par établissement : un restaurateur qui se réabonne
-    // après une résiliation (ou qui quitte un abonnement géré à la main) paie dès la souscription.
-    subscription_data: { ...(restaurant.subscription ? {} : { trial_period_days: getSetting("RESTAURANT_TRIAL_DAYS") }), metadata: { restaurantId: restaurant.id, planId, billingPeriod } },
+    subscription_data: { metadata: { restaurantId: restaurant.id, planId, billingPeriod } },
     payment_method_collection: "always",
     metadata: { restaurantId: restaurant.id, planId, billingPeriod },
-    success_url: `${env.WEB_ORIGIN}/restaurant?tab=subscription&checkout=success`,
-    cancel_url: `${env.WEB_ORIGIN}/restaurant?tab=subscription&checkout=cancel`
+    success_url: `${SITE_ORIGIN}/restaurant?tab=subscription&checkout=success`,
+    cancel_url: `${SITE_ORIGIN}/restaurant?tab=subscription&checkout=cancel`
   });
   await audit(currentId(request), "SUBSCRIPTION_CHECKOUT_CREATED", "Restaurant", restaurant.id, { planId, billingPeriod });
   return { url: session.url };
@@ -232,9 +238,13 @@ app.get("/restaurants/me/subscription", { preHandler: auth }, async (request) =>
   const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) }, select: { id: true } });
   return subscriptionOverview(restaurant.id);
 });
-app.post("/restaurants/me/subscription/change-plan", { preHandler: auth, config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } }, async (request) => {
-  const { planId, billingPeriod } = z.object({ planId: z.string(), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]).optional() }).parse(request.body);
-  const { subscription } = await ownSubscription(currentId(request));
+app.post("/restaurants/me/subscription/change-plan", { preHandler: auth, config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const { planId, billingPeriod, acceptCgv } = z.object({ planId: z.string(), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]).optional(), acceptCgv: z.boolean().optional() }).parse(request.body);
+  const { restaurant, subscription } = await ownSubscription(currentId(request));
+  // Un changement de formule peut facturer au prorata : mêmes CGV en vigueur que pour la souscription.
+  const cgvContext = `subscription:${restaurant.id}`;
+  if (!acceptCgv && !(await hasAcceptedCurrent(restaurant.ownerId, LegalDocument.CGV, cgvContext))) return reply.code(422).send({ error: "Vous devez accepter les conditions générales de vente avant de changer de formule.", cgvRequired: true });
+  if (acceptCgv) await recordAcceptance(request, restaurant.ownerId, LegalDocument.CGV, cgvContext);
   const target = await prisma.plan.findUniqueOrThrow({ where: { id: planId } });
   const result = await changeSubscriptionPlan(subscription, target, billingPeriod ?? (subscription.billingPeriod as "MONTHLY" | "ANNUAL"));
   await audit(currentId(request), result.direction === "UPGRADE" ? "SUBSCRIPTION_UPGRADED" : "SUBSCRIPTION_DOWNGRADE_SCHEDULED", "RestaurantSubscription", subscription.id, { from: subscription.planId, to: target.id, fromPeriod: subscription.billingPeriod, toPeriod: billingPeriod ?? subscription.billingPeriod });

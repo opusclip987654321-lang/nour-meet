@@ -191,9 +191,9 @@ await app.register(async (webhooks) => {
         }
       }
     } else if (event.type === "checkout.session.completed") {
-      // C06/C07 (instructions définitives 2026-09-20) : la session Checkout confirme le moyen de
-      // paiement et l'essai démarre réellement côté Stripe (trial_period_days, voir la création de la
-      // session) — jamais un simple changement de statut local sans passage par Stripe.
+      // C06/C07 (instructions définitives 2026-09-20) : la session Checkout confirme l'abonnement, dont
+      // le premier paiement est encaissé à la souscription (plus d'essai gratuit depuis le 2026-09-25) —
+      // jamais un simple changement de statut local sans passage par Stripe.
       await recordCheckoutSession(event.data.object as Stripe.Checkout.Session);
     } else if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
       const stripeSub = event.data.object as Stripe.Subscription;

@@ -1,7 +1,7 @@
 import { EventStatus } from "@prisma/client";
 import { z } from "zod";
 import { aiProvider, app, emailProvider, prisma, smsVerification, stripe } from "../context.js";
-import { env } from "../env.js";
+import { SITE_ORIGIN, env } from "../env.js";
 import { TokenUser, optionalAuth } from "../services/auth.js";
 import { getSetting } from "../settings.js";
 
@@ -43,7 +43,7 @@ app.get("/sitemap.xml", async (_request, reply) => {
     ...events.map(e => ({ path: `/events/${e.slug}`, updatedAt: e.updatedAt, priority: "0.8" })),
     ...articles.map(a => ({ path: `/blog/${a.slug}`, updatedAt: a.updatedAt, priority: "0.6" }))
   ];
-  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `  <url><loc>${xmlEscape(`${env.WEB_ORIGIN}${u.path}`)}</loc>${u.updatedAt ? `<lastmod>${u.updatedAt.toISOString().slice(0, 10)}</lastmod>` : ""}<priority>${u.priority}</priority></url>`).join("\n")}\n</urlset>\n`;
+  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `  <url><loc>${xmlEscape(`${SITE_ORIGIN}${u.path}`)}</loc>${u.updatedAt ? `<lastmod>${u.updatedAt.toISOString().slice(0, 10)}</lastmod>` : ""}<priority>${u.priority}</priority></url>`).join("\n")}\n</urlset>\n`;
   reply.header("Content-Type", "application/xml; charset=utf-8").header("Cache-Control", "public, max-age=3600");
   return body;
 });
@@ -51,7 +51,7 @@ app.get("/sitemap.xml", async (_request, reply) => {
 // (soirées, journal, pages juridiques) restent ouvertes, y compris aux robots des moteurs IA.
 app.get("/robots.txt", async (_request, reply) => {
   reply.header("Content-Type", "text/plain; charset=utf-8").header("Cache-Control", "public, max-age=86400");
-  return ["User-agent: *", "Allow: /", "Disallow: /admin", "Disallow: /dashboard", "Disallow: /restaurant", "Disallow: /notifications", "Disallow: /pay/", "Disallow: /login", "", `Sitemap: ${env.WEB_ORIGIN}/sitemap.xml`, ""].join("\n");
+  return ["User-agent: *", "Allow: /", "Disallow: /admin", "Disallow: /dashboard", "Disallow: /restaurant", "Disallow: /notifications", "Disallow: /pay/", "Disallow: /login", "", `Sitemap: ${SITE_ORIGIN}/sitemap.xml`, ""].join("\n");
 });
 // llms.txt (proposition llmstxt.org) : résumé factuel du service et liens vers les pages utiles, avec
 // les soirées réservables à venir et les derniers articles — généré à la demande, jamais figé.
@@ -60,7 +60,7 @@ app.get("/llms.txt", async (_request, reply) => {
     prisma.event.findMany({ where: { status: { in: [EventStatus.PUBLISHED, EventStatus.FULL] }, isDemo: false, startsAt: { gt: new Date() } }, orderBy: { startsAt: "asc" }, take: 20, select: { slug: true, title: true, category: true, district: true, startsAt: true, priceCents: true } }),
     prisma.article.findMany({ where: { status: "PUBLISHED" }, orderBy: { publishedAt: "desc" }, take: 20, select: { slug: true, title: true, excerpt: true } })
   ]);
-  const o = env.WEB_ORIGIN;
+  const o = SITE_ORIGIN;
   const date = (d: Date) => d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" });
   const lines = [
     "# Nūr Meet",

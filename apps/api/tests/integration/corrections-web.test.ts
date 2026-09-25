@@ -195,7 +195,10 @@ describe("abonnement restaurateur : montée immédiate avec prorata, descente à
     expect(local.status).toBe("ACTIVE");
 
     // Standard → Premium : immédiat, prorata facturé.
-    const up = await api<{ direction: string; subscription: { planId: string } }>("/restaurants/me/subscription/change-plan", { method: "POST", body: JSON.stringify({ planId: premium.id }) }, org.token);
+    // CGV partie B exigées avant tout changement facturé (revue de sécurité du 2026-09-25).
+    const noCgv = await api<{ cgvRequired: boolean }>("/restaurants/me/subscription/change-plan", { method: "POST", body: JSON.stringify({ planId: premium.id }) }, org.token);
+    expect([noCgv.status, noCgv.body.cgvRequired]).toEqual([422, true]);
+    const up = await api<{ direction: string; subscription: { planId: string } }>("/restaurants/me/subscription/change-plan", { method: "POST", body: JSON.stringify({ planId: premium.id, acceptCgv: true }) }, org.token);
     expect(up.status).toBe(200);
     expect(up.body.direction).toBe("UPGRADE");
     expect(up.body.subscription.planId).toBe(premium.id);
@@ -221,7 +224,7 @@ describe("abonnement restaurateur : montée immédiate avec prorata, descente à
     expect(local.pendingPlanId).toBeNull();
     expect((await stripe.subscriptionSchedules.retrieve(schedule.id)).status).toBe("released");
     // Un second Checkout est refusé tant que l'abonnement est actif.
-    expect((await api("/restaurants/me/subscription/checkout", { method: "POST", body: JSON.stringify({ planId: standard.id, billingPeriod: "MONTHLY" }) }, org.token)).status).toBe(409);
+    expect((await api("/restaurants/me/subscription/checkout", { method: "POST", body: JSON.stringify({ planId: standard.id, billingPeriod: "MONTHLY", acceptCgv: true }) }, org.token)).status).toBe(409);
 
     // Décision du 2026-09-25 — mensuel → annuel : immédiat (même formule, périodicité annuelle facturée).
     expect(premium.stripePriceAnnualId, "lancer npm run stripe:setup-test-plans").toBeTruthy();
@@ -384,18 +387,20 @@ describe("espaces restaurateur et administration strictement séparés (décisio
 });
 
 describe("réglages de l'administration appliqués sans redémarrage (décision du 2026-09-25)", () => {
-  it("une durée d'essai modifiée est lue aussitôt par l'espace restaurateur, puis restaurée", async () => {
-    const org = await organizer("ReglageOrg");
+  it("un réglage modifié est lu aussitôt par tous les processus, puis restauré", async () => {
     const admin = await adminToken();
-    const before = (await api<{ trialDays: number }>("/restaurants/me", {}, org.token)).body.trialDays;
+    const KEY = "SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE";
+    // Lu plusieurs fois : chaque requête peut tomber sur un processus différent du cluster.
+    const read = async () => (await api<{ key: string; value: number }[]>("/admin/settings", {}, admin)).body.find(x => x.key === KEY)!.value;
+    const before = await read();
     try {
-      expect((await api("/admin/settings/RESTAURANT_TRIAL_DAYS", { method: "PATCH", body: JSON.stringify({ value: 12 }) }, admin)).status).toBe(200);
-      expect((await api<{ trialDays: number }>("/restaurants/me", {}, org.token)).body.trialDays).toBe(12);
-      // Valeur hors de ce que Stripe accepte : refusée, l'ancienne reste en vigueur.
-      expect((await api("/admin/settings/RESTAURANT_TRIAL_DAYS", { method: "PATCH", body: JSON.stringify({ value: 999 }) }, admin)).status).toBe(400);
-      expect((await api<{ trialDays: number }>("/restaurants/me", {}, org.token)).body.trialDays).toBe(12);
+      expect((await api(`/admin/settings/${KEY}`, { method: "PATCH", body: JSON.stringify({ value: 12 }) }, admin)).status).toBe(200);
+      for (let i = 0; i < 6; i++) expect(await read()).toBe(12);
+      // Valeur hors bornes : refusée, l'ancienne reste en vigueur.
+      expect((await api(`/admin/settings/${KEY}`, { method: "PATCH", body: JSON.stringify({ value: -3 }) }, admin)).status).toBe(400);
+      expect(await read()).toBe(12);
     } finally {
-      await api("/admin/settings/RESTAURANT_TRIAL_DAYS", { method: "PATCH", body: JSON.stringify({ value: before }) }, admin);
+      await api(`/admin/settings/${KEY}`, { method: "PATCH", body: JSON.stringify({ value: before }) }, admin);
     }
   });
 });
@@ -502,5 +507,22 @@ describe("onboarding restaurateur en 3 étapes (décision v2 §5, Stripe test)",
     const other = await pendingRestaurant("OnboardDates");
     expect((await api("/restaurants/me/onboarding-event", { method: "POST", body: JSON.stringify({ ...eventBody(`dates-${Date.now()}`), startsAt: "abc" }) }, other.token)).status).toBe(400);
     expect((await api("/restaurants/me/onboarding-event", { method: "POST", body: JSON.stringify({ ...eventBody(`dates-${Date.now()}`), endsAt: day(29).toISOString() }) }, other.token)).status).toBe(400);
+  }, 60_000);
+
+  // Plus d'essai gratuit (décision du 2026-09-25) : le paiement est immédiat, donc CGV acceptées et
+  // jamais d'encaissement pour un établissement refusé ou suspendu.
+  it("souscription : CGV exigées et enregistrées, refusée pour un établissement refusé ou suspendu", async () => {
+    const owner = await pendingRestaurant("OnboardCgv");
+    const standard = await prisma.plan.findFirstOrThrow({ where: { name: "Standard", active: true } });
+    const withoutCgv = await api<{ cgvRequired: boolean }>("/restaurants/me/subscription/checkout", { method: "POST", body: JSON.stringify({ planId: standard.id, billingPeriod: "MONTHLY" }) }, owner.token);
+    expect([withoutCgv.status, withoutCgv.body.cgvRequired]).toEqual([422, true]);
+    const ok = await api<{ url: string }>("/restaurants/me/subscription/checkout", { method: "POST", body: JSON.stringify({ planId: standard.id, billingPeriod: "MONTHLY", acceptCgv: true }) }, owner.token);
+    expect(ok.status).toBe(200);
+    expect(ok.body.url).toMatch(/^https:\/\/checkout\.stripe\.com\//);
+    expect(await prisma.legalAcceptance.count({ where: { userId: owner.userId, document: "CGV", context: `subscription:${owner.restaurantId}` } })).toBe(1);
+    for (const status of ["REJECTED", "SUSPENDED"] as const) {
+      await prisma.restaurant.update({ where: { id: owner.restaurantId }, data: { status } });
+      expect((await api("/restaurants/me/subscription/checkout", { method: "POST", body: JSON.stringify({ planId: standard.id, billingPeriod: "MONTHLY", acceptCgv: true }) }, owner.token)).status).toBe(409);
+    }
   }, 60_000);
 });

@@ -152,7 +152,7 @@ export function RestaurantSpace() {
       <button type="button" role="tab" aria-selected={tab==="subscription"} className={tab==="subscription"?"active":undefined} onClick={()=>setTab("subscription")}>Abonnement</button>
     </div>}
     {(!hasTabs||tab!=="subscription")&&<RestaurantApplication/>}
-    {hasTabs&&tab==="subscription"&&<RestaurantSubscriptionPanel restaurant={restaurant} onChanged={loadRestaurant}/>}
+    {hasTabs&&tab==="subscription"&&<RestaurantSubscriptionPanel onChanged={loadRestaurant}/>}
   </>;
   // Restaurateur approuvé : même barre latérale que le reste de son espace (tableau de bord, soirées…).
   if(user?.role==="ORGANIZER")return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Mon établissement</h1>{content}</div></section></Layout>;

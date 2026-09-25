@@ -36,7 +36,7 @@ test("restaurateur : son espace sous /restaurant, jamais l'administration", asyn
 test("administration : pages principales intactes, abonnement d'un restaurateur en lecture seule", async ({ page }) => {
   await quickLogin(page, "Administrateur (Walid)", /\/admin$/);
   await page.goto("/admin/settings");
-  await expect(page.getByText("RESTAURANT_TRIAL_DAYS")).toBeVisible();
+  await expect(page.getByText("SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE")).toBeVisible();
   await page.goto("/admin/restaurants");
   await page.locator(".filters select").first().selectOption("APPROVED");
   const card = page.locator(".panel", { hasText: "Maison Amana" }).first();

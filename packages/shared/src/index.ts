@@ -179,7 +179,7 @@ export function subscriptionChangeTiming(current: { monthlyPriceCents: number; b
 // Versions en vigueur des textes juridiques (apps/web/src/legal/*.md) : à changer ici à chaque
 // modification substantielle d'un texte. L'API refuse alors toute action couverte par ce texte tant
 // qu'une nouvelle acceptation n'a pas été enregistrée (voir le modèle LegalAcceptance).
-export const LEGAL_VERSIONS = { CGU: "2026-09-25", CGV: "2026-09-25" } as const;
+export const LEGAL_VERSIONS = { CGU: "2026-09-25", CGV: "2026-09-25.2" } as const;
 
 // Service réservé aux personnes majeures (CGU §2) : l'âge est calculé en années révolues, à la
 // date du jour, jamais approximé en divisant une durée par 365,25 jours.

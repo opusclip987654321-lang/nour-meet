@@ -81,11 +81,6 @@ export const SETTINGS_SCHEMA = {
     default: 3,
     description: "Délai avant l'échéance d'un abonnement restaurateur (fin de période ou fin d'essai) auquel un rappel est envoyé, une seule fois par période."
   },
-  RESTAURANT_TRIAL_DAYS: {
-    schema: z.number().int().positive().max(730), // plafond de Stripe pour trial_period_days
-    default: 7,
-    description: "Durée de l'essai gratuit (en jours) accordé à la première souscription d'un restaurateur, au moment où il choisit sa formule (§7 du cahier des charges 2026-09) : carte bancaire requise, abonnement activé à l'issue de l'essai sauf résiliation avant l'échéance."
-  },
   ANALYTICS_ENABLED: {
     schema: z.boolean(),
     default: true,

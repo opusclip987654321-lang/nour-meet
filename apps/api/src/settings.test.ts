@@ -18,26 +18,26 @@ describe("réglages partagés entre les processus du cluster", () => {
   it("le processus qui enregistre applique la valeur tout de suite et prévient les autres", async () => {
     const broadcast = vi.fn();
     settingsChannel.broadcast = broadcast;
-    await updateSetting(fakePrisma([]), "RESTAURANT_TRIAL_DAYS", 14);
-    expect(getSetting("RESTAURANT_TRIAL_DAYS")).toBe(14);
+    await updateSetting(fakePrisma([]), "SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE", 14);
+    expect(getSetting("SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE")).toBe(14);
     expect(broadcast).toHaveBeenCalledOnce();
   });
 
   it("un autre processus relit la base dès le message, sans redémarrage", async () => {
     let deliver: (message: unknown) => void = () => {};
     settingsChannel.subscribe = onMessage => { deliver = onMessage; return () => {}; };
-    const rows = [{ key: "RESTAURANT_TRIAL_DAYS", value: 7 }];
+    const rows = [{ key: "SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE", value: 7 }];
     const prisma = fakePrisma(rows);
     await loadSettings(prisma);
     const stop = watchSettings(prisma, () => {});
-    expect(getSetting("RESTAURANT_TRIAL_DAYS")).toBe(7);
+    expect(getSetting("SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE")).toBe(7);
     rows[0].value = 21; // modifié en base par un autre processus
     deliver({ type: SETTINGS_CHANGED_MESSAGE });
-    await vi.waitFor(() => expect(getSetting("RESTAURANT_TRIAL_DAYS")).toBe(21));
+    await vi.waitFor(() => expect(getSetting("SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE")).toBe(21));
     stop();
   });
 
-  it("refuse une durée d'essai que Stripe n'accepterait pas", async () => {
-    await expect(updateSetting(fakePrisma([]), "RESTAURANT_TRIAL_DAYS", 999)).rejects.toThrow();
+  it("refuse une valeur hors des bornes du réglage", async () => {
+    await expect(updateSetting(fakePrisma([]), "SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE", -3)).rejects.toThrow();
   });
 });

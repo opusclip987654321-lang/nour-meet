@@ -84,3 +84,6 @@ const envSchema = z.object({
 });
 
 export const env = envSchema.parse(process.env);
+// WEB_ORIGIN peut lister plusieurs origines autorisées (CORS, séparées par des virgules) ; les liens
+// construits vers le site (retours Stripe, partage, sitemap) utilisent toujours la première, la principale.
+export const SITE_ORIGIN = env.WEB_ORIGIN.split(",")[0].trim().replace(/\/$/, "");

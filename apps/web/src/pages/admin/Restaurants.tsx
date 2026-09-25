@@ -52,7 +52,7 @@ export function AdminRestaurants() {
 
   const decide=async(id:string, accept:boolean, rejectReason?:string)=>{
     setActingOn(id);setNotice(null);
-    try{await api(`/admin/restaurants/${id}/decision`,{method:"POST",body:JSON.stringify({accept,reason:rejectReason})});setNotice({kind:"success",text:accept?"Restaurateur approuvé. Un essai d’abonnement a été activé.":"Demande refusée."});setReasonFor(null);setReason("");await load()}
+    try{await api(`/admin/restaurants/${id}/decision`,{method:"POST",body:JSON.stringify({accept,reason:rejectReason})});setNotice({kind:"success",text:accept?"Restaurateur approuvé.":"Demande refusée."});setReasonFor(null);setReason("");await load()}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setActingOn(null)}
   };

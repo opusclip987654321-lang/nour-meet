@@ -133,7 +133,7 @@ Nūr Meet examine la demande et peut l'accepter ou la refuser. **Aucune demande 
 
 Nūr Meet propose des abonnements **Standard** et **Premium**, en facturation **mensuelle** ou **annuelle**. Le prix hors taxes, le nombre de soirées publiables par mois et les options (mise en avant) sont ceux affichés dans l'espace restaurateur au moment de la souscription. La formule annuelle bénéficie de la remise affichée.
 
-La souscription se fait par carte bancaire via **Stripe**. Lors d'une première souscription, un **essai gratuit** d'une durée affichée est accordé ; la carte est demandée dès la souscription et l'abonnement démarre à la fin de l'essai, sauf résiliation avant son terme.
+La souscription se fait par carte bancaire via **Stripe**. Le premier paiement est effectué à la souscription, puis à chaque échéance de la périodicité choisie (mensuelle ou annuelle).
 
 Le choix d'une formule ne publie aucune soirée : chaque soirée reste soumise à la validation de Nūr Meet (B4).
 
@@ -154,7 +154,7 @@ L'équipe Nūr Meet peut consulter l'abonnement d'un établissement pour l'accom
 
 Le restaurateur crée ses soirées en brouillon puis les soumet à validation. Une soirée ne peut être soumise que si l'établissement dispose d'**au moins une photo**. Nūr Meet vérifie la cohérence, la qualité et la conformité de la soirée avant de la publier, et peut demander des modifications.
 
-La publication requiert un **abonnement actif** (ou en période d'essai) et s'impute sur le nombre de soirées publiables par mois de la formule.
+La publication requiert un **abonnement actif** et s'impute sur le nombre de soirées publiables par mois de la formule.
 
 Le restaurateur reste responsable :
 - de l'exactitude des informations fournies (date, prix, prestations comprises, capacité) ;
