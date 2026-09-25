@@ -46,6 +46,8 @@ app.get("/profiles/code/:code", { preHandler: auth, config: { rateLimit: { max: 
   if (profile.userId === currentId(request)) return reply.code(409).send({ error: "Il s’agit de votre propre code" });
   // Aucun profil montré hors d'une soirée commune : un code trouvé ne suffit pas.
   if (!(await shareAnEvent(currentId(request), profile.userId))) return reply.code(403).send({ error: SHARED_EVENT_REQUIRED });
+  // La personne qui vous a signalé(e) n'est plus visible, même avec son code.
+  if (await prisma.report.findFirst({ where: { reporterId: profile.userId, reportedId: currentId(request) }, select: { id: true } })) return reply.code(403).send({ error: UNAVAILABLE });
   return { userId: profile.userId, displayName: profile.user.displayName, photoUrl: profile.photoUrl, age: profileAge(profile.birthDate), city: profile.city, profession: profile.profession, interests: profile.interests, bio: profile.bio, validated: !!profile.validatedAt };
 });
 
@@ -55,6 +57,9 @@ app.get("/profiles/code/:code", { preHandler: auth, config: { rateLimit: { max: 
 app.post("/contacts/request", { preHandler: auth }, async (request, reply) => {
   const { recipientId } = z.object({ recipientId: z.string() }).parse(request.body); const requesterId = currentId(request);
   if (recipientId === requesterId) return reply.code(400).send({ error: "Vous ne pouvez pas vous envoyer une demande à vous-même." });
+  // Destinataire suspendu ou supprimé depuis la lecture de son code : même réponse neutre.
+  const recipient = await prisma.user.findUnique({ where: { id: recipientId }, select: { deletedAt: true, suspendedAt: true } });
+  if (!recipient || recipient.deletedAt || recipient.suspendedAt) return reply.code(409).send({ error: UNAVAILABLE });
   // Règle serveur, pas seulement d'interface : jamais de demande hors d'une soirée commune.
   if (!(await shareAnEvent(requesterId, recipientId))) return reply.code(403).send({ error: SHARED_EVENT_REQUIRED });
   const existing = await prisma.contactRequest.findUnique({ where: { requesterId_recipientId: { requesterId, recipientId } } });

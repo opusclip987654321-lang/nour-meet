@@ -202,7 +202,7 @@ export const subscriptionOverview = async (restaurantId: string) => {
   let invoices: { id: string; number: string | null; status: string | null; createdAt: string; amountCents: number; currency: string; hostedUrl: string | null; pdfUrl: string | null }[] = [];
   if (stripe && subscription?.stripeCustomerId) {
     const list = await stripe.invoices.list({ customer: subscription.stripeCustomerId, limit: 24 }).catch(() => null);
-    invoices = (list?.data ?? []).map(i => ({ id: i.id ?? "", number: i.number ?? null, status: i.status ?? null, createdAt: new Date(i.created * 1000).toISOString(), amountCents: i.status === "paid" ? i.amount_paid : i.amount_due, currency: i.currency, hostedUrl: i.hosted_invoice_url ?? null, pdfUrl: i.invoice_pdf ?? null }));
+    invoices = (list?.data ?? []).map((i, index) => ({ id: i.number ?? `facture-${index + 1}`, number: i.number ?? null, status: i.status ?? null, createdAt: new Date(i.created * 1000).toISOString(), amountCents: i.status === "paid" ? i.amount_paid : i.amount_due, currency: i.currency, hostedUrl: i.hosted_invoice_url ?? null, pdfUrl: i.invoice_pdf ?? null }));
   }
   return {
     subscription: subscription ? {

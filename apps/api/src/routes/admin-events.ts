@@ -52,7 +52,7 @@ app.get("/admin/events/:id/reservations", { preHandler: roles(UserRole.ADMIN, Us
   const isAdmin = token.role === UserRole.ADMIN;
   // §6 (corrections web 2026-09-24) : le restaurateur ne voit que le statut du paiement, jamais les
   // références Stripe ni les champs de remboursement internes à Nūr Meet.
-  return prisma.reservation.findMany({ where: { eventId: event.id }, include: { user: { select: isAdmin ? { id: true, displayName: true, phone: true, email: true } : { id: true, displayName: true } }, payment: isAdmin ? true : { select: { id: true, status: true } }, ticket: true }, orderBy: { createdAt: "desc" } });
+  return prisma.reservation.findMany({ where: { eventId: event.id }, include: { user: { select: isAdmin ? { id: true, displayName: true, phone: true, email: true } : { id: true, displayName: true } }, payment: isAdmin ? true : { select: { id: true, status: true } }, ticket: isAdmin ? true : { select: { id: true, status: true, usedAt: true } } }, orderBy: { createdAt: "desc" } });
 });
 
 app.post("/admin/events/:id/cancel", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
@@ -122,7 +122,7 @@ app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER
     status: token.role === UserRole.ADMIN && input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT
   } });
   await audit(currentId(request), "CREATE_EVENT", "Event", event.id);
-  if (event.status === EventStatus.PUBLISHED) await retireDemoEventsIfRealOnesPublished(prisma);
+  if (event.status === EventStatus.PUBLISHED) await retireDemoEventsIfRealOnesPublished(prisma).catch(err => request.log.error(err, "Retrait des soirées de démonstration échoué"));
   return event;
 });
 // Modification d'un événement déjà créé. La capacité ne peut jamais descendre sous les places déjà
@@ -280,7 +280,8 @@ app.post("/admin/events/:id/review-decision", { preHandler: roles(UserRole.ADMIN
   const updated = await prisma.event.update({ where: { id }, data: { status: accept ? EventStatus.PUBLISHED : EventStatus.DRAFT, reviewedAt: new Date(), reviewNote: note ?? null, quotaConsumedAt: quotaConsumedNow ? new Date() : undefined } });
   if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, accept ? "Événement publié" : "Événement renvoyé en brouillon", accept ? `« ${event.title} » est maintenant publié.` : `« ${event.title} » nécessite des modifications${note ? ` : ${note}` : "."}`, links.restaurantEvent(event.id));
   await audit(currentId(request), accept ? "APPROVE_EVENT" : "REJECT_EVENT", "Event", id, { note, quotaConsumedNow });
-  if (accept && !event.isDemo) await retireDemoEventsIfRealOnesPublished(prisma);
+  // Le retrait des démonstrations ne doit jamais faire échouer une publication déjà enregistrée.
+  if (accept && !event.isDemo) await retireDemoEventsIfRealOnesPublished(prisma).catch(err => request.log.error(err, "Retrait des soirées de démonstration échoué"));
   return updated;
 });
 // Action explicite d'un administrateur (§8.2) : la seule façon de rendre un quota déjà consommé,

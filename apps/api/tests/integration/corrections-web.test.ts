@@ -246,7 +246,7 @@ describe("abonnement restaurateur : montée immédiate avec prorata, descente à
     expect(seenByAdmin.status).toBe(200);
     expect(seenByAdmin.body.subscription).toEqual(own.body.subscription);
     expect(own.body.invoices.length).toBeGreaterThan(0);
-    expect(JSON.stringify(own.body)).not.toMatch(/stripeSubscriptionId|stripeCustomerId|cus_|sub_/);
+    expect(JSON.stringify(own.body)).not.toMatch(/stripeSubscriptionId|stripeCustomerId|cus_|sub_|"in_/);
     await stripe.subscriptions.cancel(subscription.id);
   }, 90_000);
 });

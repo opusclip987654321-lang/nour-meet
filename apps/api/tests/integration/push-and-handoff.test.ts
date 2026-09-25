@@ -101,6 +101,9 @@ describe("jeton de paiement de la page /pay (15 min)", () => {
     expect((await api(`/events/${event.id}/my-application`, {}, paymentToken)).status).toBe(200);
     // Une autre inscription, le profil, la session glissante ou une connexion mobile : refusés.
     expect((await api(`/me/applications/${otherApplication.id}/amount`, {}, paymentToken)).status).toBe(403);
+    // Ni paiement d'une autre inscription, ni lecture de sa candidature à une autre soirée.
+    expect((await api(`/applications/${otherApplication.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, paymentToken)).status).toBe(403);
+    expect((await api(`/events/${other.id}/my-application`, {}, paymentToken)).status).toBe(403);
     expect((await api("/me", {}, paymentToken)).status).toBe(403);
     expect((await api("/me/applications", {}, paymentToken)).status).toBe(403);
     expect((await api("/auth/mobile-handoff", { method: "POST", body: JSON.stringify({ redirect: "nourmeet://auth", challenge: "a".repeat(43) }) }, paymentToken)).status).toBe(403);

@@ -35,7 +35,7 @@ Rien n'est déposé ni enregistré tant que vous n'avez pas accepté. Les visite
 
 ## 4. Rapports d'erreurs
 
-En cas d'erreur technique, un rapport est envoyé à **Sentry** : message d'erreur et contexte technique, sans votre identité, sans cookie et sans enregistrement de votre écran.
+En cas d'erreur technique, un rapport est envoyé à **Sentry** : message d'erreur et contexte technique, rattachés au plus à un identifiant technique de compte (jamais votre nom, téléphone ou e-mail), sans cookie et sans enregistrement de votre écran.
 
 ## 5. Application mobile
 

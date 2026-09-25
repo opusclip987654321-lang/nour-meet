@@ -65,7 +65,7 @@ Les données de carte bancaire sont saisies directement chez **Stripe** ; Nūr M
 
 ### Données techniques
 - adresse IP et journaux techniques du serveur ;
-- rapports d'erreur (sans votre identité, sans le contenu de vos échanges) ;
+- rapports d'erreur, rattachés au plus à un identifiant technique de compte (jamais votre nom, téléphone, e-mail ni le contenu de vos échanges) ;
 - mesure d'audience interne, **uniquement après votre accord** (voir la Politique de cookies).
 
 ## 4. Finalités et bases légales
@@ -102,7 +102,7 @@ Nūr Meet n'envoie pas de prospection commerciale par e-mail ou SMS. Si cela dev
 | Resend | Envoi des e-mails de service (codes de connexion, notifications) | États-Unis |
 | Google | Connexion avec un compte Google, à votre demande (identifiant, nom et e-mail du compte) | États-Unis |
 | Expo, puis Apple et Google | Acheminement des notifications push, si vous les autorisez (contenu générique, sans détail personnel) | États-Unis |
-| Sentry | Rapports d'erreurs techniques, sans identité ni contenu des échanges | États-Unis ou Union européenne selon la configuration |
+| Sentry | Rapports d'erreurs techniques, avec au plus un identifiant technique de compte, sans nom, téléphone, e-mail ni contenu des échanges | États-Unis ou Union européenne selon la configuration |
 
 Les services d'intelligence artificielle (OpenAI, Anthropic) et Instagram ne sont utilisés que pour les articles du journal et les illustrations du site : **aucune donnée de membre ne leur est transmise**.
 

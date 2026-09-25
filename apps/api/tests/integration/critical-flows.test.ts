@@ -1093,5 +1093,7 @@ describe("signalement et confidentialité entre participants", () => {
     expect((await api(`/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ body: "Bonjour" }) }, b.token)).status).toBe(403);
     expect((await api(`/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ body: "Bonjour" }) }, a.token)).status).toBe(403);
     expect((await api("/contacts/request", { method: "POST", body: JSON.stringify({ recipientId: a.userId }) }, b.token)).status).toBe(409);
+    // La personne signalée ne voit plus non plus le profil de celle qui l'a signalée.
+    expect((await api(`/profiles/code/${await shareCodeOf(a.userId)}`, {}, b.token)).status).toBe(403);
   });
 });

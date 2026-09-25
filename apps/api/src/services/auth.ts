@@ -13,10 +13,15 @@ const PAYMENT_SCOPE_ROUTES: { method: string; url: string; bound: boolean }[] = 
   { method: "POST", url: "/applications/:id/payment-intent", bound: true },
   { method: "GET", url: "/events/:id/my-application", bound: false }
 ];
-const assertPaymentScope = (request: FastifyRequest, token: TokenUser) => {
+// my-application porte l'identifiant de l'ÉVÉNEMENT : il doit être celui de l'inscription du jeton,
+// jamais un autre (sinon un jeton volé révélerait les candidatures de la personne à d'autres soirées).
+const boundToTokenEvent = async (eventId: string | undefined, applicationId: string | undefined) =>
+  !!eventId && !!applicationId && !!(await prisma.application.findFirst({ where: { id: applicationId, eventId }, select: { id: true } }));
+const assertPaymentScope = async (request: FastifyRequest, token: TokenUser) => {
   const route = PAYMENT_SCOPE_ROUTES.find(r => r.method === request.method && r.url === request.routeOptions.url);
   const id = (request.params as { id?: string } | undefined)?.id;
   if (!route || (route.bound && (!token.app || id !== token.app))) throw httpError(403, "Jeton réservé au paiement en cours.");
+  if (!route.bound && !(await boundToTokenEvent(id, token.app))) throw httpError(403, "Jeton réservé au paiement en cours.");
 };
 
 // Le rôle et l'état du compte sont vérifiés en base à chaque requête (pas seulement via les
@@ -25,7 +30,7 @@ const assertPaymentScope = (request: FastifyRequest, token: TokenUser) => {
 const loadCurrentUser = async (request: FastifyRequest) => {
   await request.jwtVerify();
   const token = request.user as TokenUser;
-  if (token.scope === "payment") assertPaymentScope(request, token);
+  if (token.scope === "payment") await assertPaymentScope(request, token);
   const current = await prisma.user.findUniqueOrThrow({ where: { id: token.sub } });
   if (current.suspendedAt) throw httpError(403, "Compte suspendu");
   if (current.deletedAt) throw httpError(403, "Compte supprimé");
