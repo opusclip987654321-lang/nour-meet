@@ -200,7 +200,7 @@ app.get("/me/applications", { preHandler: auth }, async (request) => {
   // avant la confirmation de la place (elle figure sur le billet).
   return applications.map(({ notes: _notes, ...a }) => {
     if (!a.event) return a;
-    const { priceTiers, isDemo: _isDemo, reviewNote: _reviewNote, address, ...event } = a.event;
+    const { priceTiers, isDemo: _isDemo, reviewNote: _reviewNote, address, instagramMediaId: _ig, instagramPublishedAt: _igAt, instagramPublishingAt: _igLock, instagramError: _igErr, facebookPostId: _fb, facebookPublishedAt: _fbAt, facebookPublishingAt: _fbLock, facebookError: _fbErr, ...event } = a.event;
     return { ...a, amountCents: applicationAmountCents({ ...a.event, priceTiers }, a.quotaCategory), event: { ...event, address: a.status === ApplicationStatus.CONFIRMED ? address : null, imageUrl: a.event.imageUrl ?? defaultCategoryImage(a.event.category) } };
   });
 });

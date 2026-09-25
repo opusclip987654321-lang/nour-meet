@@ -314,6 +314,11 @@ model Event {
   instagramPublishedAt    DateTime?
   instagramPublishingAt   DateTime?
   instagramError          String?
+  // Publication sur la Page Facebook au premier passage réel à PUBLISHED (mêmes règles qu'Instagram).
+  facebookPostId          String?
+  facebookPublishedAt     DateTime?
+  facebookPublishingAt    DateTime?
+  facebookError           String?
   applications            Application[]
   callSlots               ScreeningCall[]
   reservations            Reservation[]
@@ -910,6 +915,11 @@ model Article {
   // Verrou de publication (v2 §6) : posé atomiquement avant l'envoi à Instagram, pour qu'un nouvel essai
   // manuel et la tâche automatique ne publient jamais deux fois le même carrousel.
   instagramPublishingAt DateTime?
+  // Publication sur la Page Facebook (même carrousel qu'Instagram) : identifiant, date, verrou, erreur.
+  facebookPostId       String?
+  facebookPublishedAt  DateTime?
+  facebookPublishingAt DateTime?
+  facebookError        String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   reviewLogs      ArticleReviewLog[]

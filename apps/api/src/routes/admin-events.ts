@@ -16,7 +16,8 @@ import { claimReservation } from "../services/reservations.js";
 import { getSetting } from "../settings.js";
 import { retireDemoEventsIfRealOnesPublished } from "../services/demo-events.js";
 import { shareEventOnInstagram } from "../services/instagram.js";
-import { instagramConfig } from "../services/social-config.js";
+import { facebookConfig, instagramConfig } from "../services/social-config.js";
+import { shareEventOnFacebook } from "../services/facebook.js";
 import { eventCreateData, eventCreateSchema, perksInput } from "../services/event-drafts.js";
 
 app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
@@ -283,6 +284,12 @@ app.post("/admin/events/:id/review-decision", { preHandler: roles(UserRole.ADMIN
       .then(outcome => request.log.info({ eventId: event.id, outcome }, "Publication Instagram de l’événement"))
       .catch(err => request.log.warn({ eventId: event.id, err: (err as Error).message }, "Publication Instagram de l’événement échouée"));
   }
+  const facebook = facebookConfig;
+  if (accept && facebook && event.controllerRestaurant && !event.isDemo) {
+    void shareEventOnFacebook(prisma, facebook, event.id, defaultCategoryImage(event.category))
+      .then(outcome => request.log.info({ eventId: event.id, outcome }, "Publication Facebook de l’événement"))
+      .catch(err => request.log.warn({ eventId: event.id, err: (err as Error).message }, "Publication Facebook de l’événement échouée"));
+  }
   return updated;
 });
 // Nouvel essai manuel après un échec (jamais une seconde publication : instagramMediaId + verrou).
@@ -297,6 +304,20 @@ app.post("/admin/events/:id/instagram", { preHandler: roles(UserRole.ADMIN), con
     return { result };
   } catch (err) {
     return reply.code(502).send({ error: `Instagram a refusé la publication : ${(err as Error).message}` });
+  }
+});
+// Nouvel essai manuel de la publication Facebook d'une soirée (jamais une seconde publication).
+app.post("/admin/events/:id/facebook", { preHandler: roles(UserRole.ADMIN), config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  if (!facebookConfig) return reply.code(503).send({ error: "Facebook n’est pas configuré sur ce serveur." });
+  const event = await prisma.event.findUniqueOrThrow({ where: { id } });
+  try {
+    const result = await shareEventOnFacebook(prisma, facebookConfig, id, defaultCategoryImage(event.category));
+    if (result === "NOT_ELIGIBLE") return reply.code(409).send({ error: "Seul un événement restaurateur publié, à venir et hors démonstration peut être partagé sur Facebook." });
+    await audit(currentId(request), "SHARE_EVENT_FACEBOOK", "Event", id, { result });
+    return { result };
+  } catch (err) {
+    return reply.code(502).send({ error: `Facebook a refusé la publication : ${(err as Error).message}` });
   }
 });
 // Action explicite d'un administrateur (§8.2) : la seule façon de rendre un quota déjà consommé,
