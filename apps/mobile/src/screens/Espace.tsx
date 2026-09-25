@@ -146,8 +146,8 @@ function Interview({ user, onUserChanged }: { user: any; onUserChanged: () => vo
     {user.profile?.validatedAt ? <Notice kind="success">Votre profil est validé : vous pouvez vous inscrire directement aux soirées.</Notice>
       : !status || status.status == null ? requestForm
         : status.status === "REFUSED" ? (status.retryAvailableAt && new Date(status.retryAvailableAt) > new Date()
-          ? <><Notice kind="error">Votre profil n’a pas été validé{status.notes ? ` : ${status.notes}` : "."}</Notice><Text style={s.small}>Vous pourrez redemander un entretien à partir du {longDate(status.retryAvailableAt)}.</Text></>
-          : <>{status.notes && <Notice kind="error">{status.notes}</Notice>}{requestForm}</>)
+          ? <><Notice kind="error">Votre profil n’a pas été validé.</Notice><Text style={s.small}>Vous pourrez redemander un entretien à partir du {longDate(status.retryAvailableAt)}.</Text></>
+          : requestForm)
           : status.status === "PENDING_CALL" && !status.call ? <View style={[s.panel, { gap: S[3] }]}>
             <Text style={s.h3}>Choisissez votre appel</Text>
             {loadingSlots ? <ActivityIndicator color={T.night} /> : slots.length === 0 ? <Text style={s.small}>Aucun créneau disponible pour le moment. L’équipe Nūr Meet publie régulièrement de nouveaux créneaux : revenez un peu plus tard.</Text>

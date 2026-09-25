@@ -13,7 +13,8 @@ if (cluster.isPrimary && workerCount > 1) {
   // Un réglage modifié par un worker est relayé à tous les autres (voir watchSettings, settings.ts).
   cluster.on("message", (sender, message) => {
     if ((message as { type?: string } | null)?.type !== SETTINGS_CHANGED_MESSAGE) return;
-    for (const worker of Object.values(cluster.workers ?? {})) if (worker && worker.id !== sender.id) worker.send(message);
+    // Un worker qui s'arrête à cet instant ne doit jamais faire tomber le processus principal.
+    for (const worker of Object.values(cluster.workers ?? {})) if (worker && worker.id !== sender.id && worker.isConnected()) worker.send(message, undefined, () => {});
   });
 
   let shuttingDown = false;

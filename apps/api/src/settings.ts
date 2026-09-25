@@ -150,7 +150,7 @@ export async function updateSetting<K extends SettingKey>(prisma: PrismaClient, 
   const parsed = SETTINGS_SCHEMA[key].schema.parse(value);
   await prisma.appSetting.upsert({ where: { key }, update: { value: parsed as any, updatedBy }, create: { key, value: parsed as any, updatedBy } });
   cache = { ...cache, [key]: parsed };
-  process.send?.({ type: SETTINGS_CHANGED_MESSAGE });
+  if (process.connected) process.send?.({ type: SETTINGS_CHANGED_MESSAGE }, undefined, {}, () => {});
   return parsed as Settings[K];
 }
 

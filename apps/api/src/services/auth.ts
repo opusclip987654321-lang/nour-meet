@@ -35,7 +35,9 @@ export const auth = async (request: FastifyRequest) => { await loadCurrentUser(r
 // C24 : les fiches publiques restent consultables sans compte, mais un visiteur connecté doit voir
 // le solde de SA catégorie plutôt qu'un état générique — jamais d'erreur si le jeton est absent ou
 // invalide, contrairement à `auth`.
-export const optionalAuth = async (request: FastifyRequest) => { try { await loadCurrentUser(request); } catch { /* visiteur anonyme */ } };
+// Un jeton refusé (compte suspendu, jeton de paiement hors de ses routes…) ne laisse jamais
+// request.user rempli : jwtVerify l'a posé avant le refus, et les routes testent `request.user`.
+export const optionalAuth = async (request: FastifyRequest) => { try { await loadCurrentUser(request); } catch { (request as { user?: unknown }).user = undefined; } };
 export const roles = (...allowed: UserRole[]) => async (request: FastifyRequest) => {
   await loadCurrentUser(request);
   if (!allowed.includes((request.user as TokenUser).role)) throw httpError(403, "Accès non autorisé");
