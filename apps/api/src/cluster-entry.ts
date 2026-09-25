@@ -1,5 +1,6 @@
 import cluster from "node:cluster";
 import { workerCount } from "./cluster-config.js";
+import { SETTINGS_CHANGED_MESSAGE } from "./settings.js";
 
 // index.ts itself is untouched: every worker runs the exact same full bootstrap
 // (mkdir calls, Fastify setup, app.listen, the setInterval background jobs — each
@@ -8,6 +9,12 @@ import { workerCount } from "./cluster-config.js";
 // so it never opens a Prisma connection or an HTTP listener of its own.
 if (cluster.isPrimary && workerCount > 1) {
   for (let i = 0; i < workerCount; i++) cluster.fork();
+
+  // Un réglage modifié par un worker est relayé à tous les autres (voir watchSettings, settings.ts).
+  cluster.on("message", (sender, message) => {
+    if ((message as { type?: string } | null)?.type !== SETTINGS_CHANGED_MESSAGE) return;
+    for (const worker of Object.values(cluster.workers ?? {})) if (worker && worker.id !== sender.id) worker.send(message);
+  });
 
   let shuttingDown = false;
   cluster.on("exit", (worker, code, signal) => {
