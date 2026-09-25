@@ -51,7 +51,7 @@ Date d'expiration future quelconque, CVC quelconque, code postal quelconque.
 ## 5. Parcours à tester
 
 **Participant** — compte `+33600000042` « Paiement en attente » (code SMS `123456` en mode simulé) :
-Mon espace → Réservations → « Payer par carte » → accepter les CGV → carte `4242…` → le webhook
+Mon espace → Réservations → « Payer 35,00 € » (un seul bouton par carte) → accepter les CGV → carte `4242…` → le webhook
 confirme : statut « Place confirmée », billet QR dans « Mes billets », notification cliquable.
 
 **Restaurateur** — compte `+33600000002` (Maison Amana) : Mon établissement → Abonnement →
@@ -63,6 +63,22 @@ confirme : statut « Place confirmée », billet QR dans « Mes billets », noti
   de bascule est affichée ; « Conserver Premium » annule le changement programmé.
 - Pour vérifier la bascule sans attendre un mois : Dashboard Stripe (test) → Horloges de test
   (*test clocks*), ou `stripe trigger customer.subscription.updated`.
+
+**Nouveau restaurateur, parcours en 3 étapes** (décision v2 §5) — créer un compte participant, puis :
+1. « Devenir restaurateur » → fiche + au moins une photo → « Envoyer ma demande » : restaurant en attente.
+2. « Créer mon premier événement » (`/restaurant/premier-evenement`) : le brouillon est enregistré, rien
+   n'est publié.
+3. « Choisir mon abonnement » → Checkout → carte `4242…` : au webhook `checkout.session.completed`,
+   l'établissement est approuvé, le compte devient restaurateur et le brouillon passe **en attente de
+   validation** (jamais publié automatiquement). Avec `4000 0000 0000 9995` (refus) ou une session
+   abandonnée, rien ne change : le restaurant reste en attente.
+
+**Carte refusée** : `4000 0000 0000 9995` → message d'erreur de Stripe dans le formulaire, aucune place
+réservée ni abonnement activé. **3-D Secure** : `4000 0025 0000 3155` → valider dans la fenêtre de test.
+
+**Aide-mémoire à l'écran** : en développement local uniquement (`npm run dev` / Vite), un encadré
+« Développement : cartes de test Stripe » apparaît sous le formulaire de paiement et sous les formules
+d'abonnement. Il n'existe pas dans le build de production (`import.meta.env.DEV`).
 
 **Événement de démonstration** (`isDemo`) : le paiement est refusé par l'API avec le message
 « Cet événement n'est actuellement pas réservable » — aucun PaymentIntent n'est créé.

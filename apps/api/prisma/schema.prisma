@@ -108,6 +108,8 @@ model User {
   phoneVerifiedAt  DateTime?
   email            String?          @unique
   emailVerifiedAt  DateTime?
+  // E-mail de bienvenue envoyé une seule fois, dès la première adresse vérifiée (décision v2 §4).
+  welcomeEmailSentAt DateTime?
   displayName      String
   role             UserRole         @default(PARTICIPANT)
   suspendedAt      DateTime?
@@ -306,6 +308,12 @@ model Event {
   // tentative de paiement est refusée côté serveur (POST /applications/:id/payment-intent), jamais
   // seulement masquée dans l'interface. Aucune mention « démo » n'est affichée publiquement.
   isDemo                  Boolean     @default(false)
+  // Publication Instagram d'un événement restaurateur (v2 §14) : une seule fois, au premier passage réel
+  // à PUBLISHED ; identifiant du média, date, verrou d'envoi et dernière erreur (jamais bloquante).
+  instagramMediaId        String?
+  instagramPublishedAt    DateTime?
+  instagramPublishingAt   DateTime?
+  instagramError          String?
   applications            Application[]
   callSlots               ScreeningCall[]
   reservations            Reservation[]
@@ -467,6 +475,21 @@ model ScreeningCall {
   endsAt        DateTime
   completedAt   DateTime?
   notes         String?
+
+  @@index([startsAt])
+}
+
+// Calendrier des entretiens (v2 §11) : ouvert par défaut de 10h à 22h ; l'équipe ferme des périodes.
+// Une plage bloquée ne déplace ni n'annule jamais un rendez-vous déjà réservé (ScreeningCall).
+model InterviewBlock {
+  id          String   @id @default(cuid())
+  startsAt    DateTime
+  endsAt      DateTime
+  reason      String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([startsAt, endsAt])
 }
 
 model Reservation {
@@ -884,6 +907,9 @@ model Article {
   instagramMediaId     String?
   instagramPublishedAt DateTime?
   instagramError       String?
+  // Verrou de publication (v2 §6) : posé atomiquement avant l'envoi à Instagram, pour qu'un nouvel essai
+  // manuel et la tâche automatique ne publient jamais deux fois le même carrousel.
+  instagramPublishingAt DateTime?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   reviewLogs      ArticleReviewLog[]

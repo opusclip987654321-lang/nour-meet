@@ -1,3 +1,4 @@
+import { approveRestaurantAfterFirstPayment } from "../services/subscriptions.js";
 import { isAdult } from "@nour/shared";
 import { ApplicationStatus, LegalDocument, PaymentStatus, Prisma, SubscriptionStatus, UserRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
@@ -228,15 +229,10 @@ await app.register(async (webhooks) => {
       const subscriptionRef = invoice.parent?.subscription_details?.subscription;
       const stripeSubscriptionId = typeof subscriptionRef === "string" ? subscriptionRef : subscriptionRef?.id;
       if (stripeSubscriptionId) {
-        const existing = await prisma.restaurantSubscription.findFirst({ where: { stripeSubscriptionId }, include: { restaurant: { include: { owner: true } } } });
-        if (existing && existing.restaurant.status === "PENDING") {
-          await prisma.$transaction([
-            prisma.restaurant.update({ where: { id: existing.restaurant.id }, data: { status: "APPROVED", verifiedAt: new Date() } }),
-            prisma.user.update({ where: { id: existing.restaurant.ownerId }, data: { role: existing.restaurant.owner.role === UserRole.PARTICIPANT ? UserRole.ORGANIZER : existing.restaurant.owner.role } })
-          ]);
-          await notify(existing.restaurant.ownerId, "Compte restaurateur approuvé automatiquement", "Votre premier paiement d’abonnement a été confirmé : votre établissement est approuvé. Vous pouvez proposer des soirées, chacune restant soumise à validation.", "/restaurant?tab=subscription");
-          await audit(undefined, "AUTO_APPROVE_RESTAURANT_ON_PAYMENT", "Restaurant", existing.restaurant.id, { invoiceId: invoice.id });
-        }
+        // Même règle que la validation au Checkout (v2 §5) : une seule fonction, qui exige un montant
+        // réellement encaissé, une photo, aucun refus antérieur, et une transition atomique.
+        const existing = await prisma.restaurantSubscription.findFirst({ where: { stripeSubscriptionId }, select: { restaurantId: true } });
+        if (existing) await approveRestaurantAfterFirstPayment(existing.restaurantId, { paidInvoiceCents: invoice.amount_paid ?? 0 });
       }
     }
     return reply.send({ received: true });

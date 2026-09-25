@@ -5,7 +5,7 @@ import { CalendarClock, Check, LogOut, Minus } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Image, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { api } from "../api";
-import { Badge, Button, Chip, Field, Loading, Notice, Skeleton } from "../components/ui";
+import { Badge, Button, Chip, Field, Loading, Notice, Skeleton, openWeb } from "../components/ui";
 import { imgUrl, longDate, money } from "../format";
 import { SUBSCRIPTION_STATUS_LABEL } from "../labels";
 import { Navigate, RestaurantTab } from "../links";
@@ -38,7 +38,7 @@ export function RestaurantSpace({ tab: initialTab, focus, navigate, onLogout }: 
     {hasTabs && <View style={[s.row, { flexWrap: "wrap" }]}><Chip label="Établissement" active={tab === "establishment"} onPress={() => setTab("establishment")} />{approved && <Chip label="Mes soirées" active={tab === "events"} onPress={() => setTab("events")} />}<Chip label="Abonnement" active={tab === "subscription"} onPress={() => setTab("subscription")} /></View>}
     {hasTabs && tab === "subscription" ? <Subscription restaurant={restaurant} onChanged={load} />
       : approved && tab === "events" ? <RestaurantEvents restaurant={restaurant} focus={focus} />
-        : <Establishment restaurant={restaurant} onChanged={load} />}
+        : <>{restaurant?.status === "PENDING" && <PendingNextStep onSubscription={() => setTab("subscription")} />}<Establishment restaurant={restaurant} onChanged={load} /></>}
     {approved && tab === "establishment" && <>
       <View style={s.divider} />
       <TicketScanner />
@@ -46,6 +46,29 @@ export function RestaurantSpace({ tab: initialTab, focus, navigate, onLogout }: 
     <Button variant="ghost" title="Voir les soirées" onPress={() => navigate({ name: "events" })} />
     <Button variant="ghost" title="Se déconnecter" icon={<LogOut size={18} color={T.ink} />} onPress={onLogout} />
   </ScrollView>;
+}
+
+// Onboarding (v2 §5), même parcours que le site : pendant l'examen, préparer le premier événement
+// (formulaire sur le site, comme toute création de soirée) puis choisir l'abonnement. Aucune formulation
+// ne laisse croire que le paiement vaut validation : c'est l'équipe qui valide.
+function PendingNextStep({ onSubscription }: { onSubscription: () => void }) {
+  const [state, setState] = useState<{ draft: any | null } | null | undefined>(undefined);
+  useEffect(() => { api<{ draft: any | null }>("/restaurants/me/onboarding").then(setState).catch(() => setState(null)); }, []);
+  if (state === undefined) return <Skeleton height={140} />;
+  if (state === null) return null;
+  return <View style={s.panel}>
+    {state.draft ? <>
+      <Text style={s.h3}>Votre premier événement est prêt.</Text>
+      <Text style={s.body}>Choisissez votre abonnement pour pouvoir le soumettre et le mettre en ligne.</Text>
+      <Button title="Choisir mon abonnement" onPress={onSubscription} />
+      <Button variant="ghost" title="Modifier mon événement sur le site" onPress={() => openWeb("/restaurant/premier-evenement?etape=evenement")} />
+    </> : <>
+      <Text style={s.h3}>Votre restaurant est en attente de validation.</Text>
+      <Text style={s.body}>Souhaitez-vous créer votre premier événement dès maintenant ?</Text>
+      <Button title="Créer mon premier événement" onPress={() => openWeb("/restaurant/premier-evenement")} />
+      <Text style={s.meta}>Le formulaire s’ouvre sur le site Nūr Meet.</Text>
+    </>}
+  </View>;
 }
 
 function Establishment({ restaurant, onChanged }: { restaurant: any; onChanged: () => void }) {

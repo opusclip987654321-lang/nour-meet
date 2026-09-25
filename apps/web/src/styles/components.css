@@ -499,6 +499,11 @@ label > textarea {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: var(--fs-sm);
+  /* Initiales parfaitement centrées : sans cela, les métriques de la police d'affichage décalent
+     le texte vers le bas (décision v2 §1.1). */
+  line-height: 1;
+  text-align: center;
+  letter-spacing: 0.02em;
 }
 
 img.avatar {
@@ -1030,4 +1035,29 @@ img.avatar {
 .viewer-badge.waitlist {
   background: var(--warning-bg);
   color: var(--warning);
+}
+
+/* Cartes de test Stripe, développement local uniquement (v2 §15) */
+.dev-test-cards {
+  margin: var(--s-3) 0;
+  padding: var(--s-3);
+  border: 1px dashed var(--warning);
+  border-radius: var(--r-sm);
+  background: var(--warning-bg);
+  color: var(--warning-ink);
+  font-size: var(--fs-sm);
+}
+
+.dev-test-cards summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.dev-test-cards ul {
+  margin: var(--s-2) 0;
+  padding-left: var(--s-4);
+}
+
+.dev-test-cards p {
+  margin: 0;
 }

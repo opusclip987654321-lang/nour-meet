@@ -1,15 +1,25 @@
+import { parisDateTime } from "@nour/shared";
 import type { PrismaClient } from "@prisma/client";
-import { writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import sharp from "sharp";
+import { sanitizeInstagramCaption } from "./blog-content.js";
+import { CAROUSEL_MIN, articleCarouselPlan } from "./instagram-carousel.js";
+import { chartSlide, coverSlide, ctaSlide, eventVisual, pointSlide } from "./social-visuals.js";
 
-// Publication Instagram de l'article du jour (corrections du 2026-09-24), via l'API Instagram avec
-// connexion Instagram (compte professionnel). Une seule publication par article (instagramMediaId),
-// délais bornés, et aucune erreur ne remonte au blog : l'article reste en ligne, l'échec est tracé.
+// Publication Instagram via l'API Instagram avec connexion Instagram (compte professionnel) :
+// - l'article du jour, en carrousel de 4 à 8 slides (décision v2 §6, remplace l'image unique) ;
+// - un événement restaurateur au moment où il est réellement publié (v2 §14).
+// Une seule publication par article ou événement (instagramMediaId + verrou atomique
+// instagramPublishingAt), délais bornés, et aucune erreur ne remonte : l'article ou l'événement reste
+// en ligne sur le site, l'échec est tracé (instagramError) et un nouvel essai reste possible.
 
-export type InstagramConfig = { userId: string; initialToken: string; graphVersion: string; publicApiOrigin: string; webOrigin: string; uploadsDir: string; publicPrefix: string };
+export type InstagramConfig = { userId: string; initialToken: string; graphVersion: string; publicApiOrigin: string; webOrigin: string; uploadsDir: string; publicPrefix: string; publicDir: string };
 const PROVIDER = "instagram";
 const TOKEN_REFRESH_AFTER_MS = 7 * 24 * 60 * 60_000;
+// Un envoi interrompu (redémarrage du serveur) libère son verrou au bout d'une heure — bien au-delà du
+// pire cas d'un carrousel de 8 médias (chaque attente est bornée à 60 s).
+const STALE_LOCK_MS = 60 * 60_000;
 
 const graph = (config: InstagramConfig, pathAndQuery: string) => `https://graph.instagram.com/${config.graphVersion}/${pathAndQuery}`;
 async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -38,48 +48,135 @@ export async function refreshInstagramToken(prisma: PrismaClient, config: Instag
   return true;
 }
 
-// JPEG public attendu par Instagram : l'illustration IA en a déjà un ; sinon on le fabrique depuis la
-// photo de couverture de la photothèque du site (servie en WebP par le site public).
-async function instagramImageUrl(article: { imageUrl: string | null }, config: InstagramConfig) {
-  const image = article.imageUrl;
-  if (image?.endsWith(".webp") && image.startsWith(config.publicPrefix)) return `${config.publicApiOrigin}${image.replace(/\.webp$/, "-instagram.jpg")}`;
-  const photo = image?.startsWith("photo:") ? image.slice(6) : "paris-terrace";
+/**
+ * Image source d'un visuel : fichier d'article ou d'événement servi par l'API (/static/uploads/…), image
+ * par défaut (/static/defaults/…), ou photo de la photothèque du site. Aucune autre adresse n'est lue :
+ * ni URL arbitraire (pas de requête serveur vers une adresse choisie par un tiers), ni photo de profil.
+ */
+const READABLE_STATIC = ["uploads/articles/", "uploads/events/", "defaults/"];
+export async function loadImage(image: string | null, config: Pick<InstagramConfig, "publicDir" | "webOrigin">, fallbackPhoto = "paris-terrace"): Promise<Buffer> {
+  if (image?.startsWith("/static/")) {
+    const relative = image.slice("/static/".length);
+    const file = path.resolve(config.publicDir, relative);
+    if (!READABLE_STATIC.some(prefix => relative.startsWith(prefix)) || !file.startsWith(path.resolve(config.publicDir) + path.sep)) throw new Error("Image refusée pour Instagram");
+    return readFile(file);
+  }
+  const photo = image?.startsWith("photo:") ? image.slice(6) : fallbackPhoto;
+  if (!/^[a-z0-9-]+$/.test(photo)) throw new Error("Photo de photothèque invalide");
   const source = await fetch(`${config.webOrigin}/images/${photo}-1600.webp`, { signal: AbortSignal.timeout(30_000) });
-  if (!source.ok) throw new Error(`Photo de couverture introuvable (${source.status})`);
-  const jpeg = await sharp(Buffer.from(await source.arrayBuffer())).resize(1080, 1080, { fit: "cover", position: "centre" }).jpeg({ quality: 86, mozjpeg: true }).toBuffer();
-  const file = `instagram-${photo}-${Date.now()}.jpg`;
-  await writeFile(path.join(config.uploadsDir, file), jpeg);
-  return `${config.publicApiOrigin}${config.publicPrefix}${file}`;
+  if (!source.ok) throw new Error(`Image introuvable (${source.status})`);
+  return Buffer.from(await source.arrayBuffer());
 }
 
-let publishing = false;
-export async function shareArticleOnInstagram(prisma: PrismaClient, config: InstagramConfig, articleId: string): Promise<"PUBLISHED" | "ALREADY_PUBLISHED" | "NO_CAPTION" | "BUSY"> {
-  if (publishing) return "BUSY";
-  publishing = true;
+// Instagram télécharge et traite chaque média de façon asynchrone : on attend FINISHED (60 s au plus).
+async function waitFinished(config: InstagramConfig, token: string, containerId: string) {
+  for (let i = 0; i < 20; i++) {
+    const status = await call<{ status_code?: string }>(graph(config, `${containerId}?fields=status_code&access_token=${encodeURIComponent(token)}`));
+    if (status.status_code === "FINISHED") return;
+    if (status.status_code === "ERROR" || status.status_code === "EXPIRED") throw new Error(`Traitement du média refusé par Instagram (${status.status_code})`);
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  throw new Error("Instagram n’a pas fini de traiter le média à temps");
+}
+
+/** Publie une image seule, ou un carrousel (conteneur CAROUSEL + médias enfants) dès deux images. */
+async function publishImages(config: InstagramConfig, token: string, jpegs: Buffer[], caption: string): Promise<string> {
+  // Fichiers publics temporaires : Instagram les télécharge lui-même, puis ils sont supprimés.
+  const files = await Promise.all(jpegs.map(async jpeg => {
+    const name = `instagram-${randomUUID()}.jpg`;
+    await writeFile(path.join(config.uploadsDir, name), jpeg);
+    return { name, url: `${config.publicApiOrigin}${config.publicPrefix}${name}` };
+  }));
   try {
-    const article = await prisma.article.findUniqueOrThrow({ where: { id: articleId } });
-    if (article.instagramMediaId) return "ALREADY_PUBLISHED";
-    if (!article.instagramCaption) return "NO_CAPTION";
-    try {
-      const token = await instagramToken(prisma, config);
-      const imageUrl = await instagramImageUrl(article, config);
-      const body = new URLSearchParams({ image_url: imageUrl, caption: article.instagramCaption, access_token: token });
-      const container = await call<{ id: string }>(graph(config, `${config.userId}/media`), { method: "POST", body });
-      // Instagram télécharge et traite l'image de façon asynchrone : on attend FINISHED (60 s au plus).
-      for (let i = 0; i < 20; i++) {
-        const status = await call<{ status_code?: string }>(graph(config, `${container.id}?fields=status_code&access_token=${encodeURIComponent(token)}`));
-        if (status.status_code === "FINISHED") break;
-        if (status.status_code === "ERROR" || status.status_code === "EXPIRED") throw new Error(`Traitement de l'image refusé par Instagram (${status.status_code})`);
-        await new Promise(r => setTimeout(r, 3000));
+    let creationId: string;
+    if (files.length === 1) {
+      creationId = (await call<{ id: string }>(graph(config, `${config.userId}/media`), { method: "POST", body: new URLSearchParams({ image_url: files[0].url, caption, access_token: token }) })).id;
+    } else {
+      const children: string[] = [];
+      for (const f of files) {
+        const child = await call<{ id: string }>(graph(config, `${config.userId}/media`), { method: "POST", body: new URLSearchParams({ image_url: f.url, is_carousel_item: "true", access_token: token }) });
+        await waitFinished(config, token, child.id);
+        children.push(child.id);
       }
-      const published = await call<{ id: string }>(graph(config, `${config.userId}/media_publish`), { method: "POST", body: new URLSearchParams({ creation_id: container.id, access_token: token }) });
-      await prisma.article.update({ where: { id: articleId }, data: { instagramMediaId: published.id, instagramPublishedAt: new Date(), instagramError: null } });
-      return "PUBLISHED";
-    } catch (err) {
-      await prisma.article.update({ where: { id: articleId }, data: { instagramError: (err as Error).message.slice(0, 500) } });
-      throw err;
+      creationId = (await call<{ id: string }>(graph(config, `${config.userId}/media`), { method: "POST", body: new URLSearchParams({ media_type: "CAROUSEL", children: children.join(","), caption, access_token: token }) })).id;
     }
+    await waitFinished(config, token, creationId);
+    return (await call<{ id: string }>(graph(config, `${config.userId}/media_publish`), { method: "POST", body: new URLSearchParams({ creation_id: creationId, access_token: token }) })).id;
   } finally {
-    publishing = false;
+    await Promise.all(files.map(f => rm(path.join(config.uploadsDir, f.name), { force: true })));
+  }
+}
+
+const siteLabel = (config: Pick<InstagramConfig, "webOrigin">) => new URL(config.webOrigin).host.replace(/^www\./, "");
+
+/** Slides JPEG du carrousel d'un article (exporté pour les tests et l'aperçu). */
+export async function renderArticleCarousel(article: { title: string; excerpt: string | null; content: string; category: string | null; imageUrl: string | null }, config: Pick<InstagramConfig, "publicDir" | "webOrigin">) {
+  const plan = articleCarouselPlan(article);
+  const total = plan.middle.length + 2;
+  if (total < CAROUSEL_MIN) throw new Error("Article trop court pour un carrousel de 4 slides au moins");
+  const slides = [await coverSlide(await loadImage(article.imageUrl, config), plan.title, plan.label, `1/${total}`)];
+  let pointIndex = 0;
+  for (const [i, m] of plan.middle.entries()) {
+    const position = `${i + 2}/${total}`;
+    slides.push(m.kind === "chart" ? await chartSlide(m.chart, position) : await pointSlide(++pointIndex, m.heading, m.body, position));
+  }
+  slides.push(await ctaSlide("Lire l’article complet", "Lien en bio", siteLabel(config), `${total}/${total}`));
+  return slides;
+}
+
+// Verrou atomique : un seul envoi à la fois par article ou événement, jamais une seconde publication.
+const lockWhere = (id: string) => ({ id, instagramMediaId: null, OR: [{ instagramPublishingAt: null }, { instagramPublishingAt: { lt: new Date(Date.now() - STALE_LOCK_MS) } }] });
+
+export async function shareArticleOnInstagram(prisma: PrismaClient, config: InstagramConfig, articleId: string): Promise<"PUBLISHED" | "ALREADY_PUBLISHED" | "NO_CAPTION" | "BUSY"> {
+  const article = await prisma.article.findUniqueOrThrow({ where: { id: articleId } });
+  if (article.instagramMediaId) return "ALREADY_PUBLISHED";
+  if (!article.instagramCaption) return "NO_CAPTION";
+  const claimed = await prisma.article.updateMany({ where: lockWhere(articleId), data: { instagramPublishingAt: new Date() } });
+  if (claimed.count !== 1) return "BUSY";
+  let mediaId: string | undefined;
+  try {
+    const slides = await renderArticleCarousel(article, config);
+    mediaId = await publishImages(config, await instagramToken(prisma, config), slides, article.instagramCaption);
+    await prisma.article.update({ where: { id: articleId }, data: { instagramMediaId: mediaId, instagramPublishedAt: new Date(), instagramError: null, instagramPublishingAt: null } });
+    return "PUBLISHED";
+  } catch (err) {
+    // Publié chez Instagram mais non enregistré ici : le verrou reste posé, pour qu'aucun nouvel essai
+    // ne republie avant vérification (l'identifiant du média figure dans le message d'erreur).
+    await prisma.article.update({ where: { id: articleId }, data: { instagramError: (mediaId ? `Publié (média ${mediaId}) mais non enregistré : ` : "") + (err as Error).message.slice(0, 450), ...(mediaId ? {} : { instagramPublishingAt: null }) } }).catch(() => {});
+    throw err;
+  }
+}
+
+/** Visuel JPEG d'un événement (exporté pour les tests et l'aperçu). */
+export async function renderEventVisual(event: { title: string; category: string; startsAt: Date; district: string; imageUrl: string | null }, config: Pick<InstagramConfig, "publicDir" | "webOrigin">, defaultImage: string) {
+  return eventVisual(await loadImage(event.imageUrl ?? defaultImage, config), { category: event.category, title: event.title, when: parisDateTime(event.startsAt), district: event.district, cta: "Réservez votre place : lien en bio" });
+}
+
+export type EventShareOutcome = "PUBLISHED" | "ALREADY_PUBLISHED" | "NOT_ELIGIBLE" | "BUSY";
+
+/**
+ * Publication d'un événement restaurateur (v2 §14), appelée au passage réel à PUBLISHED. Jamais un
+ * brouillon, un événement en attente, refusé, annulé, de démonstration, ni déjà publié sur Instagram :
+ * ces conditions sont revérifiées ici, en base, quel que soit l'appelant.
+ */
+export async function shareEventOnInstagram(prisma: PrismaClient, config: InstagramConfig, eventId: string, defaultImage: string): Promise<EventShareOutcome> {
+  const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
+  if (event.instagramMediaId) return "ALREADY_PUBLISHED";
+  if (event.status !== "PUBLISHED" || event.isDemo || !event.controllerRestaurantId || event.startsAt <= new Date()) return "NOT_ELIGIBLE";
+  const claimed = await prisma.event.updateMany({ where: { ...lockWhere(eventId), status: "PUBLISHED", isDemo: false }, data: { instagramPublishingAt: new Date() } });
+  if (claimed.count !== 1) return "BUSY";
+  let mediaId: string | undefined;
+  try {
+    const visual = await renderEventVisual(event, config, defaultImage);
+    const caption = sanitizeInstagramCaption(`${event.title}\n\n${parisDateTime(event.startsAt)} · ${event.district}\n${event.category}\n\nPlaces limitées : réservez via le lien en bio (${siteLabel(config)}).\n\n#nurmeet #paris #rencontres`)
+      ?? `Nouvelle soirée Nūr Meet · ${parisDateTime(event.startsAt)} · ${event.district}\n\nRéservez via le lien en bio.`;
+    mediaId = await publishImages(config, await instagramToken(prisma, config), [visual], caption);
+    await prisma.event.update({ where: { id: eventId }, data: { instagramMediaId: mediaId, instagramPublishedAt: new Date(), instagramError: null, instagramPublishingAt: null } });
+    return "PUBLISHED";
+  } catch (err) {
+    // Publié chez Instagram mais non enregistré ici : le verrou reste posé, pour qu'aucun nouvel essai
+    // ne republie avant vérification (l'identifiant du média figure dans le message d'erreur).
+    await prisma.event.update({ where: { id: eventId }, data: { instagramError: (mediaId ? `Publié (média ${mediaId}) mais non enregistré : ` : "") + (err as Error).message.slice(0, 450), ...(mediaId ? {} : { instagramPublishingAt: null }) } }).catch(() => {});
+    throw err;
   }
 }

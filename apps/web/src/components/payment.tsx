@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import { DevTestCards } from "./DevTestCards";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, setToken } from "../api";
@@ -75,6 +76,7 @@ export function PaymentModal({ applicationId, eventId, amountCents: announcedCen
   return <div className="modal-overlay" role="dialog" aria-modal="true">
     <div className="modal payment-modal">
       <div className="modal-head"><h2>{free ? "Confirmer ma place" : "Paiement sécurisé"}</h2><button type="button" className="link-button" onClick={onClose} aria-label="Fermer"><X size={22} aria-hidden="true"/></button></div>
+      <DevTestCards/>
       <p className="payment-amount">{free ? <>Soirée <b>gratuite</b></> : <>Montant à régler : <b>{money(amountCents)}</b> TTC, frais inclus</>}</p>
       {error && <Notice kind="error">{error}</Notice>}
       {phase === "terms" && <div className="stack">

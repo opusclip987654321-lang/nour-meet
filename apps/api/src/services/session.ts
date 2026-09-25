@@ -1,5 +1,6 @@
 import type { User } from "@prisma/client";
 import { app, httpError, prisma } from "../context.js";
+import { sendWelcomeEmailOnce } from "./welcome.js";
 
 // Session de connexion (2026-09-24) : 90 jours, prolongée automatiquement à chaque visite
 // (voir GET /me, qui renvoie un jeton neuf une fois par jour au plus). Un utilisateur actif ne
@@ -15,6 +16,8 @@ export const loginResponse = async (userId: string, isNewUser: boolean) => {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { profile: true } });
   if (user.suspendedAt) throw httpError(403, "Compte suspendu");
   if (user.deletedAt) throw httpError(403, "Compte supprimé");
+  // Jamais bloquant pour la connexion : toute erreur est absorbée (voir services/welcome.ts).
+  await sendWelcomeEmailOnce(user.id).catch(err => app.log.warn({ err }, "E-mail de bienvenue non envoyé"));
   return { token: signSession(user), isNewUser, user: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profileCompleted: user.profile?.profileCompleted ?? false } };
 };
 

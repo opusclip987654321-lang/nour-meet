@@ -1,13 +1,16 @@
-import { CheckCircle2, ChevronRight, Hourglass, Inbox } from "lucide-react";
-import { MINIMUM_AGE, isAdult } from "@nour/shared";
-import { FormEvent, Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { Camera, CheckCircle2, ChevronRight, Hourglass, Inbox } from "lucide-react";
+import { MINIMUM_AGE, isAdult, normalizeInterests } from "@nour/shared";
+import { FormEvent, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { AltOfferCard } from "../components/AltOfferCard";
 import { CallCalendar } from "../components/CallCalendar";
+import { InterestPicker } from "../components/InterestPicker";
+import { Toast, type ToastMessage } from "../components/Toast";
 import { PhoneVerification } from "../components/PhoneVerification";
 import { Layout } from "../components/Layout";
-import { Avatar, CategoryBadge, Loading, Notice } from "../components/ui";
+import { Avatar, CategoryBadge, Notice } from "../components/ui";
 import { dateTime, imgUrl, longDate, money } from "../lib/format";
 import { APPLICATION_STATUS_LABEL } from "../lib/labels";
 import { ContactsPanel } from "./ContactsPanel";
@@ -16,38 +19,43 @@ import { ContactsPanel } from "./ContactsPanel";
 const PaymentModal = lazy(() => import("../components/payment").then(m => ({ default: m.PaymentModal })));
 
 function ProfileEditor({onSaved}:{onSaved:()=>void}) {
-  const {user}=useAuth(); const [form,setForm]=useState({displayName:user?.displayName??"",email:user?.email??"",birthDate:user?.profile?.birthDate?String(user.profile.birthDate).slice(0,10):"",city:user?.profile?.city??"",profession:user?.profile?.profession??"",interests:(user?.profile?.interests??[]).join(", "),bio:user?.profile?.bio??"",quotaCategory:user?.profile?.quotaCategory??""});const [message,setMessage]=useState("");const [error,setError]=useState("");
+  const {user}=useAuth(); const [form,setForm]=useState({displayName:user?.displayName??"",email:user?.email??"",birthDate:user?.profile?.birthDate?String(user.profile.birthDate).slice(0,10):"",city:user?.profile?.city??"",profession:user?.profile?.profession??"",interests:normalizeInterests(user?.profile?.interests??[]),bio:user?.profile?.bio??"",quotaCategory:user?.profile?.quotaCategory??""});const [toast,setToast]=useState<ToastMessage|null>(null);const say=(kind:"success"|"error",text:string)=>setToast({kind,text,id:Date.now()});
   const [photoBusy,setPhotoBusy]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const clearToast=useCallback(()=>setToast(null),[]);
   // CGU §2 : date de naissance obligatoire (personne majeure) et acceptation des CGU en vigueur, une
   // seule fois par version — la case disparaît dès que l'API confirme l'acceptation (user.cguAccepted).
   const [acceptCgu,setAcceptCgu]=useState(false);
   const maxBirthDate=useMemo(()=>{const d=new Date();d.setFullYear(d.getFullYear()-MINIMUM_AGE);return d.toISOString().slice(0,10)},[]);
   const save=async(e:FormEvent)=>{
-    e.preventDefault();setMessage("");setError("");
-    if(!isAdult(form.birthDate)){setError(`Nūr Meet est réservé aux personnes de ${MINIMUM_AGE} ans et plus.`);return}
-    if(!user?.cguAccepted&&!acceptCgu){setError("Vous devez accepter les conditions générales d’utilisation pour continuer.");return}
-    try{await api("/me/profile",{method:"PATCH",body:JSON.stringify({...form,email:form.email||null,quotaCategory:form.quotaCategory||null,interests:form.interests.split(",").map((x:string)=>x.trim()).filter(Boolean),...(acceptCgu?{acceptCgu:true}:{})})});setMessage("Profil enregistré.");onSaved()}
-    catch(err){setError((err as Error).message)}
+    e.preventDefault();
+    if(!isAdult(form.birthDate)){say("error",`Nūr Meet est réservé aux personnes de ${MINIMUM_AGE} ans et plus.`);return}
+    if(!user?.cguAccepted&&!acceptCgu){say("error","Vous devez accepter les conditions générales d’utilisation pour continuer.");return}
+    setSaving(true);
+    try{await api("/me/profile",{method:"PATCH",body:JSON.stringify({...form,email:form.email||null,quotaCategory:form.quotaCategory||null,interests:form.interests,...(acceptCgu?{acceptCgu:true}:{})})});say("success","Profil enregistré.");onSaved()}
+    catch(err){say("error",(err as Error).message)}
+    finally{setSaving(false)}
   };
   const uploadPhoto=async(file:File)=>{
-    setPhotoBusy(true);setMessage("");
-    try{const body=new FormData();body.append("file",file);await api("/me/profile-photo",{method:"POST",body});onSaved()}
-    catch(err){setMessage((err as Error).message)}
+    setPhotoBusy(true);
+    try{const body=new FormData();body.append("file",file);await api("/me/profile-photo",{method:"POST",body});say("success","Photo enregistrée.");onSaved()}
+    catch(err){say("error",(err as Error).message)}
     finally{setPhotoBusy(false)}
   };
   const removePhoto=async()=>{
-    setPhotoBusy(true);setMessage("");
-    try{await api("/me/profile-photo",{method:"DELETE"});onSaved()}
-    catch(err){setMessage((err as Error).message)}
+    setPhotoBusy(true);
+    try{await api("/me/profile-photo",{method:"DELETE"});say("success","Photo retirée.");onSaved()}
+    catch(err){say("error",(err as Error).message)}
     finally{setPhotoBusy(false)}
   };
-  return <form className="panel form-grid" onSubmit={save}><div className="panel-title"><h2>Mon profil</h2><span>Informations privées</span></div>{message&&<Notice kind="success">{message}</Notice>}{error&&<Notice kind="error">{error}</Notice>}
+  return <form className="panel form-grid" onSubmit={save}><div className="panel-title"><h2>Mon profil</h2><span>Informations privées</span></div><Toast toast={toast} onDone={clearToast}/>
     <div className="wide profile-photo-editor"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><div>
-      <label className="button small secondary">{photoBusy?"Envoi…":user?.profile?.photoUrl?"Changer la photo":"Ajouter une photo"}<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={photoBusy} onChange={e=>{const f=e.target.files?.[0];if(f)uploadPhoto(f);e.target.value=""}}/></label>
+      {!user?.profile?.photoUrl&&<p className="photo-cta-hint">Une photo rassure les personnes que vous rencontrez. Facultatif.</p>}
+      <label className={`button${user?.profile?.photoUrl?" small secondary":""}`}><Camera size={18} aria-hidden="true"/>{photoBusy?"Envoi…":user?.profile?.photoUrl?"Changer la photo":"Ajouter une photo"}<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={photoBusy} onChange={e=>{const f=e.target.files?.[0];if(f)uploadPhoto(f);e.target.value=""}}/></label>
       {user?.profile?.photoUrl&&<button type="button" className="link-button" disabled={photoBusy} onClick={removePhoto}>Retirer</button>}
       <p className="fine left">JPEG, PNG ou WEBP · 5 Mo maximum. Visible par les personnes avec qui vous échangez.</p>
     </div></div>
-    <label>Prénom ou pseudonyme<input value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})}/></label><label>E-mail<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Date de naissance<input type="date" required max={maxBirthDate} value={form.birthDate} onChange={e=>setForm({...form,birthDate:e.target.value})}/></label><label>Ville<input value={form.city} onChange={e=>setForm({...form,city:e.target.value})}/></label><label>Profession<input value={form.profession} onChange={e=>setForm({...form,profession:e.target.value})}/></label><label>Centres d’intérêt<input value={form.interests} onChange={e=>setForm({...form,interests:e.target.value})}/></label><label>Sexe<div className="chip-toggle">{([["","Non renseigné"],["HOMME","Homme"],["FEMME","Femme"]] as const).map(([value,label])=><button key={value} type="button" className={"chip"+(form.quotaCategory===value?" active":"")} onClick={()=>setForm({...form,quotaCategory:value})}>{label}</button>)}</div></label><label className="wide">Biographie<textarea value={form.bio} onChange={e=>setForm({...form,bio:e.target.value})}/></label>{!user?.cguAccepted&&<label className="wide consent-check"><input type="checkbox" checked={acceptCgu} onChange={e=>setAcceptCgu(e.target.checked)}/> <span>Je certifie avoir {MINIMUM_AGE} ans ou plus et j’accepte les <Link to="/legal/cgu" target="_blank">conditions générales d’utilisation</Link>. Mes données sont traitées conformément à la <Link to="/legal/confidentialite" target="_blank">politique de confidentialité</Link>.</span></label>}<button className="button">Enregistrer</button></form>;
+    <label>Prénom ou pseudonyme<input value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})}/></label><label>E-mail<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Date de naissance<input type="date" required max={maxBirthDate} value={form.birthDate} onChange={e=>setForm({...form,birthDate:e.target.value})}/></label><label>Ville<input value={form.city} onChange={e=>setForm({...form,city:e.target.value})}/></label><label>Profession<input value={form.profession} onChange={e=>setForm({...form,profession:e.target.value})}/></label><InterestPicker value={form.interests} onChange={interests=>setForm({...form,interests})}/><label>Sexe<div className="chip-toggle">{([["","Non renseigné"],["HOMME","Homme"],["FEMME","Femme"]] as const).map(([value,label])=><button key={value} type="button" className={"chip"+(form.quotaCategory===value?" active":"")} onClick={()=>setForm({...form,quotaCategory:value})}>{label}</button>)}</div></label><label className="wide">Biographie<textarea value={form.bio} onChange={e=>setForm({...form,bio:e.target.value})}/></label>{!user?.cguAccepted&&<label className="wide consent-check"><input type="checkbox" checked={acceptCgu} onChange={e=>setAcceptCgu(e.target.checked)}/> <span>Je certifie avoir {MINIMUM_AGE} ans ou plus et j’accepte les <Link to="/legal/cgu" target="_blank">conditions générales d’utilisation</Link>. Mes données sont traitées conformément à la <Link to="/legal/confidentialite" target="_blank">politique de confidentialité</Link>.</span></label>}<button className="button" disabled={saving}>{saving?"Enregistrement…":"Enregistrer"}</button></form>;
 }
 
 // Droits RGPD (§20) : export en un clic, et suppression en deux étapes (jamais un seul clic pour
@@ -96,59 +104,69 @@ function GlobalInterviewPanel() {
   const {user}=useAuth();
   const [status,setStatus]=useState<any>(undefined);
   const [motivation,setMotivation]=useState("");
-  const [slots,setSlots]=useState<any[]>([]);
-  const [loadingSlots,setLoadingSlots]=useState(false);
   const [schedulingId,setSchedulingId]=useState<string|null>(null);
+  const [moving,setMoving]=useState(false);
   const [busy,setBusy]=useState(false);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
 
   const load=()=>api<any>("/me/global-interview").then(setStatus).catch(()=>setStatus(null));
   useEffect(()=>{load()},[]);
 
-  const needsSlots=!!status&&status.status==="PENDING_CALL"&&!status.call;
-  useEffect(()=>{
-    if(!needsSlots){setSlots([]);return}
-    let ignore=false; setLoadingSlots(true);
-    api<any[]>("/interview-slots").then(s=>!ignore&&setSlots(s)).catch(()=>!ignore&&setSlots([])).finally(()=>!ignore&&setLoadingSlots(false));
-    return ()=>{ignore=true};
-  },[needsSlots]);
-
   const request=async(e:FormEvent)=>{
-    e.preventDefault();setBusy(true);setNotice(null);
+    e.preventDefault();if(busy)return;setBusy(true);setNotice(null);
     try{await api("/me/global-interview",{method:"POST",body:JSON.stringify({motivation})});setMotivation("");await load()}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}
   };
-  const schedule=async(slotId:string)=>{
-    setSchedulingId(slotId);setNotice(null);
-    try{const result=await api<any>(`/applications/${status.id}/schedule`,{method:"POST",body:JSON.stringify({slotId})});setStatus({...status,status:"CALL_SCHEDULED",call:result.slot});setNotice({kind:"success",text:"Votre entretien est confirmé."})}
-    catch(err){setNotice({kind:"error",text:(err as Error).message});api<any[]>("/interview-slots").then(setSlots).catch(()=>{})}
+  const schedule=async(startsAt:string)=>{
+    setSchedulingId(startsAt);setNotice(null);
+    try{const result=await api<any>(`/applications/${status.id}/schedule`,{method:"POST",body:JSON.stringify({startsAt})});setStatus({...status,status:"CALL_SCHEDULED",call:result.slot});setNotice({kind:"success",text:"Votre entretien est confirmé."})}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setSchedulingId(null)}
   };
+  // « Modifier mon créneau » (v2 §12) : déplacement atomique, la demande d'entretien reste la même.
+  const move=async(startsAt:string)=>{
+    setSchedulingId(startsAt);setNotice(null);
+    try{const result=await api<any>("/me/global-interview/reschedule",{method:"POST",body:JSON.stringify({startsAt})});setStatus({...status,call:result.slot});setMoving(false);setNotice({kind:"success",text:"Votre entretien a été déplacé."})}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setSchedulingId(null)}
+  };
+  // « Annuler ma demande d'entretien » : libère le créneau et permet de refaire une demande plus tard.
   const cancel=async()=>{
     setBusy(true);setNotice(null);
-    try{await api(`/me/applications/${status.id}/cancel`,{method:"POST"});await load()}
+    try{await api(`/me/applications/${status.id}/cancel`,{method:"POST"});setMoving(false);setNotice({kind:"success",text:"Votre demande d’entretien est annulée. Vous pourrez en refaire une quand vous le souhaitez."});await load()}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}
   };
 
   // Les trois étapes restent visibles au moment de la demande : c'est là que l'entretien inquiète.
-  const requestForm=<form onSubmit={request}><ol className="interview-steps"><li><b>1.</b> Quelques mots sur vous, ci-dessous</li><li><b>2.</b> Vous choisissez un créneau</li><li><b>3.</b> L’équipe vous appelle : un court échange, bienveillant</li></ol><label>Votre motivation<textarea required minLength={30} value={motivation} onChange={e=>setMotivation(e.target.value)} placeholder="Ce que vous recherchez, en quelques lignes…"/></label><button className="button" disabled={busy}>{busy?"Envoi…":"Demander mon entretien"}</button></form>;
+  const requestForm=<form onSubmit={request}><ol className="interview-steps"><li><b>1.</b> Quelques mots sur vous, ci-dessous</li><li><b>2.</b> Vous choisissez un créneau, tous les jours de 10h à 22h</li><li><b>3.</b> Un membre de l’équipe vous appelle : 15 minutes, un échange bienveillant</li></ol><label>Votre motivation<textarea required minLength={30} value={motivation} onChange={e=>setMotivation(e.target.value)} placeholder="Ce que vous recherchez, en quelques lignes…"/></label><button className="button" disabled={busy}>{busy?"Envoi…":"Demander mon entretien"}</button></form>;
+  const cancelButton=<button type="button" className="button secondary small" disabled={busy||!!schedulingId} onClick={cancel}>{busy?"Annulation…":"Annuler ma demande d’entretien"}</button>;
 
-  if(status===undefined) return <Loading/>;
+  if(status===undefined) return <div className="panel skeleton-panel" aria-hidden="true"/>;
   return <div className="panel form-grid">
-    <div className="panel-title"><h2>Entretien de validation du profil</h2><span>Un court appel, une seule fois, avant votre première soirée de rencontre. Le networking n’en a pas besoin.</span></div>
+    {/* v2 §13 : dire concrètement ce qu'est l'entretien, pour rassurer. */}
+    <div className="interview-intro wide">
+      <h2>Un entretien téléphonique de 15 minutes avec un membre de l’équipe Nūr Meet.</h2>
+      <p>Il est réalisé une seule fois afin de valider votre profil pour les soirées de speed dating. Les événements networking ne nécessitent pas cet entretien.</p>
+    </div>
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     {user?.profile?.validatedAt?<Notice kind="success">Votre profil est validé : vous pouvez vous inscrire directement aux événements.</Notice>
     :!user?.phoneVerified?<PhoneVerification compact/>
-    :!status||status.status==null?requestForm
+    :!status||status.status==null||status.status==="CANCELLED"?requestForm
     :status.status==="REFUSED"?(
       status.retryAvailableAt && new Date(status.retryAvailableAt)>new Date()
         ? <><Notice kind="error">Votre profil n’a pas été validé.</Notice><p className="fine">Vous pourrez redemander un entretien à partir du {longDate(status.retryAvailableAt)}.</p></>
         : requestForm
     )
-    :status.status==="PENDING_CALL"&&!status.call?<><CallCalendar slots={slots} loading={loadingSlots} onSelect={schedule} schedulingId={schedulingId}/><button type="button" className="button secondary small" disabled={busy} onClick={cancel}>Annuler ma demande</button></>
-    :status.call?<div className="call-scheduled"><span className="eyebrow">Entretien programmé</span><strong>{dateTime(status.call.startsAt)}</strong><p>Nūr Meet vous appellera à cette heure, puis vous serez informé(e) de la décision.</p><button type="button" className="button secondary small" disabled={busy} onClick={cancel}>Annuler</button></div>
+    :status.status==="PENDING_CALL"&&!status.call?<><CallCalendar onSelect={schedule} schedulingId={schedulingId}/><div>{cancelButton}</div></>
+    :status.call?<div className="call-scheduled">
+      <strong>Entretien programmé : {dateTime(status.call.startsAt)}</strong>
+      <p>Un membre de l’équipe Nūr Meet vous appellera à cette heure, puis vous serez informé(e) de la décision.</p>
+      {status.status==="CALL_SCHEDULED"&&new Date(status.call.startsAt)>new Date()&&(moving
+        ?<><CallCalendar title="Choisissez votre nouveau créneau" onSelect={move} schedulingId={schedulingId} exclude={new Date(status.call.startsAt).toISOString()}/><div className="interview-actions"><button type="button" className="button secondary small" disabled={!!schedulingId} onClick={()=>setMoving(false)}>Garder mon créneau actuel</button></div></>
+        :<div className="interview-actions"><button type="button" className="button small" disabled={busy} onClick={()=>{setMoving(true);setNotice(null)}}>Modifier mon créneau</button>{cancelButton}</div>)}
+    </div>
     :null}
   </div>;
 }
@@ -195,6 +213,37 @@ function ReportPanel() {
   </form>;
 }
 
+// Carte d'inscription (v2 §9) : un seul statut et un seul bouton principal. Quand il reste à payer,
+// le montant, une phrase de statut et « Payer » — jamais « candidature acceptée », « paiement à
+// finaliser » et un second bloc de paiement empilés. Le montant affiché est celui réellement débité
+// (amountCents, tarif par catégorie compris). La logique Stripe (PaymentModal) est inchangée.
+function ReservationCard({application:a,offers,focused,focusRef,busyId,onPay,onCancel,onRespondOffer}:{application:any;offers:any[];focused:boolean;focusRef:React.MutableRefObject<HTMLElement|null>;busyId:string|null;onPay:(amountCents:number)=>void;onCancel:()=>void;onRespondOffer:(offerId:string,accept:boolean)=>void}) {
+  const waitlisted=!!a.waitlistEntry&&a.status==="PAYMENT_PENDING";
+  const toPay=a.status==="PAYMENT_PENDING"&&!waitlisted;
+  const amount=a.amountCents??a.event.priceCents;
+  const payStatus=a.event.flow==="SCREENING"?"Votre candidature est acceptée.":"Votre place vous attend.";
+  return <article className={`reservation${focused?" focused":""}`} id={`inscription-${a.id}`} tabIndex={focused?-1:undefined} ref={focused?el=>{focusRef.current=el}:undefined}>
+    <img className="reservation-photo" src={imgUrl(a.event.imageUrl)} alt=""/>
+    <div>
+      <div className="admin-event-meta"><CategoryBadge category={a.event.category} className="inline"/>{waitlisted?<span className="viewer-badge waitlist"><Hourglass size={14} aria-hidden="true"/>Liste d’attente</span>:!toPay&&<small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small>}</div>
+      <h3>{a.event.title}</h3>
+      <p>{dateTime(a.event.startsAt)} · {a.event.district}</p>
+      {a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}
+      {waitlisted&&<p className="fine left">Soirée complète pour le moment : dès qu’une place se libère, vous êtes prévenu(e) et elle revient à la première personne qui finalise son paiement.</p>}
+    </div>
+    {toPay&&<div className="reservation-pay">
+      <strong className="reservation-amount">{amount===0?"Gratuit":money(amount)}</strong>
+      <p>{payStatus}</p>
+    </div>}
+    <div className="reservation-actions">
+      {toPay&&<button className="button" onClick={()=>onPay(amount)}>{amount===0?"Confirmer ma place":`Payer ${money(amount)}`}</button>}
+      {waitlisted&&<Link className="button secondary small" to={`/events/${a.event.slug}`}>Voir la soirée</Link>}
+      {!["REFUSED","CANCELLED"].includes(a.status)&&<button className={toPay?"link-button":"button secondary small"} disabled={busyId===a.id} onClick={onCancel}>Annuler ma participation</button>}
+    </div>
+    {offers.length>0&&<div className="alt-offers"><p className="alt-offers-title">Soirées similaires proposées pour vous</p>{offers.map(offer=><AltOfferCard key={offer.id} offer={offer} busy={busyId===offer.id} onRespond={accept=>onRespondOffer(offer.id,accept)}/>)}</div>}
+  </article>;
+}
+
 export function Dashboard() {
   const {user,refresh}=useAuth(); const [searchParams]=useSearchParams();
   // C14 (ordre correctif 2026-09-20) : permet aux notifications de renvoyer vers un onglet précis,
@@ -214,6 +263,8 @@ export function Dashboard() {
   // (?application=… ou ?reservation=…) — la carte correspondante est amenée à l'écran et mise en évidence.
   const focusId=searchParams.get("application")??searchParams.get("reservation");
   const focusRef=useRef<HTMLElement|null>(null);
+  // Notification cliquée alors que l'espace est déjà ouvert : on recharge pour montrer l'état à jour de la carte visée.
+  useEffect(()=>{if(focusId)load()},[focusId]);
   useEffect(()=>{if(loaded&&focusId&&focusRef.current){focusRef.current.scrollIntoView({behavior:"smooth",block:"center"});focusRef.current.focus({preventScroll:true})}},[loaded,focusId,tab]);
   // Un compte restaurateur n'a rien à faire dans l'espace participant (§5) : on le renvoie vers sa
   // propre fiche établissement plutôt que de lui laisser voir un tableau de bord vide. Ce contrôle
@@ -245,7 +296,7 @@ export function Dashboard() {
   const ticketsLabel=tickets.length===1?"Mon billet":"Mes billets";
   const tabs=[["interview","Entretien"],["reservations","Réservations"],["tickets",ticketsLabel],["contacts","Contacts"],["profile","Profil"],["report","Signaler"]];
   const titles:Record<string,string>={interview:"Entretien de validation",reservations:"Mes événements",tickets:ticketsLabel,contacts:"Mes contacts",profile:"Mon profil",report:"Signaler un problème"};
-  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{profileLabel}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} aria-current={tab===id?"page":undefined} onClick={()=>setTab(id)} key={id}>{label}{id==="interview"&&user?.profile?.validatedAt&&<CheckCircle2 size={16} aria-label="validé" className="tab-done"/>}<ChevronRight size={16} aria-hidden="true"/></button>)}</aside><div className="dashboard-content"><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><Inbox size={24} aria-hidden="true"/><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=>{const offersForEvent=pendingOffers.filter(o=>o.originalEventId===a.eventId);const focused=focusId===a.id;const waitlisted=!!a.waitlistEntry&&a.status==="PAYMENT_PENDING";return <article className={`reservation${focused?" focused":""}`} key={a.id} id={`inscription-${a.id}`} tabIndex={focused?-1:undefined} ref={focused?el=>{focusRef.current=el}:undefined}><img className="reservation-photo" src={imgUrl(a.event.imageUrl)} alt=""/><div><div className="admin-event-meta"><CategoryBadge category={a.event.category} className="inline"/>{waitlisted?<span className="viewer-badge waitlist"><Hourglass size={14} aria-hidden="true"/>Liste d’attente</span>:<small>{APPLICATION_STATUS_LABEL[a.status]??a.status.replaceAll("_"," ")}</small>}</div><h3>{a.event.title}</h3><p>{dateTime(a.event.startsAt)} · {a.event.district}</p>{a.call&&a.status==="CALL_SCHEDULED"&&<p className="call-hint">Entretien : {dateTime(a.call.startsAt)}</p>}{waitlisted&&<p className="fine left">Soirée complète pour le moment : dès qu’une place se libère, vous êtes prévenu(e) et elle revient à la première personne qui finalise son paiement.</p>}</div><div className="reservation-actions">{a.status==="PAYMENT_PENDING"&&(waitlisted?<Link className="button secondary small" to={`/events/${a.event.slug}`}>Voir la soirée</Link>:a.event.priceCents===0?<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:0})}>Confirmer ma place (gratuit)</button>:<button className="button" onClick={()=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents:a.amountCents??a.event.priceCents})}>Payer par carte · {money(a.event.priceCents)}</button>)}{!["REFUSED","CANCELLED"].includes(a.status)&&<button className="button secondary small" disabled={busyId===a.id} onClick={()=>cancelApplication(a.id)}>Annuler ma participation</button>}</div>{offersForEvent.length>0&&<div className="alt-offers"><p className="alt-offers-title">Soirées similaires proposées pour vous</p>{offersForEvent.map(offer=><article className="alt-offer" key={offer.id}><h3>{offer.alternativeEvent.title}</h3><p>{dateTime(offer.alternativeEvent.startsAt)} · {offer.alternativeEvent.district}</p><p><b>{offer.alternativeEvent.priceCents===0?"Gratuit":money(offer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,true)}>Accepter</button><button className="button secondary" disabled={busyId===offer.id} onClick={()=>respondOffer(offer.id,false)}>Refuser</button></div></article>)}</div>}</article>;})}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.length===0&&<div className="empty small"><Inbox size={24} aria-hidden="true"/><p>Aucun billet pour le moment : il apparaît ici dès que votre place est confirmée.</p></div>}{tickets.map(t=>{const focused=focusId===t.reservationId;return <article className={`ticket${focused?" focused":""}`} key={t.id} tabIndex={focused?-1:undefined} ref={focused?el=>{focusRef.current=el}:undefined}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{(t.reservation.event.venueRestaurant??t.reservation.event.controllerRestaurant)&&<p>{(t.reservation.event.venueRestaurant??t.reservation.event.controllerRestaurant).name}</p>}<p>{t.reservation.event.address?`${t.reservation.event.address} · ${t.reservation.event.district}`:t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>})}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/>{user?.phoneVerified?<div className="panel"><div className="panel-title"><h2>Numéro de téléphone</h2><span className="badge success">Vérifié</span></div><p className="fine left">{user.phone} — utilisé uniquement pour vos réservations, jamais visible des autres participants ni des restaurants.</p></div>:<PhoneVerification/>}<PrivacyPanel/></div>}{tab==="contacts"&&<ContactsPanel/>}{tab==="report"&&<ReportPanel/>}</div></section>
+  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{profileLabel}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} aria-current={tab===id?"page":undefined} onClick={()=>setTab(id)} key={id}>{label}{id==="interview"&&user?.profile?.validatedAt&&<CheckCircle2 size={16} aria-label="validé" className="tab-done"/>}<ChevronRight size={16} aria-hidden="true"/></button>)}</aside><div className="dashboard-content"><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><Inbox size={24} aria-hidden="true"/><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=><ReservationCard key={a.id} application={a} offers={pendingOffers.filter(o=>o.originalEventId===a.eventId)} focused={focusId===a.id} focusRef={focusRef} busyId={busyId} onPay={amountCents=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents})} onCancel={()=>cancelApplication(a.id)} onRespondOffer={respondOffer}/>)}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.length===0&&<div className="empty small"><Inbox size={24} aria-hidden="true"/><p>Aucun billet pour le moment : il apparaît ici dès que votre place est confirmée.</p></div>}{tickets.map(t=>{const focused=focusId===t.reservationId;return <article className={`ticket${focused?" focused":""}`} key={t.id} tabIndex={focused?-1:undefined} ref={focused?el=>{focusRef.current=el}:undefined}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{(t.reservation.event.venueRestaurant??t.reservation.event.controllerRestaurant)&&<p>{(t.reservation.event.venueRestaurant??t.reservation.event.controllerRestaurant).name}</p>}<p>{t.reservation.event.address?`${t.reservation.event.address} · ${t.reservation.event.district}`:t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>})}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/>{user?.phoneVerified?<div className="panel"><div className="panel-title"><h2>Numéro de téléphone</h2><span className="badge success">Vérifié</span></div><p className="fine left">{user.phone} — utilisé uniquement pour vos réservations, jamais visible des autres participants ni des restaurants.</p></div>:<PhoneVerification/>}<PrivacyPanel/></div>}{tab==="contacts"&&<ContactsPanel/>}{tab==="report"&&<ReportPanel/>}</div></section>
   {payingFor&&<Suspense fallback={null}><PaymentModal applicationId={payingFor.applicationId} eventId={payingFor.eventId} amountCents={payingFor.amountCents} onClose={()=>setPayingFor(null)} onConfirmed={()=>{setPayingFor(null);load()}} onWaitlisted={()=>{setPayingFor(null);load()}}/></Suspense>}
   </Layout>;
 }

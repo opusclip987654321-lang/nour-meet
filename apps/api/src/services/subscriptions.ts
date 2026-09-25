@@ -1,4 +1,4 @@
-import { Plan, RestaurantSubscription, SubscriptionStatus, UserRole } from "@prisma/client";
+import { EventStatus, Plan, RestaurantSubscription, SubscriptionStatus, UserRole } from "@prisma/client";
 import Stripe from "stripe";
 import { httpError, prisma, stripe } from "../context.js";
 import { audit } from "./audit.js";
@@ -35,6 +35,13 @@ const planForStripePrice = async (priceId: string | undefined) => {
 // résiliation programmée. Un changement différé encore en attente reste affiché tant que Stripe
 // n'a pas réellement basculé sur la nouvelle formule, puis s'efface de lui-même.
 export const syncSubscriptionFromStripe = async (existing: RestaurantSubscription, stripeSub: Stripe.Subscription, opts: { deleted?: boolean } = {}) => {
+  const synced = await writeSubscriptionFromStripe(existing, stripeSub, opts);
+  // Un abonnement passé à « actif » ou « essai » chez Stripe après coup (paiement d'abord incomplet)
+  // valide aussi l'établissement encore en attente — même règle, même garde contre les doublons.
+  await approveRestaurantAfterFirstPayment(synced.restaurantId, { subscriptionStatus: synced.status });
+  return synced;
+};
+const writeSubscriptionFromStripe = async (existing: RestaurantSubscription, stripeSub: Stripe.Subscription, opts: { deleted?: boolean } = {}) => {
   const item = stripeSub.items.data[0];
   const billed = await planForStripePrice(item?.price?.id);
   const status = opts.deleted ? SubscriptionStatus.CANCELLED : mapStripeSubscriptionStatus(stripeSub.status);
@@ -188,6 +195,7 @@ export const recordCheckoutSession = async (session: Stripe.Checkout.Session) =>
     await notify(restaurant.ownerId, "Abonnement activé", `Votre abonnement « ${updated.plan.name} » (${billingPeriod === "ANNUAL" ? "annuel" : "mensuel"}) est confirmé${trial}.`, "/restaurant?tab=subscription");
     await audit(restaurant.ownerId, "SUBSCRIPTION_CHECKOUT_COMPLETED", "RestaurantSubscription", updated.id, { planId, billingPeriod });
   }
+  if (updated.stripeSubscriptionId === stripeSubscriptionId) await approveRestaurantAfterFirstPayment(restaurantId, { subscriptionStatus: updated.status });
   return updated;
 };
 
@@ -217,3 +225,43 @@ export const subscriptionOverview = async (restaurantId: string) => {
     invoices
   };
 };
+
+// Premier paiement réellement encaissé par Stripe (webhook ou resynchronisation serveur, jamais un
+// retour du navigateur) = validation automatique d'une toute première demande encore en attente
+// (décision v2 §5, règle interne jamais annoncée avant le paiement ; arbitrage final 01). Seul un vrai
+// encaissement compte : abonnement ACTIVE ou facture payée d'un montant non nul — jamais le seul
+// démarrage d'un essai (TRIALING, carte enregistrée sans débit). Jamais non plus après un refus :
+// une nouvelle demande après refus repasse toujours par l'équipe. Statut, rôle et brouillon changent
+// dans une seule transaction, conditionnée par le statut PENDING (webhook rejoué = aucun effet).
+// Le premier brouillon d'onboarding entre ensuite dans la file de validation normale : sa publication
+// reste décidée par l'équipe Nūr Meet.
+export async function approveRestaurantAfterFirstPayment(restaurantId: string, evidence: { subscriptionStatus?: SubscriptionStatus; paidInvoiceCents?: number }) {
+  const paid = evidence.subscriptionStatus === SubscriptionStatus.ACTIVE || (evidence.paidInvoiceCents ?? 0) > 0;
+  if (!paid) return false;
+  const restaurant = await prisma.restaurant.findUnique({ where: { id: restaurantId }, include: { owner: true, _count: { select: { photos: true } } } });
+  if (!restaurant || restaurant.status !== "PENDING") return false;
+  if (await prisma.auditLog.count({ where: { entity: "Restaurant", entityId: restaurantId, action: "REJECT_RESTAURANT" } }) > 0) return false;
+  // Même exigence que l'approbation manuelle : au moins une photo de l'établissement.
+  if (restaurant._count.photos === 0) {
+    await notify(restaurant.ownerId, "Ajoutez une photo de votre établissement", "Au moins une photo de votre établissement est nécessaire pour finaliser l'examen de votre demande.", "/restaurant");
+    return false;
+  }
+  const draft = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.restaurant.updateMany({ where: { id: restaurantId, status: "PENDING" }, data: { status: "APPROVED", verifiedAt: new Date(), rejectionReason: null } });
+    if (claimed.count === 0) return undefined;
+    // Jamais de rétrogradation : seul un compte participant devient restaurateur.
+    await tx.user.updateMany({ where: { id: restaurant.ownerId, role: UserRole.PARTICIPANT }, data: { role: UserRole.ORGANIZER } });
+    const first = await tx.event.findFirst({ where: { controllerRestaurantId: restaurantId, status: EventStatus.DRAFT }, orderBy: { createdAt: "asc" } });
+    if (first) await tx.event.update({ where: { id: first.id }, data: { status: EventStatus.PENDING_REVIEW, submittedForReviewAt: new Date(), reviewNote: null } });
+    return first;
+  });
+  if (draft === undefined) return false;
+  await audit(undefined, "AUTO_APPROVE_RESTAURANT_AFTER_PAYMENT", "Restaurant", restaurantId, evidence);
+  if (draft) {
+    const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+    await Promise.all(admins.map(a => notify(a.id, "Événement à valider", `« ${draft.title} » attend votre validation avant publication.`, `/admin/events?highlight=${draft.id}`)));
+    await audit(undefined, "SUBMIT_EVENT_FOR_REVIEW", "Event", draft.id, { reason: "onboarding" });
+  }
+  await notify(restaurant.ownerId, "Établissement validé", draft ? `Votre établissement est validé. « ${draft.title} » est transmis à l'équipe Nūr Meet pour relecture avant publication.` : "Votre établissement est validé : vous pouvez créer vos soirées.", "/restaurant/tableau-de-bord");
+  return true;
+}

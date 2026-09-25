@@ -9,6 +9,7 @@ beforeAll(ensureServerRunning);
 afterAll(async () => {
   await prisma.pushToken.deleteMany({ where: { userId: { in: createdUserIds } } });
   await deleteTestUsers(createdUserIds);
+  await prisma.event.deleteMany({ where: { slug: { startsWith: "test-jeton-paiement-" } } });
   await prisma.emailLoginCode.deleteMany({ where: { email: { endsWith: "@test.nourmeet.local" } } });
 });
 
@@ -89,8 +90,14 @@ describe("adresse e-mail saisie dans un profil sans vérification", () => {
 describe("jeton de paiement de la page /pay (15 min)", () => {
   it("ne sert qu'au paiement de l'inscription pour laquelle il a été émis", async () => {
     const user = await newUser();
-    const event = await prisma.event.findFirstOrThrow({ where: { status: "PUBLISHED", startsAt: { gt: new Date() } } });
-    const other = await prisma.event.findFirstOrThrow({ where: { status: "PUBLISHED", startsAt: { gt: new Date() }, id: { not: event.id } } });
+    // Soirées propres au test : les autres fichiers publient des soirées en parallèle, ce qui retire les
+    // soirées de démonstration — un test qui en dépendrait deviendrait instable.
+    const own = (n: number) => prisma.event.create({ data: {
+      slug: `test-jeton-paiement-${Date.now()}-${n}`, title: `Test jeton de paiement ${n}`, category: "Networking", flow: "DIRECT", description: "Soirée de test du jeton de paiement.",
+      startsAt: new Date(Date.now() + (20 + n) * 86_400_000), endsAt: new Date(Date.now() + (20 + n) * 86_400_000 + 3 * 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2500, status: "PUBLISHED"
+    } });
+    const [event, other] = [await own(1), await own(2)];
     const application = await prisma.application.create({ data: { eventId: event.id, userId: user.user.id, status: "PAYMENT_PENDING" } });
     const otherApplication = await prisma.application.create({ data: { eventId: other.id, userId: user.user.id, status: "PAYMENT_PENDING" } });
     const session = await api<{ token: string }>("/me/payment-sessions", { method: "POST", body: JSON.stringify({ applicationId: application.id }) }, user.token);
@@ -115,5 +122,23 @@ describe("jeton de paiement de la page /pay (15 min)", () => {
     expect((await prisma.application.findUniqueOrThrow({ where: { id: application.id } })).status).toBe("PAYMENT_PENDING");
     // Le jeton de session normal, lui, garde tous ses droits.
     expect((await api("/me", {}, user.token)).status).toBe(200);
+  });
+});
+
+describe("e-mail de bienvenue (décision v2 §4)", () => {
+  it("n'est envoyé qu'une seule fois, quel que soit le nombre de connexions, même simultanées", async () => {
+    const email = `bienvenue-${Date.now()}@test.nourmeet.local`;
+    const login = async () => {
+      const request = await api<{ devCode: string }>("/auth/email/request-code", { method: "POST", body: JSON.stringify({ email }) });
+      return api<{ token: string; user: { id: string } }>("/auth/email/verify", { method: "POST", body: JSON.stringify({ email, code: request.body.devCode }) });
+    };
+    const first = await login();
+    createdUserIds.push(first.body.user.id);
+    await login();
+    await Promise.all([login(), login()]);
+    const welcomes = await prisma.outboxMessage.count({ where: { recipient: email, subject: "Bienvenue sur Nūr Meet" } });
+    expect(welcomes).toBe(1);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: first.body.user.id } })).welcomeEmailSentAt).not.toBeNull();
+    await prisma.outboxMessage.deleteMany({ where: { recipient: email } });
   });
 });

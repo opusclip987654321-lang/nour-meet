@@ -1,4 +1,4 @@
-import { MINIMUM_AGE, isAdult } from "@nour/shared";
+import { MINIMUM_AGE, isAdult, normalizeInterests } from "@nour/shared";
 import { LegalDocument } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -34,7 +34,8 @@ app.patch("/me/profile", { preHandler: auth }, async (request, reply) => {
   if (!isAdult(input.birthDate)) return reply.code(422).send({ error: `Nūr Meet est réservé aux personnes de ${MINIMUM_AGE} ans et plus.` });
   if (!input.acceptCgu && !(await hasAcceptedCurrent(userId, LegalDocument.CGU))) return reply.code(422).send({ error: "Vous devez accepter les conditions générales d’utilisation pour continuer." });
   if (input.acceptCgu) await recordAcceptance(request, userId, LegalDocument.CGU, "profile");
-  const profileData = { birthDate: new Date(input.birthDate), city: input.city, profession: input.profession, interests: input.interests, bio: input.bio, quotaCategory: input.quotaCategory, profileCompleted: true };
+  // Liste fermée (décision v2 §1.3) : toute valeur hors de la liste commune est ignorée.
+  const profileData = { birthDate: new Date(input.birthDate), city: input.city, profession: input.profession, interests: normalizeInterests(input.interests), bio: input.bio, quotaCategory: input.quotaCategory, profileCompleted: true };
   // Une nouvelle adresse n'est plus « vérifiée » : elle le redeviendra à la prochaine connexion par code.
   const previousEmail = (await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })).email;
   const emailChanged = input.email !== undefined && (input.email?.toLowerCase() ?? null) !== previousEmail;
