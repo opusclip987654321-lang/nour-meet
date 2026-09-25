@@ -68,6 +68,22 @@ vérifié côté Stripe, alertes admin qui réagissent en temps réel. **Pour ba
 remplacer `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/`VITE_STRIPE_PUBLISHABLE_KEY` par les
 clés live, et me redemander confirmation avant de le faire — je ne le ferai jamais de moi-même.**
 
+### Passage en mode réel (procédure)
+
+1. Dashboard Stripe, **mode réel** : compte activé (identité, IBAN), puis Développeurs → Clés API :
+   clé publiable `pk_live_…` et clé secrète `sk_live_…`.
+2. Développeurs → Webhooks → Ajouter un endpoint : `https://<domaine de l'API>/webhooks/stripe`,
+   événements `payment_intent.succeeded`, `payment_intent.payment_failed`, `checkout.session.completed`,
+   `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded` ;
+   noter le secret de signature `whsec_…`.
+3. Sur le serveur, dans le `.env` de production (jamais commité, jamais transmis par chat) : remplacer
+   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `VITE_STRIPE_PUBLISHABLE_KEY` par les valeurs réelles.
+4. Redéployer : `./scripts/deploy.sh production` (la clé publiable est intégrée au site au build).
+5. Créer les formules dans le compte réel, sur le serveur :
+   `docker compose -f docker-compose.prod.yml exec -e CONFIRMER_MODE_REEL=oui api npm run stripe:setup-live-plans`
+6. Contrôler : le site charge `pk_live_`, Dashboard Stripe → Webhooks → l'endpoint répond 200 au
+   premier événement ; un premier paiement réel de faible montant, remboursé ensuite, valide la chaîne.
+
 ## 6. Resend (e-mails transactionnels)
 
 Déjà implémenté et branché génériquement : chaque notification importante (inscription,

@@ -17,6 +17,7 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:seed:demo": "tsx prisma/seed-demo.ts",
     "stripe:setup-test-plans": "tsx prisma/stripe-test-plans.ts",
+    "stripe:setup-live-plans": "tsx prisma/stripe-live-plans.ts",
     "admin:grant": "tsx prisma/grant-admin.ts",
     "prisma:studio": "prisma studio"
   },
