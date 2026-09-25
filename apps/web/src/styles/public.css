@@ -1884,3 +1884,40 @@ a.next-card:hover {
 .alt-offer .decision-buttons {
   grid-column: 1 / -1;
 }
+
+/* ---------- Offre restaurateurs ---------- */
+/* Lien discret du premier écran de l'accueil vers /restaurateurs : les professionnels trouvent l'offre
+   sans concurrencer l'appel principal destiné aux participants. */
+.hero-pro-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 44px;
+  margin-top: var(--s-5);
+  padding: 0 var(--s-4);
+  border: 1px solid var(--on-night-line);
+  border-radius: var(--r-pill);
+  color: var(--on-night);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+.hero-pro-link svg:first-child {
+  color: var(--saffron);
+  flex: 0 0 auto;
+}
+
+.hero-pro-link:hover {
+  background: var(--night-2);
+  border-color: var(--on-night-2);
+}
+
+.pricing-head .pro-pricing-title {
+  font-size: var(--fs-h2);
+}
+
+.pro-pricing {
+  margin: var(--s-6) 0 var(--s-4);
+}

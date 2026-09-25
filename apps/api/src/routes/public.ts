@@ -35,7 +35,7 @@ app.get("/sitemap.xml", async (_request, reply) => {
     prisma.article.findMany({ where: { status: "PUBLISHED" }, select: { slug: true, updatedAt: true }, orderBy: { publishedAt: "desc" } })
   ]);
   const staticUrls: { path: string; priority: string }[] = [
-    { path: "/", priority: "1.0" }, { path: "/events", priority: "0.9" }, { path: "/concept", priority: "0.7" }, { path: "/blog", priority: "0.7" },
+    { path: "/", priority: "1.0" }, { path: "/events", priority: "0.9" }, { path: "/concept", priority: "0.7" }, { path: "/restaurateurs", priority: "0.6" }, { path: "/blog", priority: "0.7" },
     { path: "/legal/mentions-legales", priority: "0.2" }, { path: "/legal/cgu", priority: "0.2" }, { path: "/legal/cgv", priority: "0.2" }, { path: "/legal/confidentialite", priority: "0.2" }, { path: "/legal/cookies", priority: "0.2" }
   ];
   const urls = [
@@ -72,6 +72,7 @@ app.get("/llms.txt", async (_request, reply) => {
     "## Pages principales",
     `- [Prochaines soirées](${o}/events) : toutes les soirées à venir, avec lieu, date, prix et prestations comprises`,
     `- [Comment ça marche](${o}/concept) : le parcours détaillé de chaque format`,
+    `- [Restaurateurs](${o}/restaurateurs) : accueillir des soirées dans son restaurant, fonctionnement et formules d'abonnement`,
     `- [Le journal](${o}/blog) : articles sur les rencontres, l'amitié, la vie sociale et le networking`,
     "",
     "## Soirées à venir",

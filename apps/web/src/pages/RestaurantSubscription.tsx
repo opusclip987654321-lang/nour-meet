@@ -7,9 +7,9 @@ import { api } from "../api";
 import { DevTestCards } from "../components/DevTestCards";
 import { Notice } from "../components/ui";
 import { longDate, money } from "../lib/format";
+import { Plan, planFeatures, priceFor } from "../lib/plans";
 import { SUBSCRIPTION_STATUS_LABEL } from "../lib/labels";
 
-type Plan = { id: string; name: string; monthlyPriceCents: number; annualPriceCents: number | null; monthlyEventQuota: number | null; highlightTier: "simple" | "priority" | null };
 type Invoice = { id: string; number: string | null; status: string | null; createdAt: string; amountCents: number; currency: string; hostedUrl: string | null; pdfUrl: string | null };
 // Lecture unique de l'abonnement (GET /restaurants/me/subscription) — exactement celle que
 // l'administration consulte en lecture seule (GET /admin/restaurants/:id/subscription).
@@ -23,20 +23,8 @@ export type SubscriptionOverview = {
   invoices: Invoice[];
 };
 
-const priceFor = (plan: Plan, period: BillingPeriod) => period === "ANNUAL" ? plan.annualPriceCents : plan.monthlyPriceCents;
 export const periodLabel = (period: BillingPeriod | null | undefined) => period === "ANNUAL" ? "annuelle" : "mensuelle";
 const INVOICE_STATUS: Record<string, string> = { paid: "Payée", open: "À régler", draft: "En préparation", void: "Annulée", uncollectible: "Impayée" };
-
-// Lignes de comparaison : uniquement ce qui existe réellement dans le produit (quota appliqué à la
-// publication, badge de mise en avant sur les fiches), jamais une promesse commerciale sans effet.
-// Corrections web 2026-09-24 (§1.1) : plus de mention de mise en avant pour la formule Standard.
-const planFeatures = (plan: Plan): { label: string; included: boolean }[] => [
-  { label: plan.monthlyEventQuota == null ? "Soirées publiées en illimité" : `${plan.monthlyEventQuota} soirées publiées par mois`, included: true },
-  { label: "Billetterie, paiement en ligne et billets QR", included: true },
-  { label: "Liste des participants et scan à l’entrée", included: true },
-  { label: "Comptes pour votre personnel d’accueil", included: true },
-  { label: "Mise en avant prioritaire des soirées et de l’établissement", included: plan.highlightTier === "priority" }
-];
 
 // Résumé et factures, partagés avec la fiche restaurateur de l'administration (lecture seule).
 export function SubscriptionSummary({ overview, actions }: { overview: SubscriptionOverview; actions?: ReactNode }) {

@@ -274,7 +274,9 @@ app.post("/restaurants/me/subscription/sync", { preHandler: auth, config: { rate
 });
 // Formules actives lisibles par tout compte authentifié (page d'abonnement restaurateur) — jamais
 // les champs internes Stripe, seulement ce qui doit s'afficher.
-app.get("/plans", { preHandler: auth }, async () => prisma.plan.findMany({ where: { active: true }, orderBy: { monthlyPriceCents: "asc" }, select: { id: true, name: true, monthlyPriceCents: true, annualPriceCents: true, monthlyEventQuota: true, highlightTier: true } }));
+// Formules actives lisibles sans compte : la page publique /restaurateurs affiche les vrais prix avant
+// toute inscription (champs commerciaux uniquement, jamais les identifiants de prix Stripe).
+app.get("/plans", async () => prisma.plan.findMany({ where: { active: true }, orderBy: { monthlyPriceCents: "asc" }, select: { id: true, name: true, monthlyPriceCents: true, annualPriceCents: true, monthlyEventQuota: true, highlightTier: true } }));
 app.get("/admin/plans", { preHandler: roles(UserRole.ADMIN) }, async () => prisma.plan.findMany({ orderBy: { createdAt: "asc" } }));
 app.post("/admin/plans", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const input = z.object({ name: z.string().min(2).max(80), monthlyPriceCents: z.number().int().min(0), annualPriceCents: z.number().int().min(0).nullable().optional(), monthlyEventQuota: z.number().int().min(1).nullable(), highlightTier: z.enum(["simple", "priority"]).nullable().optional(), active: z.boolean().default(true) }).parse(request.body);

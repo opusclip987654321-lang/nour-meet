@@ -114,7 +114,7 @@ function Footer() {
         <nav aria-labelledby="footer-pros">
           <h2 id="footer-pros">Restaurateurs</h2>
           <ul>
-            <li><Link to="/restaurant">Accueillir des soirées</Link></li>
+            <li><Link to="/restaurateurs">Accueillir des soirées</Link></li>
             <li><Link to="/legal/cgv">Conditions professionnelles</Link></li>
           </ul>
         </nav>

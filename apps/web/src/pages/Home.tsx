@@ -96,6 +96,7 @@ export function Home() {
             <li><MessageCircleHeart size={18} aria-hidden="true"/>Contact seulement si c’est réciproque</li>
             <li><Undo2 size={18} aria-hidden="true"/>Annulation gratuite jusqu’à 24 h</li>
           </ul>
+          <Link className="hero-pro-link" to="/restaurateurs"><Store size={18} aria-hidden="true"/>Vous êtes restaurateur ? Découvrez notre offre<ArrowRight size={16} aria-hidden="true"/></Link>
         </div>
         <div className="home-hero-visual">
           <Picture name="ai-soiree" className="hero-photo hero-photo-main" sizes="(max-width: 900px) 92vw, 42vw" priority/>
@@ -179,7 +180,7 @@ export function Home() {
           <p>Le nom du lieu et ce qui est compris dans le prix sont indiqués sur chaque fiche, avant de réserver.</p>
           <div className="venues-pro">
             <Store size={22} aria-hidden="true"/>
-            <div><b>Vous êtes restaurateur ?</b><span>Accueillez des soirées et faites découvrir votre établissement.</span><Link className="text-link" to="/restaurant">Proposer mon établissement</Link></div>
+            <div><b>Vous êtes restaurateur ?</b><span>Accueillez des soirées et faites découvrir votre établissement.</span><Link className="text-link" to="/restaurateurs">Découvrir l’offre restaurateurs</Link></div>
           </div>
         </div>
       </div>
