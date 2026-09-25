@@ -126,7 +126,7 @@ hr {
 
 ::selection {
   background: var(--saffron);
-  color: var(--ink);
+  color: var(--on-saffron);
 }
 
 :focus-visible {

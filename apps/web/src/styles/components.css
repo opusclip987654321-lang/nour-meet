@@ -38,7 +38,7 @@
 
 .button.accent {
   --btn-bg: var(--saffron);
-  --btn-fg: var(--ink);
+  --btn-fg: var(--on-saffron);
 }
 
 .button.accent:hover:not(:disabled) {
@@ -78,11 +78,11 @@
 
 .button.danger {
   --btn-bg: var(--danger);
-  --btn-fg: #fff;
+  --btn-fg: var(--on-danger);
 }
 
 .button.danger:hover:not(:disabled) {
-  --btn-bg: #8f1e17;
+  --btn-bg: var(--danger-2);
 }
 
 .button.small {
@@ -404,7 +404,7 @@ label > textarea {
 
 .full-badge {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-danger);
 }
 
 .flow-badge.screening {
@@ -545,17 +545,17 @@ img.avatar {
 
 .notice.success {
   background: var(--success-bg);
-  color: #134d31;
+  color: var(--success-ink);
 }
 
 .notice.error {
   background: var(--danger-bg);
-  color: #7a1a14;
+  color: var(--danger-ink);
 }
 
 .notice.warning {
   background: var(--warning-bg);
-  color: #5e3800;
+  color: var(--warning-ink);
 }
 
 .notice > svg {
@@ -661,7 +661,7 @@ img.avatar {
 }
 
 .skeleton {
-  background: linear-gradient(90deg, var(--surface-2) 25%, #f7f8fa 37%, var(--surface-2) 63%);
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--shimmer) 37%, var(--surface-2) 63%);
   background-size: 400% 100%;
   border-radius: var(--r-sm);
   animation: shimmer 1.4s ease infinite;
@@ -1000,7 +1000,7 @@ img.avatar {
   padding: 0 6px;
   border-radius: var(--r-pill);
   background: var(--saffron);
-  color: var(--ink);
+  color: var(--on-saffron);
   font-size: 12px;
 }
 

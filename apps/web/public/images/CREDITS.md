@@ -15,3 +15,17 @@ Photos sous licence Unsplash (https://unsplash.com/license) : usage commercial l
 - `portrait-man` — Levi Meir Clancy — https://unsplash.com/photos/ZYmuF2Reucs
 - `portrait-woman` — Nassim Boughazi — https://unsplash.com/photos/265DfLfDM1g
 - `networking-pro` — Fortune Vieyra — https://unsplash.com/photos/9sEcEcYHgQ0
+
+## Illustrations générées par IA (2026-09-25)
+
+Générées avec OpenAI Images (gpt-image-2), contrôlées une à une selon la charte (public représenté,
+aucun alcool, aucun texte ni symbole religieux) avant publication. Toujours affichées avec la
+mention « Illustration générée par IA » (composant `Picture`, champ `ai` de `PHOTOS`). Ce ne sont
+jamais des photos d'événements Nour Meet réels.
+
+- `ai-soiree` — convives autour d'une grande table (accueil, « Comment ça marche »)
+- `ai-tete-a-tete` — tête-à-tête de speed dating (format Speed dating)
+- `ai-networking` — soirée networking (format Networking)
+- `ai-entretien` — appel de validation (bloc « L'entretien de validation »)
+- `ai-echange-code` — échange de codes à table (bloc « Sur place, échangez vos codes »)
+- `ai-apres-soiree` — message reçu le lendemain (bloc « Le lendemain, la conversation continue »)

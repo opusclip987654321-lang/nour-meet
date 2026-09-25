@@ -1,9 +1,10 @@
 import type { Paginated, PublicEvent } from "@nour/shared";
-import { ArrowRight, BadgeCheck, CalendarDays, Flag, Handshake, Heart, Lock, MapPin, MessageCircleHeart, PhoneCall, QrCode, ShieldCheck, Store, Ticket, Undo2, Users } from "lucide-react";
+import { ArrowRight, BadgeCheck, CalendarDays, Check, Flag, Handshake, Heart, Lock, MapPin, MessageCircleHeart, PhoneCall, QrCode, ShieldCheck, Store, Ticket, Undo2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { Picture } from "../components/brand";
+import { ContactExplainer, InterviewExplainer } from "../components/explainers";
 import { Layout } from "../components/Layout";
 import { EventCard, availabilityLabel, initials } from "../components/ui";
 import { imgUrl, money } from "../lib/format";
@@ -39,12 +40,30 @@ function NextEventCard({ event }: { event?: PublicEvent }) {
 }
 
 const FAQ: { q: string; a: string }[] = [
-  { q: "À qui s’adressent les soirées Nūr Meet ?", a: "Aux adultes (18 ans et plus) qui cherchent à rencontrer des personnes partageant leurs valeurs, dans un cadre respectueux : pour une relation sérieuse lors des soirées de rencontre, ou pour élargir son réseau lors des soirées networking." },
-  { q: "Pourquoi un entretien avant les soirées de rencontre ?", a: "Pour que chaque participant vienne avec la même intention. L’entretien est court, se fait une seule fois, et vaut pour toutes les soirées de rencontre suivantes. Les soirées networking, elles, sont en inscription directe." },
-  { q: "Que se passe-t-il après la soirée ?", a: "Si vous souhaitez revoir quelqu’un, vous lui envoyez une demande depuis votre espace. L’échange ne s’ouvre que si la personne accepte : personne ne reçoit vos coordonnées sans votre accord." },
-  { q: "Puis-je annuler ma place ?", a: "Oui, gratuitement jusqu’à 24 heures avant le début de la soirée : le remboursement est intégral et automatique. Passé ce délai, ou en cas d’absence, la place n’est pas remboursée. Si l’organisateur annule, vous êtes intégralement remboursé(e)." },
-  { q: "Qui organise les soirées ?", a: "Des restaurants et établissements partenaires, dont le nom figure sur chaque fiche. Nūr Meet gère les inscriptions, la sélection, le paiement et le suivi ; le restaurant accueille la soirée. Il ne reçoit que les informations nécessaires à l’accueil, jamais vos coordonnées complètes ni vos réponses au questionnaire de rencontre." },
-  { q: "Comment se passe le paiement ?", a: "En ligne, par carte bancaire, via Stripe. Nūr Meet ne conserve jamais vos coordonnées bancaires. Votre place n’est acquise qu’une fois le paiement confirmé ; votre billet avec QR code arrive alors dans votre espace." }
+  { q: "À qui s’adresse Nūr Meet ?", a: "Aux adultes de 18 ans et plus qui veulent rencontrer des personnes partageant leurs valeurs : pour une relation sérieuse (speed dating) ou pour élargir leur réseau (networking)." },
+  { q: "Pourquoi un entretien pour le speed dating ?", a: "Pour que chacun vienne avec la même intention. C’est un court appel, une seule fois, valable pour toutes les soirées de rencontre. Le networking est en accès direct." },
+  { q: "Et si mon profil n’est pas validé ?", a: "L’entretien sert à vérifier que votre démarche correspond au cadre des soirées. Si ce n’est pas le cas, vous pourrez refaire une demande plus tard." },
+  { q: "Comment revoir quelqu’un après la soirée ?", a: "Sur place, échangez vos codes personnels. La personne reçoit votre demande et choisit : la conversation ne s’ouvre que si elle accepte." },
+  { q: "Qui voit mes informations ?", a: "Aucun participant ne voit votre numéro ni votre e-mail. Le restaurant ne reçoit que votre prénom pour l’accueil ; vos réponses au questionnaire de rencontre restent privées." },
+  { q: "Puis-je annuler ?", a: "Oui : remboursement intégral et automatique jusqu’à 24 heures avant la soirée. Passé ce délai, ou en cas d’absence, la place n’est pas remboursée. Si l’organisateur annule, vous êtes remboursé(e)." },
+  { q: "Comment se passe le paiement ?", a: "Par carte, via Stripe : Nūr Meet ne conserve jamais vos données bancaires. Votre billet avec QR code arrive dans votre espace dès la confirmation." }
+];
+
+const STEPS = [
+  { icon: CalendarDays, title: "Choisissez une soirée", text: "Lieu, prix, ce qui est compris : tout est sur la fiche." },
+  { icon: BadgeCheck, title: "Validez votre profil", text: "Speed dating : un court appel, une seule fois.", link: "#entretien", linkLabel: "Comment ça se passe" },
+  { icon: Ticket, title: "Réservez", text: "Paiement sécurisé, billet QR dans votre espace." },
+  { icon: Users, title: "Venez, rencontrez", text: "L’équipe vous accueille et anime la soirée." },
+  { icon: QrCode, title: "Gardez le contact", text: "Échangez vos codes, on se reparle si c’est réciproque.", link: "#garder-contact", linkLabel: "Voir comment" }
+];
+
+const TRUST = [
+  { icon: PhoneCall, text: "Numéro vérifié pour tous" },
+  { icon: BadgeCheck, text: "Entretien pour le speed dating" },
+  { icon: Lock, text: "Coordonnées jamais partagées" },
+  { icon: Flag, text: "Signalement et modération" },
+  { icon: ShieldCheck, text: "Réservé aux 18 ans et plus" },
+  { icon: Undo2, text: "Annulation gratuite jusqu’à 24 h" }
 ];
 
 export function Home() {
@@ -56,90 +75,94 @@ export function Home() {
     {"@context":"https://schema.org","@type":"WebSite",name:SITE_NAME,url:SITE_URL,inLanguage:"fr-FR"},
     {"@context":"https://schema.org","@type":"FAQPage",mainEntity:FAQ.map(f=>({"@type":"Question",name:f.q,acceptedAnswer:{"@type":"Answer",text:f.a}}))}
   ]});
+  // Refonte conversion du 2026-09-25 : la page se lit en diagonale — une promesse, le principe en
+  // trois points, les deux formats, le parcours, puis les deux mécanismes qui inquiètent ou
+  // intriguent le plus (l'entretien, l'échange de codes), et seulement ensuite le détail.
   return <Layout>
     <section className="home-hero" aria-labelledby="hero-title">
       <div className="home-hero-inner">
         <div className="home-hero-copy">
-          <h1 id="hero-title" className="display">Rencontrer quelqu’un de sérieux, autour d’une vraie table.</h1>
-          <p className="hero-lead">Nūr Meet organise à Paris et en Île-de-France des soirées en petit comité, dans des restaurants partenaires, entre personnes qui partagent vos valeurs. Speed dating sur sélection, networking en accès direct.</p>
+          <h1 id="hero-title" className="display">Des soirées pour faire de vraies rencontres.</h1>
+          <p className="hero-lead">Speed dating et networking en petit comité, dans des restaurants à Paris et en Île-de-France. Des participants vérifiés, qui partagent vos valeurs.</p>
           <div className="hero-actions">
             <Link className="button accent" to="/events">Voir les prochaines soirées<ArrowRight size={18} aria-hidden="true"/></Link>
             <a className="button on-night" href="#comment">Comment ça marche</a>
           </div>
           <ul className="hero-proofs" aria-label="Nos engagements">
-            <li><BadgeCheck size={18} aria-hidden="true"/>Profils vérifiés</li>
-            <li><MessageCircleHeart size={18} aria-hidden="true"/>Contact seulement si l’intérêt est réciproque</li>
+            <li><BadgeCheck size={18} aria-hidden="true"/>Participants vérifiés</li>
+            <li><MessageCircleHeart size={18} aria-hidden="true"/>Contact seulement si c’est réciproque</li>
             <li><Undo2 size={18} aria-hidden="true"/>Annulation gratuite jusqu’à 24 h</li>
           </ul>
         </div>
         <div className="home-hero-visual">
-          <Picture name="friends-duo" className="hero-photo hero-photo-main" sizes="(max-width: 900px) 92vw, 42vw" priority/>
-          <Picture name="paris-terrace" className="hero-photo hero-photo-side" sizes="(max-width: 900px) 40vw, 18vw"/>
+          <Picture name="ai-soiree" className="hero-photo hero-photo-main" sizes="(max-width: 900px) 92vw, 42vw" priority/>
           <NextEventCard event={events?.[0]}/>
         </div>
       </div>
     </section>
 
+    <section className="section" aria-labelledby="principe">
+      <div className="section-title"><h2 id="principe">Le principe, en trois points</h2></div>
+      <div className="pillars">
+        <div className="pillar"><Store size={26} aria-hidden="true"/><h3>Une vraie table, pas une appli</h3><p>Une soirée en petit comité, dans un restaurant partenaire.</p></div>
+        <div className="pillar"><ShieldCheck size={26} aria-hidden="true"/><h3>Des personnes vérifiées</h3><p>Numéro confirmé pour tous, entretien pour les rencontres.</p></div>
+        <div className="pillar"><Handshake size={26} aria-hidden="true"/><h3>Vous choisissez qui vous revoyez</h3><p>Rien ne s’ouvre sans votre accord mutuel.</p></div>
+      </div>
+    </section>
+
     <section className="section" aria-labelledby="formats">
-      <div className="section-title"><h2 id="formats">Deux façons de venir</h2><p>Choisissez selon ce que vous cherchez. Dans les deux cas : un lieu choisi, une équipe sur place, un groupe à taille humaine.</p></div>
+      <div className="section-title"><h2 id="formats">Deux formats, selon ce que vous cherchez</h2></div>
       <div className="format-grid">
         <article className="format-card">
-          <Picture name="shared-table" className="format-photo" sizes="(max-width: 768px) 92vw, 45vw"/>
+          <Picture name="ai-tete-a-tete" className="format-photo" sizes="(max-width: 768px) 92vw, 45vw"/>
           <div className="format-copy">
             <span className="category-badge" data-category="Speed dating"><Heart size={14} aria-hidden="true"/>Speed dating</span>
-            <h3>Des rencontres en vue d’une relation sérieuse</h3>
-            <p>Des tête-à-tête courts et animés, puis des temps libres. Chaque participant a été validé lors d’un entretien ; les places sont équilibrées entre femmes et hommes lorsque la soirée le prévoit.</p>
-            <Link className="text-link" to="/events?category=Speed%20dating">Voir les soirées de rencontre</Link>
+            <h3>Pour une relation sérieuse</h3>
+            <ul className="format-points">
+              <li><Check size={18} aria-hidden="true"/>Tête-à-tête courts, puis échanges libres</li>
+              <li><Check size={18} aria-hidden="true"/>Sur sélection : un entretien, une seule fois</li>
+              <li><Check size={18} aria-hidden="true"/>Places équilibrées femmes / hommes quand la soirée le prévoit</li>
+            </ul>
+            <Link className="button secondary" to="/events?category=Speed%20dating">Voir les soirées de rencontre</Link>
           </div>
         </article>
         <article className="format-card">
-          <Picture name="networking-event" className="format-photo" sizes="(max-width: 768px) 92vw, 45vw"/>
+          <Picture name="ai-networking" className="format-photo" sizes="(max-width: 768px) 92vw, 45vw"/>
           <div className="format-copy">
             <span className="category-badge" data-category="Networking"><Users size={14} aria-hidden="true"/>Networking</span>
-            <h3>Élargir son réseau, entre professionnels</h3>
-            <p>Entrepreneurs, salariés, indépendants : des soirées pour échanger et trouver des associés, des clients ou des idées. Inscription directe, sans entretien préalable.</p>
-            <Link className="text-link" to="/events?category=Networking">Voir les soirées networking</Link>
+            <h3>Pour élargir votre réseau</h3>
+            <ul className="format-points">
+              <li><Check size={18} aria-hidden="true"/>Entrepreneurs, salariés, indépendants</li>
+              <li><Check size={18} aria-hidden="true"/>Accès direct, sans entretien</li>
+              <li><Check size={18} aria-hidden="true"/>Associés, clients, idées : autour d’une table</li>
+            </ul>
+            <Link className="button secondary" to="/events?category=Networking">Voir les soirées networking</Link>
           </div>
         </article>
       </div>
     </section>
 
     <section className="section how" id="comment" aria-labelledby="how-title">
-      <div className="section-title"><h2 id="how-title">Comment ça marche</h2><p>De l’inscription à l’après-soirée, chaque étape est pensée pour que vous veniez l’esprit tranquille.</p></div>
-      <ol className="steps">
-        <li><PhoneCall size={22} aria-hidden="true"/><b>Créez votre compte</b><span>Avec Google ou votre adresse e-mail, sans mot de passe. Votre numéro est vérifié une seule fois par SMS avant votre première réservation.</span></li>
-        <li><BadgeCheck size={22} aria-hidden="true"/><b>Faites-vous valider</b><span>Pour les rencontres : un court entretien avec l’équipe, une seule fois. Le networking est en accès direct.</span></li>
-        <li><Ticket size={22} aria-hidden="true"/><b>Réservez votre place</b><span>Paiement sécurisé. Votre billet avec QR code arrive dans votre espace dès la confirmation.</span></li>
-        <li><QrCode size={22} aria-hidden="true"/><b>Venez à la soirée</b><span>L’équipe vous accueille, scanne votre billet et anime la soirée du début à la fin.</span></li>
-        <li><Handshake size={22} aria-hidden="true"/><b>Gardez le contact, si vous le voulez tous les deux</b><span>Une demande envoyée depuis votre espace ; la conversation s’ouvre seulement si l’autre accepte.</span></li>
-      </ol>
+      <div className="section-title"><h2 id="how-title">Comment ça marche</h2><p>Cinq étapes, de la réservation à l’après-soirée.</p></div>
+      <ol className="steps">{STEPS.map(step=><li key={step.title}><step.icon size={22} aria-hidden="true"/><b>{step.title}</b><span>{step.text}</span>{step.link&&<a className="text-link step-link" href={step.link}>{step.linkLabel}</a>}</li>)}</ol>
     </section>
 
-    <section className="trust-band" aria-labelledby="trust-title">
-      <div className="trust-inner">
-        <div className="trust-intro">
-          <h2 id="trust-title">Un cadre sérieux, et des règles claires</h2>
-          <p>La confiance ne se décrète pas : voici ce qui est réellement en place sur Nūr Meet.</p>
-          <Picture name="portrait-woman" className="trust-photo" sizes="(max-width: 900px) 60vw, 26vw"/>
-        </div>
-        <ul className="trust-list">
-          <li><ShieldCheck size={24} aria-hidden="true"/><div><b>Des profils vérifiés</b><span>Numéro de téléphone confirmé par SMS avant toute réservation, entretien de validation pour les soirées de rencontre, badge « Vérifié » visible sur le profil.</span></div></li>
-          <li><Lock size={24} aria-hidden="true"/><div><b>Vos coordonnées restent privées</b><span>Aucun participant ne voit votre numéro. Le restaurant ne reçoit que votre prénom pour l’accueil ; vos réponses au questionnaire de rencontre ne sont jamais partagées.</span></div></li>
-          <li><MessageCircleHeart size={24} aria-hidden="true"/><div><b>Le consentement avant tout</b><span>Après la soirée, un échange ne s’ouvre que si les deux personnes l’acceptent. Rien n’est automatique.</span></div></li>
-          <li><Flag size={24} aria-hidden="true"/><div><b>Signalement et modération</b><span>Un comportement déplacé se signale à l’équipe, sur place ou à contact@nourmeet.com ; chaque signalement est examiné et peut entraîner la suspension du compte.</span></div></li>
-          <li><Users size={24} aria-hidden="true"/><div><b>Réservé aux adultes</b><span>Le service est réservé aux personnes de 18 ans et plus : la date de naissance est demandée à la création du profil et l’inscription est refusée aux mineurs.</span></div></li>
-          <li><Undo2 size={24} aria-hidden="true"/><div><b>Paiement sécurisé, annulation simple</b><span>Paiement par Stripe, sans conservation de vos données bancaires. Remboursement intégral jusqu’à 24 h avant la soirée.</span></div></li>
-        </ul>
-      </div>
+    <div className="section"><InterviewExplainer/></div>
+
+    <ContactExplainer/>
+
+    <section className="section" aria-labelledby="trust-title">
+      <div className="section-title"><h2 id="trust-title">Un cadre sérieux, des règles claires</h2></div>
+      <ul className="trust-tiles">{TRUST.map(t=><li key={t.text}><t.icon size={22} aria-hidden="true"/><span>{t.text}</span></li>)}</ul>
     </section>
 
     <section className="section" aria-labelledby="agenda">
       <div className="section-title row">
-        <div><h2 id="agenda">Les prochaines soirées</h2><p>Places limitées à chaque soirée : quand la salle est complète, la liste d’attente prend le relais.</p></div>
+        <div><h2 id="agenda">Les prochaines soirées</h2><p>Places limitées. Soirée complète ? La liste d’attente prend le relais.</p></div>
         <Link className="button secondary" to="/events">Tout le calendrier<ArrowRight size={18} aria-hidden="true"/></Link>
       </div>
       {events===null
-        ?<div className="event-grid" aria-busy="true">{[0,1,2].map(i=><div key={i} className="event-card skeleton-card"><div className="skeleton" style={{aspectRatio:"4 / 3"}}/><div className="event-copy"><div className="skeleton" style={{height:18,width:"50%"}}/><div className="skeleton" style={{height:26,width:"85%"}}/><div className="skeleton" style={{height:18,width:"60%"}}/></div></div>)}</div>
+        ?<div className="event-grid" aria-busy="true">{[0,1,2].map(i=><div key={i} className="event-card skeleton-card"><div className="skeleton skeleton-media"/><div className="event-copy"><div className="skeleton skeleton-line short"/><div className="skeleton skeleton-line tall"/><div className="skeleton skeleton-line"/></div></div>)}</div>
         :events.length>0
           ?<div className="event-grid">{events.slice(0,3).map(e=><EventCard key={e.id} event={e}/>)}</div>
           :<div className="empty"><CalendarDays size={24} aria-hidden="true"/><h3>Aucune soirée publiée pour le moment</h3><p>Les prochaines dates arrivent bientôt. Créez votre compte pour être prévenu(e).</p><Link className="button" to="/login">Créer mon compte</Link></div>}
@@ -150,10 +173,10 @@ export function Home() {
         <Picture name="venue-day" className="venues-photo" sizes="(max-width: 900px) 92vw, 40vw"/>
         <div className="venues-copy">
           <h2 id="lieux">Des restaurants partenaires, choisis un par un</h2>
-          <p>Chaque soirée se tient dans un établissement partenaire, à Paris ou en Île-de-France, qui l’accueille et la co-organise. Son nom figure sur la fiche de la soirée avant toute réservation, et vous savez à l’avance ce qui est compris dans le prix.</p>
+          <p>Le nom du lieu et ce qui est compris dans le prix sont indiqués sur chaque fiche, avant de réserver.</p>
           <div className="venues-pro">
             <Store size={22} aria-hidden="true"/>
-            <div><b>Vous êtes restaurateur ?</b><span>Accueillez des soirées Nūr Meet et faites découvrir votre établissement à de nouveaux clients.</span><Link className="text-link" to="/restaurant">Proposer mon établissement</Link></div>
+            <div><b>Vous êtes restaurateur ?</b><span>Accueillez des soirées et faites découvrir votre établissement.</span><Link className="text-link" to="/restaurant">Proposer mon établissement</Link></div>
           </div>
         </div>
       </div>
@@ -162,15 +185,15 @@ export function Home() {
     <TestimonialsSection/>
 
     <section className="section faq" aria-labelledby="faq-title">
-      <div className="section-title"><h2 id="faq-title">Questions fréquentes</h2></div>
+      <div className="section-title"><h2 id="faq-title">Vos questions</h2></div>
       <div className="faq-list">{FAQ.map(item=><details key={item.q}><summary>{item.q}</summary><p>{item.a}</p></details>)}</div>
-      <p className="faq-more">Une autre question ? Écrivez-nous à <a className="text-link" href="mailto:contact@nourmeet.com">contact@nourmeet.com</a>.</p>
+      <p className="faq-more">Une autre question ? <a className="text-link" href="mailto:contact@nourmeet.com">contact@nourmeet.com</a></p>
     </section>
 
     <section className="final-cta" aria-labelledby="final-title">
       <div className="final-cta-inner">
-        <h2 id="final-title">Votre place à table vous attend.</h2>
-        <p>Créez votre compte en deux minutes, puis choisissez votre première soirée.</p>
+        <h2 id="final-title">Votre prochaine rencontre commence à table.</h2>
+        <p>Créez votre compte en deux minutes, sans mot de passe.</p>
         <div className="hero-actions"><Link className="button accent" to="/login">Créer mon compte</Link><Link className="button on-night" to="/events">Voir les soirées</Link></div>
       </div>
     </section>

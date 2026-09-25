@@ -34,7 +34,15 @@ export function Logo({ onNight = false, to = "/" }: { onNight?: boolean; to?: st
 // Photo responsive : AVIF puis WebP, trois largeurs, dimensions déclarées pour réserver la place
 // (aucun décalage de mise en page au chargement), chargement différé sauf image prioritaire.
 // Les fichiers vivent dans public/images/<nom>-<largeur>.<format> (voir CREDITS.md).
-export const PHOTOS: Record<string, { w: number; h: number; alt: string }> = {
+// `ai` : illustration générée par IA (OpenAI Images, contrôlée selon la charte avant publication) —
+// toujours accompagnée de la mention visible « Illustration générée par IA ».
+export const PHOTOS: Record<string, { w: number; h: number; alt: string; ai?: boolean }> = {
+  "ai-soiree": { w: 1024, h: 1536, alt: "Six convives autour d'une grande table dans un restaurant parisien, en pleine conversation", ai: true },
+  "ai-tete-a-tete": { w: 1536, h: 1024, alt: "Un homme et une femme en tête-à-tête à une petite table de bistrot, autour de deux thés à la menthe", ai: true },
+  "ai-networking": { w: 1536, h: 1024, alt: "Des professionnels échangent leurs cartes lors d'une soirée networking dans un restaurant", ai: true },
+  "ai-entretien": { w: 1536, h: 1024, alt: "Une jeune femme souriante au téléphone chez elle, près d'une fenêtre parisienne", ai: true },
+  "ai-echange-code": { w: 1536, h: 1024, alt: "À table, une participante scanne avec son téléphone le code affiché sur le téléphone d'un participant", ai: true },
+  "ai-apres-soiree": { w: 1536, h: 1024, alt: "Le lendemain, un homme sourit en lisant un message sur son téléphone à une terrasse de café", ai: true },
   "friends-duo": { w: 1600, h: 1067, alt: "Deux amies souriantes dans un parc" },
   "portrait-woman": { w: 1600, h: 2400, alt: "Une jeune femme dans une rue de Paris" },
   "portrait-man": { w: 1600, h: 2000, alt: "Portrait d'un homme souriant" },
@@ -54,13 +62,15 @@ export function Picture({ name, sizes = "100vw", priority = false, className, st
   const photo = PHOTOS[name];
   if (!photo) return null;
   const set = (fmt: string) => [640, 1024, 1600].map(w => `/images/${name}-${w}.${fmt} ${w}w`).join(", ");
-  return (
-    <picture className={className} style={style}>
+  const picture = (
+    <picture className={photo.ai ? undefined : className} style={photo.ai ? undefined : style}>
       <source type="image/avif" srcSet={set("avif")} sizes={sizes} />
       <source type="image/webp" srcSet={set("webp")} sizes={sizes} />
       <img src={`/images/${name}-1024.webp`} width={photo.w} height={photo.h} alt={alt ?? photo.alt} loading={priority ? "eager" : "lazy"} decoding="async" fetchPriority={priority ? "high" : "auto"} />
     </picture>
   );
+  if (!photo.ai) return picture;
+  return <span className={`ai-picture${className ? ` ${className}` : ""}`} style={style}>{picture}<span className="ai-image-tag">Illustration générée par IA</span></span>;
 }
 
 // Flou progressif porté du composant « Progressive Blur » de Magic UI (licence MIT,

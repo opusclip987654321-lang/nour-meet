@@ -132,11 +132,12 @@ function GlobalInterviewPanel() {
     finally{setBusy(false)}
   };
 
-  const requestForm=<form onSubmit={request}><label>Votre motivation<textarea required minLength={30} value={motivation} onChange={e=>setMotivation(e.target.value)} placeholder="Expliquez en quelques lignes ce que vous recherchez…"/></label><button className="button" disabled={busy}>{busy?"Envoi…":"Demander mon entretien"}</button></form>;
+  // Les trois étapes restent visibles au moment de la demande : c'est là que l'entretien inquiète.
+  const requestForm=<form onSubmit={request}><ol className="interview-steps"><li><b>1.</b> Quelques mots sur vous, ci-dessous</li><li><b>2.</b> Vous choisissez un créneau</li><li><b>3.</b> L’équipe vous appelle : un court échange, bienveillant</li></ol><label>Votre motivation<textarea required minLength={30} value={motivation} onChange={e=>setMotivation(e.target.value)} placeholder="Ce que vous recherchez, en quelques lignes…"/></label><button className="button" disabled={busy}>{busy?"Envoi…":"Demander mon entretien"}</button></form>;
 
   if(status===undefined) return <Loading/>;
   return <div className="panel form-grid">
-    <div className="panel-title"><h2>Entretien de validation du profil</h2><span>Obligatoire une seule fois, avant votre première soirée de rencontre (speed dating)</span></div>
+    <div className="panel-title"><h2>Entretien de validation du profil</h2><span>Un court appel, une seule fois, avant votre première soirée de rencontre. Le networking n’en a pas besoin.</span></div>
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     {user?.profile?.validatedAt?<Notice kind="success">Votre profil est validé : vous pouvez vous inscrire directement aux événements.</Notice>
     :!user?.phoneVerified?<PhoneVerification compact/>

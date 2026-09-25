@@ -55,6 +55,20 @@ et la confiance passe par la clarté.
 
 Sur fond nuit : texte `#FFFFFF`, secondaire `#C8CDE4` (9,2:1), safran pour l’accent (6,9:1).
 
+Rôles distincts du bleu nuit (2026-09-25) : `--band` pour les grands fonds sombres (bandeaux
+d'accueil, d'échange de codes, d'appel final, fiche événement), `--brand-ink` / `--brand-ink-2`
+quand le bleu sert de couleur de texte ou d'icône, `--on-saffron` pour tout texte posé sur le safran,
+`--on-danger` pour le texte sur fond rouge. Ne jamais réutiliser `--night` pour un de ces rôles.
+
+### Mode sombre
+
+Bouton soleil/lune toujours visible dans l'en-tête (`ThemeToggle`) ; le choix est mémorisé
+(`nour_theme`), sinon le site suit le réglage de l'appareil ; un script en ligne d'`index.html`
+l'applique avant le premier affichage. Seules les valeurs des tokens changent
+(`:root[data-theme="dark"]` dans `tokens.css`) : aucun composant n'a de règle propre au thème, d'où
+l'interdiction absolue des couleurs en dur. Exceptions voulues : le fond blanc des QR codes (lisibles
+par les scanners) et le texte blanc sur les photos.
+
 ## Typographie — deux familles auto-hébergées
 
 - **Bricolage Grotesque** (variable, OFL) pour l'affichage et les titres : une grotesque
@@ -104,6 +118,12 @@ porte son propre poids.
 
 ## Images
 
+- **Illustrations IA pédagogiques** (2026-09-25) : pour expliquer un mécanisme (la soirée, l'entretien,
+  l'échange de codes, la reprise de contact), une illustration générée par IA, contrôlée selon les
+  règles ci-dessous avant publication, déclarée avec `ai: true` dans `PHOTOS` : la mention
+  « Illustration générée par IA » s'affiche alors automatiquement sur l'image. Quand un mécanisme
+  d'écran doit être compris (code personnel, demande envoyée), une petite maquette en HTML à côté de
+  la photo plutôt qu'un écran généré (illisible).
 - Photos réelles, lumière naturelle, **aucun alcool à l'image**, personnes qui ressemblent au
   public (voir la section Thèse) ; lieux parisiens identifiables (terrasses, bistrots).
 - Crédits et licences : `public/images/CREDITS.md`. Ce sont des illustrations d'ambiance,
@@ -118,6 +138,11 @@ Transitions de 150 à 220 ms, `cubic-bezier(.2,.7,.2,1)` ; aucun rebond. Un seul
 page. `prefers-reduced-motion: reduce` coupe toute animation non essentielle.
 
 ## Ton et rédaction
+
+Pages Persuader écrites comme une page d'accueil orientée inscription (2026-09-25) : une promesse
+en une phrase, des titres qui disent le bénéfice, des phrases courtes (une idée, une ligne), des
+listes à puces plutôt que des paragraphes, une action claire à la fin de chaque bloc. Le détail
+(conditions, exceptions) vit dans la FAQ, les fiches et les pages juridiques, pas dans les sections.
 
 Concret, vérifiable, en « vous ». Chaque titre dit ce qui se passe réellement (qui, où, comment).
 Aucun chiffre, avis ou membre inventé. Les mécanismes de confiance cités sont ceux qui existent

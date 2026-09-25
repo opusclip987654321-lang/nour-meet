@@ -5,6 +5,7 @@ import { api } from "../api";
 import { STAFF_ROLES, useAuth } from "../auth";
 import { Logo } from "./brand";
 import { NotificationBell } from "./NotificationBell";
+import { ThemeToggle } from "./ThemeToggle";
 import { CookieConsent } from "./CookieConsent";
 import { CONSENT_CHANGED, analyticsAllowed, openConsentSettings } from "../lib/consent";
 
@@ -47,6 +48,7 @@ function Header() {
           {account && <NavLink to={account.to}>{account.label}</NavLink>}
         </nav>
         <div className="header-actions">
+          <ThemeToggle />
           {user ? (
             <>
               <NotificationBell />
