@@ -104,7 +104,7 @@ Nūr Meet n'envoie pas de prospection commerciale par e-mail ou SMS. Si cela dev
 | Expo, puis Apple et Google | Acheminement des notifications push, si vous les autorisez (contenu générique, sans détail personnel) | États-Unis |
 | Sentry | Rapports d'erreurs techniques, avec au plus un identifiant technique de compte, sans nom, téléphone, e-mail ni contenu des échanges | États-Unis ou Union européenne selon la configuration |
 
-Les services d'intelligence artificielle (OpenAI, Anthropic) et Instagram ne sont utilisés que pour les articles du journal et les illustrations du site : **aucune donnée de membre ne leur est transmise**.
+Les services d'intelligence artificielle (OpenAI, Anthropic), Instagram et Facebook (Meta) ne sont utilisés que pour les articles du journal, les illustrations du site et l'annonce des soirées publiées : **aucune donnée de membre ne leur est transmise**.
 
 ## 7. Transferts hors de l'Union européenne
 

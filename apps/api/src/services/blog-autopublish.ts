@@ -8,9 +8,9 @@ import { BLOG_CATEGORIES, MAX_AI_ATTEMPTS_PER_DAY, parisDay, sanitizeGeneratedAr
 // sans doublon : la colonne unique Article.autoPublishDay le garantit au niveau de la base, même si
 // deux passages de la tâche se chevauchent ou si le serveur redémarre en pleine génération.
 // Dépendances injectées (base, fournisseur IA, notifications) pour être testable sans serveur.
-// illustrate et shareOnInstagram sont facultatifs : absents (pas de clé OpenAI ou Instagram), l'article
-// garde sa photo de la photothèque et n'est pas publié sur Instagram. Leurs erreurs ne bloquent jamais le blog.
-type Deps = { illustrate?: (article: { title: string; imagePrompt: string }) => Promise<Illustration | null>; shareOnInstagram?: (articleId: string) => Promise<unknown>; prisma: PrismaClient; aiProvider: AIProvider; notify: (userId: string, title: string, body: string, link?: string) => Promise<unknown>; log: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void } };
+// illustrate, shareOnInstagram et shareOnFacebook sont facultatifs : absents (pas de clé OpenAI, Instagram
+// ou Facebook), l'article garde sa photo de la photothèque et n'est pas publié sur ces réseaux. Leurs erreurs ne bloquent jamais le blog.
+type Deps = { illustrate?: (article: { title: string; imagePrompt: string }) => Promise<Illustration | null>; shareOnInstagram?: (articleId: string) => Promise<unknown>; shareOnFacebook?: (articleId: string) => Promise<unknown>; prisma: PrismaClient; aiProvider: AIProvider; notify: (userId: string, title: string, body: string, link?: string) => Promise<unknown>; log: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void } };
 export type DailyArticleOutcome = "ALREADY_PUBLISHED" | "PUBLISHED_AI" | "PUBLISHED_QUEUE" | "NOTHING_TO_PUBLISH" | "BUSY";
 
 let running = false;
@@ -79,6 +79,13 @@ export async function publishDailyArticle(deps: Deps, now: Date = new Date()): P
       catch (err) {
         deps.log.warn({ err: (err as Error).message }, "Publication Instagram de l’article du jour échouée");
         await Promise.all(admins.map(a => deps.notify(a.id, "Publication Instagram échouée", `« ${created!.title} » est en ligne sur le site, mais pas sur Instagram : ${(err as Error).message.slice(0, 200)}`, `/admin/blog/${created!.id}`)));
+      }
+    }
+    if (deps.shareOnFacebook) {
+      try { await deps.shareOnFacebook(created!.id); }
+      catch (err) {
+        deps.log.warn({ err: (err as Error).message }, "Publication Facebook de l’article du jour échouée");
+        await Promise.all(admins.map(a => deps.notify(a.id, "Publication Facebook échouée", `« ${created!.title} » est en ligne sur le site, mais pas sur Facebook : ${(err as Error).message.slice(0, 200)}`, `/admin/blog/${created!.id}`)));
       }
     }
     return outcome;

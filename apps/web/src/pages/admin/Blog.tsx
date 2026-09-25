@@ -140,6 +140,7 @@ export function AdminArticleEditor() {
       {article.scheduledAt&&<p className="fine left">Publication programmée le {new Date(article.scheduledAt).toLocaleString("fr-FR")}.</p>}
     </div>
     {article.status==="PUBLISHED"&&<InstagramPanel article={article} onChanged={load}/>}
+    {article.status==="PUBLISHED"&&<FacebookPanel article={article} onChanged={load}/>}
     <div className="panel" style={{marginTop:20}}>
       <div className="panel-title"><h2>Propositions sociales (IA)</h2><button type="button" className="button small secondary" disabled={busy==="social"} onClick={generateSocial}>Générer</button></div>
       {socialCopy&&<div className="stack">{socialCopy.map((s,i)=><div key={i} className="notice"><b>{s.platform}</b><p>{s.text}</p></div>)}</div>}
@@ -171,6 +172,28 @@ function InstagramPanel({article,onChanged}:{article:any;onChanged:()=>void}){
     {!article.instagramMediaId&&<>
       <label className="wide">Légende (2 200 caractères maximum, liens non cliquables sur Instagram)<textarea maxLength={2200} style={{minHeight:160}} value={caption} onChange={e=>setCaption(e.target.value)}/></label>
       <button type="button" className="button small" disabled={busy} onClick={publish}>{busy?"Publication…":"Publier sur Instagram"}</button>
+    </>}
+  </div>;
+}
+
+// Publication sur la Page Facebook (décision du 2026-09-25) : même carrousel qu'Instagram, avec un lien
+// cliquable vers l'article ; faite automatiquement pour l'article du jour, relançable ici après un échec.
+function FacebookPanel({article,onChanged}:{article:any;onChanged:()=>void}){
+  const [busy,setBusy]=useState(false);
+  const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const publish=async()=>{
+    if(busy)return;setBusy(true);setNotice(null);
+    try{await api(`/admin/articles/${article.id}/facebook`,{method:"POST"});setNotice({kind:"success",text:"Publié sur Facebook."});onChanged()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setBusy(false)}
+  };
+  return <div className="panel form-grid" style={{marginTop:"var(--s-5)"}}>
+    <div className="panel-title"><h2>Facebook</h2><span>{article.facebookPostId?`Publié le ${new Date(article.facebookPublishedAt).toLocaleString("fr-FR")}`:article.facebookError?"Échec de publication":"Non publié"}</span></div>
+    {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    {article.facebookError&&!article.facebookPostId&&<Notice kind="error">{article.facebookError}</Notice>}
+    {!article.facebookPostId&&<>
+      <p className="fine left wide">Le carrousel est publié sur la Page avec le titre, le chapô et le lien vers l’article.</p>
+      <button type="button" className="button small" disabled={busy} onClick={publish}>{busy?"Publication…":"Publier sur Facebook"}</button>
     </>}
   </div>;
 }

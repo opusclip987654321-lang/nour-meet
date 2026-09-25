@@ -51,6 +51,11 @@ const envSchema = z.object({
   INSTAGRAM_ACCESS_TOKEN: optionalEnvironmentSecret,
   INSTAGRAM_USER_ID: optionalEnvironmentSecret,
   INSTAGRAM_GRAPH_VERSION: z.string().default("v24.0"),
+  // Publication automatique sur la Page Facebook (API Pages) : identifiant de la Page et jeton de Page
+  // permanent (dérivé d'un jeton utilisateur longue durée). Facultatifs : sans eux, rien n'est publié.
+  FACEBOOK_PAGE_ID: optionalEnvironmentSecret,
+  FACEBOOK_PAGE_ACCESS_TOKEN: optionalEnvironmentSecret,
+  FACEBOOK_GRAPH_VERSION: z.string().default("v24.0"),
   // Adresse publique de l'API (ex. https://api.nourmeet.com) : Instagram télécharge l'image depuis cette
   // adresse, qui doit donc être joignable depuis Internet.
   API_PUBLIC_URL: z.preprocess((v) => typeof v === "string" && v.trim() === "" ? undefined : v, z.string().url().optional()),

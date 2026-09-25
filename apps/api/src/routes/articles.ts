@@ -7,7 +7,8 @@ import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, aiProvider, app, articleUploadsDi
 import { assertNoForbiddenWord, logArticleTransition } from "../services/articles.js";
 import { sanitizeInstagramCaption } from "../services/blog-content.js";
 import { shareArticleOnInstagram } from "../services/instagram.js";
-import { instagramConfig } from "../services/social-config.js";
+import { facebookConfig, instagramConfig } from "../services/social-config.js";
+import { shareArticleOnFacebook } from "../services/facebook.js";
 import { audit } from "../services/audit.js";
 import { currentId, roles } from "../services/auth.js";
 
@@ -27,8 +28,8 @@ app.get("/articles/:slug", async (request, reply) => {
   const { slug } = z.object({ slug: z.string() }).parse(request.params);
   const article = await prisma.article.findFirst({ where: { slug, status: "PUBLISHED" }, include: { author: true } });
   if (!article) return reply.code(404).send({ error: "Article introuvable" });
-  // Jamais les informations internes (consigne IA, suivi Instagram, auteur complet) sur la route publique.
-  const { aiPrompt: _aiPrompt, instagramCaption: _caption, instagramMediaId: _media, instagramError: _error, instagramPublishedAt: _publishedAt, author, ...visible } = article;
+  // Jamais les informations internes (consigne IA, suivi Instagram et Facebook, auteur complet) sur la route publique.
+  const { aiPrompt: _aiPrompt, instagramCaption: _caption, instagramMediaId: _media, instagramError: _error, instagramPublishedAt: _publishedAt, instagramPublishingAt: _igLock, facebookPostId: _fbPost, facebookPublishedAt: _fbAt, facebookPublishingAt: _fbLock, facebookError: _fbError, author, ...visible } = article;
   return { ...visible, author: author ? { displayName: author.displayName } : null };
 });
 
@@ -173,4 +174,17 @@ app.post("/admin/articles/:id/instagram", { preHandler: roles(UserRole.ADMIN), c
   } catch (err) {
     return reply.code(502).send({ error: `Instagram a refusé la publication : ${(err as Error).message}` });
   }
+});// Publication Facebook manuelle d'un article publié (nouvel essai, ou article écrit à la main).
+app.post("/admin/articles/:id/facebook", { preHandler: roles(UserRole.ADMIN), config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  if (!facebookConfig) return reply.code(503).send({ error: "Facebook n’est pas configuré sur ce serveur." });
+  try {
+    const result = await shareArticleOnFacebook(prisma, facebookConfig, id);
+    if (result === "NOT_PUBLISHED") return reply.code(409).send({ error: "Seul un article publié peut être partagé sur Facebook." });
+    await audit(currentId(request), "SHARE_ARTICLE_FACEBOOK", "Article", id, { result });
+    return { result, article: await prisma.article.findUniqueOrThrow({ where: { id } }) };
+  } catch (err) {
+    return reply.code(502).send({ error: `Facebook a refusé la publication : ${(err as Error).message}` });
+  }
 });
+
