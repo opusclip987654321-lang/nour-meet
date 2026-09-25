@@ -2,7 +2,7 @@ import { eventRequiresScreening } from "@nour/shared";
 import { AlternativeOfferStatus, ApplicationStatus, ContactRequestStatus } from "@prisma/client";
 import { z } from "zod";
 import { assertPhoneVerified } from "../services/session.js";
-import { app, httpError, prisma } from "../context.js";
+import { app, httpError, prisma, smsVerification } from "../context.js";
 import { eventsOverlap } from "../domain.js";
 import { cachedQrDataUrl } from "../qr-cache.js";
 import { profileAge } from "../services/account.js";
@@ -13,7 +13,7 @@ import { notify } from "../services/notify.js";
 import { getSetting } from "../settings.js";
 
 app.get("/me/tickets", { preHandler: auth }, async (request) => {
-  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: { select: { id: true, name: true } } } } } } }, orderBy: { createdAt: "desc" } });
+  const tickets = await prisma.ticket.findMany({ where: { reservation: { userId: currentId(request) } }, include: { reservation: { include: { event: { include: { controllerRestaurant: { select: { id: true, name: true } }, venueRestaurant: { select: { id: true, name: true } } } } } } }, orderBy: { createdAt: "desc" } });
   return Promise.all(tickets.map(async t => ({ ...t, qrDataUrl: await cachedQrDataUrl(t.code) })));
 });
 
@@ -27,9 +27,11 @@ app.get("/me/share-qr", { preHandler: auth }, async (request) => {
   return { code: profile.shareCode, qrDataUrl: await cachedQrDataUrl(profile.shareCode) };
 });
 
-app.get("/profiles/code/:code", { preHandler: auth }, async (request, reply) => {
+// Débit strict : un code personnel ne se devine pas en essayant des valeurs à la chaîne.
+app.get("/profiles/code/:code", { preHandler: auth, config: { rateLimit: { max: smsVerification.mode === "mock" ? 1000 : 20, timeWindow: "10 minutes" } } }, async (request, reply) => {
   const { code } = z.object({ code: z.string() }).parse(request.params);
-  const profile = await prisma.profile.findUnique({ where: { shareCode: code }, include: { user: true } });
+  // Code dicté ou recopié à la main : espaces et minuscules tolérés (les codes sont en majuscules).
+  const profile = await prisma.profile.findUnique({ where: { shareCode: code.trim().toUpperCase() }, include: { user: true } });
   if (!profile || !profile.validatedAt) return reply.code(404).send({ error: "Code invalide ou révoqué" });
   if (profile.userId === currentId(request)) return reply.code(409).send({ error: "Il s’agit de votre propre code" });
   return { userId: profile.userId, displayName: profile.user.displayName, photoUrl: profile.photoUrl, age: profileAge(profile.birthDate), city: profile.city, profession: profile.profession, interests: profile.interests, bio: profile.bio, validated: true };

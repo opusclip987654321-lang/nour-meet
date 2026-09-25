@@ -58,7 +58,7 @@ export function Admin() {
     {stats.pendingInterviews!=null&&<Stat label="Entretiens en attente" value={stats.pendingInterviews}/>}
     {stats.upcomingInterviews!=null&&<Stat label="Entretiens à venir" value={stats.upcomingInterviews}/>}
     {stats.pendingRestaurantApplications!=null&&<Stat label="Demandes restaurateurs" value={stats.pendingRestaurantApplications}/>}
-    {stats.pendingPayments!=null&&<Stat label="Paiements en attente" value={stats.pendingPayments}/>}
+    {stats.pendingPayments!=null&&<Stat label="Paiements commencés, non finalisés" value={stats.pendingPayments}/>}
     {stats.failedPayments!=null&&<Stat label="Paiements échoués" value={stats.failedPayments}/>}
     {stats.shareClicks!=null&&<Stat label="Clics de partage" value={stats.shareClicks}/>}
     {stats.shareAttributedApplications!=null&&<Stat label="Inscriptions attribuées" value={stats.shareAttributedApplications}/>}

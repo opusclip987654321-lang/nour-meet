@@ -67,7 +67,7 @@ export function AdminRestaurants() {
         <span>{p.name}{!p.active&&" (désactivée)"}</span>
         <label>€/mois<input type="number" min={0} step="1" value={planEdits[p.id]?.monthlyPriceCents??""} onChange={e=>setPlanEdits({...planEdits,[p.id]:{...planEdits[p.id],monthlyPriceCents:e.target.value}})}/></label>
         <label>Quota mensuel (vide=illimité)<input type="number" min={1} placeholder="illimité" value={planEdits[p.id]?.monthlyEventQuota??""} onChange={e=>setPlanEdits({...planEdits,[p.id]:{...planEdits[p.id],monthlyEventQuota:e.target.value}})}/></label>
-        <small className="fine">Annuel : {(Math.round(Number(planEdits[p.id]?.monthlyPriceCents||0)*100*12*0.8)/100).toFixed(0)} €/an</small>
+        <small className="fine">Annuel : {p.annualPriceCents!=null?`${(p.annualPriceCents/100).toFixed(0)} €/an`:"non proposé"}</small>
         <button type="button" className="button small" onClick={()=>savePlan(p.id)}>Enregistrer</button>
         <button type="button" className="button small secondary" onClick={()=>togglePlanActive(p)}>{p.active?"Désactiver":"Réactiver"}</button>
       </div>)}</div>
@@ -97,7 +97,7 @@ export function AdminRestaurants() {
         {notesFor===r.id&&<div className="time-row"><textarea value={notes} onChange={e=>setNotes(e.target.value)}/><button className="button small" disabled={actingOn===r.id} onClick={()=>saveNotes(r.id)}>Enregistrer</button></div>}
       </div>
       {r.status==="PENDING"&&<div className="decision-buttons">
-      <button className="button" disabled={actingOn===r.id} onClick={()=>decide(r.id,true)}>Accepter</button>
+      {!(r.photos?.length>0)&&<p className="fine left">Aucune photo de l’établissement : l’approbation reste impossible tant que le restaurateur n’en a pas ajouté au moins une.</p>}<button className="button" disabled={actingOn===r.id||!(r.photos?.length>0)} onClick={()=>decide(r.id,true)}>Accepter</button>
       {reasonFor===r.id?<div className="reject-note"><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motif (optionnel)"/><button className="button danger" disabled={actingOn===r.id} onClick={()=>decide(r.id,false,reason)}>Confirmer le refus</button></div>:<button className="button danger" onClick={()=>setReasonFor(r.id)}>Refuser</button>}
     </div>}</article>)}</div>}
   </div></section></Layout>;

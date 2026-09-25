@@ -34,6 +34,11 @@ async function main() {
     update: {},
     create: { ownerId: organizerUser.id, name: "Maison Amana", managerName: "Amana Traoré", siret: "12345678900019", description: "Des expériences raffinées autour de la culture et de la rencontre.", district: "Paris 8e", address: "14 rue de Miromesnil, 75008 Paris", phone: "+33145000000", commissionRate: 30, status: "APPROVED", verifiedAt: new Date() }
   });
+  // Au moins une photo d'établissement est exigée pour soumettre une soirée : le restaurant de
+  // démonstration en a une (illustration par défaut, jamais présentée comme une vraie photo du lieu).
+  if (await prisma.restaurantPhoto.count({ where: { restaurantId: restaurant.id } }) === 0) {
+    await prisma.restaurantPhoto.create({ data: { restaurantId: restaurant.id, url: "/static/defaults/networking.jpg", position: 0 } });
+  }
   const sofia = await prisma.user.upsert({
     where: { phone: "+33612345678" },
     update: { profile: { update: { quotaCategory: "FEMME" } } },

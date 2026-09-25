@@ -97,9 +97,11 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
   }
 
   let clientSecret: string | null = null;
+  let chargedCents = amountCents;
   if (payment?.providerRef) {
     const existing = await stripe.paymentIntents.retrieve(payment.providerRef);
-    if (["requires_payment_method", "requires_confirmation", "requires_action"].includes(existing.status)) clientSecret = existing.client_secret;
+    // Intent réutilisé : son montant, figé à sa création, est celui qui sera débité — c'est lui qu'on annonce.
+    if (["requires_payment_method", "requires_confirmation", "requires_action"].includes(existing.status)) { clientSecret = existing.client_secret; chargedCents = existing.amount; }
   }
   if (!clientSecret) {
     const intent = await stripe.paymentIntents.create({
@@ -115,7 +117,7 @@ app.post("/applications/:id/payment-intent", { preHandler: auth }, async (reques
       create: { reservationId: reservation.id, provider: "stripe", providerRef: intent.id, amountCents, status: PaymentStatus.PENDING }
     });
   }
-  return { clientSecret, amountCents, expiresAt: reservation.expiresAt };
+  return { clientSecret, amountCents: chargedCents, expiresAt: reservation.expiresAt };
 });
 
 await app.register(async (webhooks) => {

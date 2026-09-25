@@ -180,7 +180,9 @@ model Profile {
   interests       String[]
   bio             String?
   photoUrl        String?
-  shareCode       String   @unique @default(cuid())
+  // Code personnel lisible et dictable en soirée (« NOUR-3F9A-C21B-07E4 », 48 bits tirés de
+  // gen_random_uuid, générateur cryptographique), jamais un identifiant technique ni devinable.
+  shareCode       String   @unique @default(dbgenerated("((((('NOUR-'::text || upper(substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 4))) || '-'::text) || upper(substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 4))) || '-'::text) || upper(substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 4)))"))
   profileCompleted Boolean @default(false)
   quotaCategory   QuotaCategory?
   validatedAt     DateTime?

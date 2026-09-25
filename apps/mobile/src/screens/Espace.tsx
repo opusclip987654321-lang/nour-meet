@@ -72,8 +72,8 @@ function Reservations({ user, focus, navigate, onUserChanged }: { user: any; foc
             {a.status === "PAYMENT_PENDING" && (waitlisted
               ? <Button small variant="secondary" title="Voir la soirée" onPress={() => navigate({ name: "events", slug: a.event.slug })} />
               : !user.phoneVerified ? <PhoneVerification onVerified={onUserChanged} />
-                : a.event.priceCents === 0 ? <Button small title="Confirmer ma place (gratuit)" onPress={() => navigate({ name: "events", slug: a.event.slug })} />
-                  : <Button small title={`Payer par carte · ${money(a.event.priceCents)}`} busy={busyId === a.id} onPress={() => act(a.id, async () => { await payByCard(a.id, a.event.id, a.event.priceCents); return "Paiement en cours de confirmation : votre billet apparaîtra dans « Billets »."; })} />)}
+                : (a.amountCents ?? a.event.priceCents) === 0 ? <Button small title="Confirmer ma place (gratuit)" onPress={() => navigate({ name: "events", slug: a.event.slug })} />
+                  : <Button small title={`Payer par carte · ${money(a.amountCents ?? a.event.priceCents)}`} busy={busyId === a.id} onPress={() => act(a.id, async () => { await payByCard(a.id, a.event.id, a.amountCents ?? a.event.priceCents); return "Paiement en cours de confirmation : votre billet apparaîtra dans « Billets »."; })} />)}
             {!["REFUSED", "CANCELLED"].includes(a.status) && <Button small variant="ghost" title="Annuler ma participation" busy={busyId === a.id} onPress={() => act(a.id, async () => {
               const r = await api<{ refunded: boolean; refundedAmountCents: number | null; eligible: boolean | null }>(`/me/applications/${a.id}/cancel`, { method: "POST" });
               return r.refunded ? `Participation annulée. ${money(r.refundedAmountCents!)} ont été remboursés intégralement.` : r.eligible === false ? "Participation annulée. Conformément à notre politique, aucun remboursement n’est possible à 24 heures ou moins de l’événement." : "Participation annulée.";
@@ -111,7 +111,7 @@ function Tickets({ focus, navigate }: { focus?: string; navigate: Navigate }) {
           <CategoryBadge category={event.category} />
           <Text style={[s.meta, { color: T.saffronInk }]}>{shortDate(event.startsAt)}</Text>
           <Text style={[s.h2, { textAlign: "center" }]}>{event.title}</Text>
-          {event.controllerRestaurant && <Text style={s.small}>{event.controllerRestaurant.name}</Text>}
+          {(event.venueRestaurant ?? event.controllerRestaurant) && <Text style={s.small}>{(event.venueRestaurant ?? event.controllerRestaurant).name}</Text>}
           <Text style={[s.small, { textAlign: "center" }]}>{event.address ? `${event.address} · ${event.district}` : event.district}</Text>
           <Image source={{ uri: t.qrDataUrl }} accessibilityLabel={`QR code du billet ${t.code}`} style={{ width: 220, height: 220, backgroundColor: T.surface, borderRadius: R.sm }} />
           <Text style={[s.bodyStrong, { letterSpacing: 1 }]}>{t.code}</Text>

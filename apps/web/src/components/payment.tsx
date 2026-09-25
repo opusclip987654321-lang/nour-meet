@@ -29,11 +29,13 @@ function PaymentForm({ amountCents, onSuccess, onCancel }: { amountCents: number
   </form>;
 }
 
-export function PaymentModal({ applicationId, eventId, amountCents, onClose, onConfirmed, onWaitlisted }: { applicationId: string; eventId: string; amountCents: number; onClose: () => void; onConfirmed: () => void; onWaitlisted: () => void }) {
+export function PaymentModal({ applicationId, eventId, amountCents: announcedCents, onClose, onConfirmed, onWaitlisted }: { applicationId: string; eventId: string; amountCents: number; onClose: () => void; onConfirmed: () => void; onWaitlisted: () => void }) {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [phase, setPhase] = useState<"terms" | "loading" | "ready" | "confirming" | "success" | "timeout" | "notBookable">("terms");
   const [acceptCgv, setAcceptCgv] = useState(false);
+  // Le montant renvoyé à la création du paiement fait foi : c'est celui que Stripe débitera.
+  const [amountCents, setAmountCents] = useState(announcedCents);
   const free = amountCents === 0;
 
   // CGV A3 : la réservation n'est ferme qu'après acceptation des CGV — étape obligatoire avant tout
@@ -43,8 +45,9 @@ export function PaymentModal({ applicationId, eventId, amountCents, onClose, onC
   // instant, la personne rejoint automatiquement la liste d'attente plutôt que d'échouer sans suite.
   const acceptAndContinue = () => {
     setError(""); setPhase("loading");
-    api<{ clientSecret?: string; free?: boolean; confirmed?: boolean }>(`/applications/${applicationId}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) })
+    api<{ clientSecret?: string; free?: boolean; confirmed?: boolean; amountCents?: number }>(`/applications/${applicationId}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) })
       .then(r => {
+        if (typeof r.amountCents === "number") setAmountCents(r.amountCents);
         if (r.free) { setPhase("success"); setTimeout(onConfirmed, 1200); return; }
         setClientSecret(r.clientSecret!); setPhase("ready");
       })
@@ -118,20 +121,22 @@ export function PayStandalone(){
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
   const [done, setDone] = useState(false);
+  const [amountCents, setAmountCents] = useState<number | null>(null);
+  const [eventId, setEventId] = useState("");
   useEffect(() => {
     const session = searchParams.get("session");
     if (!session) { setError(true); setReady(true); return; }
     api<{ token: string }>("/auth/payment-session-exchange", { method: "POST", body: JSON.stringify({ token: session }) })
-      .then(r => { setToken(r.token); setReady(true); })
+      // Montant relu auprès du serveur, jamais depuis l'URL : un paramètre absent affichait « gratuite ».
+      .then(r => { setToken(r.token); return api<{ amountCents: number; eventId: string }>(`/me/applications/${applicationId}/amount`); })
+      .then(a => { setAmountCents(a.amountCents); setEventId(a.eventId); setReady(true); })
       .catch(() => { setError(true); setReady(true); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- jeton à usage unique : échangé une seule fois au montage
   }, []);
   if (!ready) return <div className="state-page"><div className="spinner"/></div>;
   if (error) return <div className="state-page"><h2>Lien de paiement invalide ou expiré.</h2><p>Retournez dans l’application et réessayez.</p></div>;
   if (done) return <div className="state-page"><h2>C’est terminé ici.</h2><p>Vous pouvez fermer cette fenêtre et retourner dans l’application Nūr Meet.</p></div>;
-  const eventId = searchParams.get("eventId") ?? "";
-  const amountCents = Number(searchParams.get("amount") ?? "0");
   return <div style={{ minHeight: "100dvh", background: "var(--canvas)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-    <PaymentModal applicationId={applicationId!} eventId={eventId} amountCents={amountCents} onClose={() => setDone(true)} onConfirmed={() => setDone(true)} onWaitlisted={() => setDone(true)}/>
+    <PaymentModal applicationId={applicationId!} eventId={eventId} amountCents={amountCents!} onClose={() => setDone(true)} onConfirmed={() => setDone(true)} onWaitlisted={() => setDone(true)}/>
   </div>;
 }

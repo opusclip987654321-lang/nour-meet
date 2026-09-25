@@ -14,6 +14,7 @@ function RestaurantApplication() {
   const [form,setForm]=useState(emptyRestaurantForm);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [submitting,setSubmitting]=useState(false);
+  const [files,setFiles]=useState<File[]>([]);
 
   const load=()=>api<any>("/restaurants/me").then(r=>{setRestaurant(r);setForm({...emptyRestaurantForm,name:r.name??"",managerName:r.managerName??"",siret:r.siret??"",description:r.description??"",district:r.district??"",address:r.address??"",phone:r.phone??"",desiredCapacity:r.desiredCapacity??"",desiredSchedule:r.desiredSchedule??"",averagePricePerPersonCents:r.averagePricePerPersonCents!=null?String(r.averagePricePerPersonCents/100):"",defaultMinParticipants:r.defaultMinParticipants??"",priceIncludesDrink:!!r.priceIncludesDrink,priceIncludesStarter:!!r.priceIncludesStarter,priceIncludesMain:!!r.priceIncludesMain,priceIncludesDessert:!!r.priceIncludesDessert,priceNotes:r.priceNotes??"",proposesCategoryPricing:!!r.proposesCategoryPricing,allowsPrivatization:!!r.allowsPrivatization,specialConditions:r.specialConditions??""})}).catch(()=>setRestaurant(null)).finally(()=>setLoading(false));
   useEffect(()=>{load()},[]);
@@ -22,7 +23,14 @@ function RestaurantApplication() {
 
   const submit=async(e:FormEvent)=>{
     e.preventDefault();setSubmitting(true);setNotice(null);
-    try{await api("/restaurants/apply",{method:"POST",body:JSON.stringify(payload())});setNotice({kind:"success",text:"Votre demande a été envoyée."});await load()}
+    // Au moins une photo de l'établissement accompagne la demande : sans elle, l'approbation est refusée côté serveur.
+    try{
+      await api("/restaurants/apply",{method:"POST",body:JSON.stringify(payload())});
+      let failed=0;
+      for(const file of files){const body=new FormData();body.append("file",file);await api("/restaurants/me/photos",{method:"POST",body}).catch(()=>{failed++})}
+      setNotice(failed?{kind:"error",text:`Votre demande a été envoyée, mais ${failed} photo(s) n’ont pas pu être ajoutées : ajoutez-en au moins une ci-dessous.`}:{kind:"success",text:"Votre demande a été envoyée."});
+      await load()
+    }
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setSubmitting(false)}
   };
@@ -52,7 +60,14 @@ function RestaurantApplication() {
   </>;
 
   if(loading) return <Loading/>;
-  if(restaurant?.status==="PENDING") return <div className="panel"><Notice kind="info">Votre demande pour « {restaurant.name} » est en cours d’examen.</Notice></div>;
+  const photoCount=(restaurant?.photos??[]).length;
+  const gallery=<div className="panel">
+      <div className="panel-title"><h2>Galerie</h2><span>{photoCount}/8 photos</span></div>
+      {photoCount===0&&<Notice kind="error">Ajoutez au moins une photo de votre établissement : elle est obligatoire pour l’approbation de votre compte et pour soumettre une soirée.</Notice>}
+      <div className="event-photo-grid">{(restaurant?.photos??[]).map((p:any)=><div key={p.id} className="event-photo"><img src={imgUrl(p.url)} alt=""/><button type="button" className="link-button" onClick={()=>removePhoto(p.id)}>Retirer</button></div>)}</div>
+      {photoCount<8&&<label className="fine">Ajouter une photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>e.target.files?.[0]&&uploadPhoto(e.target.files[0])}/></label>}
+    </div>;
+  if(restaurant?.status==="PENDING") return <div className="stack"><div className="panel"><Notice kind="info">Votre demande pour « {restaurant.name} » est en cours d’examen.</Notice>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}</div>{gallery}</div>;
   if(restaurant?.status==="APPROVED") return <div className="stack">
     <div className="panel"><Notice kind="success">Votre établissement « {restaurant.name} » est approuvé. <Link to="/admin">Accéder à mon espace restaurateur →</Link></Notice>
       {restaurant.subscription&&<p className="fine">Formule « {restaurant.subscription.plan.name} » — {SUBSCRIPTION_STATUS_LABEL[restaurant.subscription.status]??restaurant.subscription.status} — {restaurant.currentMonthEventsPublished}{restaurant.subscription.plan.monthlyEventQuota==null?" soirée(s) publiée(s) ce mois-ci (illimité)":`/${restaurant.subscription.plan.monthlyEventQuota} soirées publiées ce mois-ci`}. <Link to="/restaurant?tab=subscription">Voir mon abonnement</Link></p>}
@@ -63,11 +78,7 @@ function RestaurantApplication() {
       {priceFields(form,setForm)}
       <button className="button" disabled={submitting}>{submitting?"Enregistrement…":"Enregistrer"}</button>
     </form>
-    <div className="panel">
-      <div className="panel-title"><h2>Galerie</h2><span>{(restaurant.photos??[]).length}/8 photos</span></div>
-      <div className="event-photo-grid">{(restaurant.photos??[]).map((p:any)=><div key={p.id} className="event-photo"><img src={imgUrl(p.url)} alt=""/><button type="button" className="link-button" onClick={()=>removePhoto(p.id)}>Retirer</button></div>)}</div>
-      <label className="fine">Ajouter une photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>e.target.files?.[0]&&uploadPhoto(e.target.files[0])}/></label>
-    </div>
+    {gallery}
   </div>;
 
   return <form className="panel form-grid" onSubmit={submit}>
@@ -82,7 +93,8 @@ function RestaurantApplication() {
     <label>Adresse<input value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></label>
     <label className="wide">Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
     {priceFields(form,setForm)}
-    <p className="fine wide">Le SIRET est déclaratif : Nūr Meet ne réalise pas de vérification officielle auprès d’un registre. La galerie de photos se complète après approbation.</p>
+    <label className="wide">Photos de l’établissement (au moins une, 8 au maximum)<input required type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={e=>setFiles(Array.from(e.target.files??[]).slice(0,8))}/><span className="fine">Façade, salle ou tables : de vraies photos du lieu. JPEG, PNG ou WEBP · 5 Mo maximum chacune.</span></label>
+    <p className="fine wide">Le SIRET est déclaratif : Nūr Meet ne réalise pas de vérification officielle auprès d’un registre.</p>
     <button className="button" disabled={submitting}>{submitting?"Envoi…":"Envoyer ma demande"}</button>
   </form>;
 }

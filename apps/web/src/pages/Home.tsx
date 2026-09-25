@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { Picture } from "../components/brand";
 import { Layout } from "../components/Layout";
-import { EventCard, availabilityLabel } from "../components/ui";
+import { EventCard, availabilityLabel, initials } from "../components/ui";
 import { imgUrl, money } from "../lib/format";
 import { SITE_NAME, SITE_URL, absoluteUrl, useSeo } from "../lib/seo";
 
@@ -19,7 +19,7 @@ function TestimonialsSection({ eventType }: { eventType?: string }) {
     <div className="section-title"><h2 id="temoignages">Ils sont venus, ils racontent</h2></div>
     <div className="testimonial-grid">{items.map(t=><figure key={t.id} className="testimonial-card">
       <blockquote>« {t.text} »</blockquote>
-      <figcaption className="testimonial-head"><span className="testimonial-avatar" aria-hidden="true">{t.displayName.slice(0,2).toUpperCase()}</span><div><b>{t.displayName}</b><span>{t.eventType}{t.rating?` · ${t.rating}/5`:""}</span></div></figcaption>
+      <figcaption className="testimonial-head"><span className="testimonial-avatar" aria-hidden="true">{initials(t.displayName)}</span><div><b>{t.displayName}</b><span>{t.eventType}{t.rating?` · ${t.rating}/5`:""}</span></div></figcaption>
     </figure>)}</div>
   </section>;
 }
@@ -61,7 +61,7 @@ export function Home() {
       <div className="home-hero-inner">
         <div className="home-hero-copy">
           <h1 id="hero-title" className="display">Rencontrer quelqu’un de sérieux, autour d’une vraie table.</h1>
-          <p className="hero-lead">Nūr Meet organise à Paris des soirées en petit comité, dans des restaurants partenaires, entre personnes qui partagent vos valeurs. Speed dating sur sélection, networking en accès direct.</p>
+          <p className="hero-lead">Nūr Meet organise à Paris et en Île-de-France des soirées en petit comité, dans des restaurants partenaires, entre personnes qui partagent vos valeurs. Speed dating sur sélection, networking en accès direct.</p>
           <div className="hero-actions">
             <Link className="button accent" to="/events">Voir les prochaines soirées<ArrowRight size={18} aria-hidden="true"/></Link>
             <a className="button on-night" href="#comment">Comment ça marche</a>
@@ -135,7 +135,7 @@ export function Home() {
 
     <section className="section" aria-labelledby="agenda">
       <div className="section-title row">
-        <div><h2 id="agenda">Les prochaines soirées</h2><p>Places limitées à chaque soirée : les inscriptions ferment quand la salle est complète.</p></div>
+        <div><h2 id="agenda">Les prochaines soirées</h2><p>Places limitées à chaque soirée : quand la salle est complète, la liste d’attente prend le relais.</p></div>
         <Link className="button secondary" to="/events">Tout le calendrier<ArrowRight size={18} aria-hidden="true"/></Link>
       </div>
       {events===null
@@ -147,10 +147,10 @@ export function Home() {
 
     <section className="section venues" aria-labelledby="lieux">
       <div className="venues-grid">
-        <Picture name="bistro-front" className="venues-photo" sizes="(max-width: 900px) 92vw, 40vw"/>
+        <Picture name="venue-day" className="venues-photo" sizes="(max-width: 900px) 92vw, 40vw"/>
         <div className="venues-copy">
           <h2 id="lieux">Des restaurants partenaires, choisis un par un</h2>
-          <p>Chaque soirée se tient dans un établissement parisien partenaire, qui l’accueille et la co-organise. Son nom figure sur la fiche de la soirée avant toute réservation, et vous savez à l’avance ce qui est compris dans le prix.</p>
+          <p>Chaque soirée se tient dans un établissement partenaire, à Paris ou en Île-de-France, qui l’accueille et la co-organise. Son nom figure sur la fiche de la soirée avant toute réservation, et vous savez à l’avance ce qui est compris dans le prix.</p>
           <div className="venues-pro">
             <Store size={22} aria-hidden="true"/>
             <div><b>Vous êtes restaurateur ?</b><span>Accueillez des soirées Nūr Meet et faites découvrir votre établissement à de nouveaux clients.</span><Link className="text-link" to="/restaurant">Proposer mon établissement</Link></div>

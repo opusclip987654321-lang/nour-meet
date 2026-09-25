@@ -7,7 +7,7 @@ import { interviewRetryDate, refundEligibility, resolvePriceCents } from "../dom
 import { ADULT_ONLY_ERROR } from "../services/account.js";
 import { audit } from "../services/audit.js";
 import { auth, currentId } from "../services/auth.js";
-import { defaultCategoryImage } from "../services/events.js";
+import { applicationAmountCents, defaultCategoryImage } from "../services/events.js";
 import { links } from "../services/links.js";
 import { notify } from "../services/notify.js";
 import { executeRefund } from "../services/payments.js";
@@ -89,7 +89,7 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   });
   await audit(userId, "CREATE_APPLICATION", "Application", application.id);
   await notify(userId, "Inscription enregistrée", `Vous pouvez maintenant régler votre billet pour « ${event.title} » (${(resolvePriceCents(event, quotaCategory, getSetting("ENABLE_GENDER_PRICING")) / 100).toFixed(2)} €). La place n’est confirmée qu’une fois le paiement réussi.`, links.reservation(application.id));
-  return reply.code(201).send({ application });
+  return reply.code(201).send({ application: { ...application, amountCents: applicationAmountCents(event, application.quotaCategory) } });
 });
 
 // Arbitrage 12/E3 (cahier des charges consolidé 2026-09-20) : les questions professionnelles d'un
@@ -162,11 +162,28 @@ app.post("/applications/:id/schedule", { preHandler: auth }, async (request, rep
   return { scheduled: true, slot };
 });
 
+// Montant à annoncer sur la page de paiement autonome (/pay/:applicationId), lu pour cette
+// inscription précise de la personne connectée — jamais depuis un paramètre d'URL.
+app.get("/me/applications/:id/amount", { preHandler: auth }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const application = await prisma.application.findFirst({ where: { id, userId: currentId(request) }, include: { event: { include: { priceTiers: true } } } });
+  if (!application?.event) return reply.code(404).send({ error: "Inscription introuvable" });
+  return { amountCents: applicationAmountCents(application.event, application.quotaCategory), eventId: application.event.id };
+});
+
 app.get("/me/applications", { preHandler: auth }, async (request) => {
-  const applications = await prisma.application.findMany({ where: { userId: currentId(request) }, include: { event: true, call: true, waitlistEntry: true, reservation: { include: { payment: true, ticket: true } } }, orderBy: { createdAt: "desc" } });
+  const applications = await prisma.application.findMany({ where: { userId: currentId(request) }, include: { event: { include: { priceTiers: true } }, call: true, waitlistEntry: true, reservation: { include: { payment: true, ticket: true } } }, orderBy: { createdAt: "desc" } });
   // Même résolution d'image par défaut que les routes publiques (§ligne 307/1316) : un événement
-  // sans photo uploadée ne doit jamais renvoyer imageUrl:null au front.
-  return applications.map(a => a.event ? { ...a, event: { ...a.event, imageUrl: a.event.imageUrl ?? defaultCategoryImage(a.event.category) } } : a);
+  // sans photo uploadée ne doit jamais renvoyer imageUrl:null au front. amountCents : le montant
+  // réellement débité (tarif différencié compris), jamais recalculé côté interface.
+  // L'événement renvoyé ne garde que ce qu'affiche l'espace personnel : jamais les tarifs bruts par
+  // catégorie (ENABLE_GENDER_PRICING), le marquage démo, la note de relecture, ni l'adresse exacte
+  // avant la confirmation de la place (elle figure sur le billet).
+  return applications.map(a => {
+    if (!a.event) return a;
+    const { priceTiers, isDemo: _isDemo, reviewNote: _reviewNote, address, ...event } = a.event;
+    return { ...a, amountCents: applicationAmountCents({ ...a.event, priceTiers }, a.quotaCategory), event: { ...event, address: a.status === ApplicationStatus.CONFIRMED ? address : null, imageUrl: a.event.imageUrl ?? defaultCategoryImage(a.event.category) } };
+  });
 });
 
 // Politique d'annulation §7 : plus de 24h avant l'événement, remboursement intégral automatique,

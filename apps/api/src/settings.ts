@@ -21,11 +21,6 @@ export const SETTINGS_SCHEMA = {
     default: 24,
     description: "Délai laissé pour répondre à une proposition d'événement alternatif avant qu'elle n'expire."
   },
-  RESTAURANT_MONTHLY_EVENT_QUOTA: {
-    schema: z.number().int().positive(),
-    default: 2,
-    description: "Quota mensuel du plan d'abonnement par défaut (Plan \"Standard\", créé par migration). Modifier le quota d'un restaurateur déjà abonné se fait sur son Plan, pas ici."
-  },
   ENABLE_COMMISSION_LEDGER: {
     schema: z.boolean(),
     default: false,
@@ -55,11 +50,6 @@ export const SETTINGS_SCHEMA = {
     schema: z.enum(["DRAFT_ONLY", "AUTO_PUBLISH_DAILY"]),
     default: "AUTO_PUBLISH_DAILY" as "DRAFT_ONLY" | "AUTO_PUBLISH_DAILY",
     description: "Blog (corrections web 2026-09-24, §3). AUTO_PUBLISH_DAILY : en production, un article est généré (IA avec recherche web, ANTHROPIC_API_KEY) et publié automatiquement chaque jour, sans validation préalable ; à défaut d'IA, un article de la réserve est publié. DRAFT_ONLY : aucune publication automatique, la génération IA ne produit que des brouillons."
-  },
-  WHATSAPP_ENABLED: {
-    schema: z.boolean(),
-    default: false,
-    description: "Active les notifications WhatsApp. Désactivé par défaut : hors périmètre actif."
   },
   CONCEPT_VIDEO_URL: {
     schema: z.string(),
@@ -92,9 +82,9 @@ export const SETTINGS_SCHEMA = {
     description: "Délai avant l'échéance d'un abonnement restaurateur (fin de période ou fin d'essai) auquel un rappel est envoyé, une seule fois par période."
   },
   RESTAURANT_TRIAL_DAYS: {
-    schema: z.number().int().positive(),
+    schema: z.number().int().positive().max(730), // plafond de Stripe pour trial_period_days
     default: 7,
-    description: "Durée de l'essai gratuit ouvert automatiquement à l'approbation d'un restaurateur (§7 du cahier des charges 2026-09) : carte bancaire requise à l'inscription, abonnement activé à l'issue de l'essai sauf annulation avant l'échéance."
+    description: "Durée de l'essai gratuit (en jours) accordé à la première souscription d'un restaurateur, au moment où il choisit sa formule (§7 du cahier des charges 2026-09) : carte bancaire requise, abonnement activé à l'issue de l'essai sauf résiliation avant l'échéance."
   },
   ANALYTICS_ENABLED: {
     schema: z.boolean(),

@@ -5,6 +5,7 @@ import { audit } from "./audit.js";
 import { notify } from "./notify.js";
 import { planChangeDirection } from "../domain.js";
 import { mapStripeSubscriptionStatus } from "./payments.js";
+import { getSetting } from "../settings.js";
 
 // Changement de formule restaurateur (corrections web 2026-09-24, §1.4) : règle métier unique,
 // jamais dupliquée dans l'interface.
@@ -177,7 +178,7 @@ export const recordCheckoutSession = async (session: Stripe.Checkout.Session) =>
   const updated = await prisma.restaurantSubscription.findUniqueOrThrow({ where: { restaurantId }, include: { plan: true } });
   if (claimed && updated.stripeSubscriptionId === stripeSubscriptionId) {
     const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { id: restaurantId } });
-    const trial = updated.status === SubscriptionStatus.TRIALING ? ", essai gratuit de 7 jours en cours" : "";
+    const trial = updated.status === SubscriptionStatus.TRIALING ? `, essai gratuit de ${getSetting("RESTAURANT_TRIAL_DAYS")} jours en cours` : "";
     await notify(restaurant.ownerId, "Abonnement activé", `Votre abonnement « ${updated.plan.name} » (${billingPeriod === "ANNUAL" ? "annuel" : "mensuel"}) est confirmé${trial}.`, "/restaurant?tab=subscription");
     await audit(restaurant.ownerId, "SUBSCRIPTION_CHECKOUT_COMPLETED", "RestaurantSubscription", updated.id, { planId, billingPeriod });
   }

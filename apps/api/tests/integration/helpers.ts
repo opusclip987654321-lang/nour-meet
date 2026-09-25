@@ -58,6 +58,12 @@ async function loginOrRegister(phone: string, displayName?: string) {
   return body.token;
 }
 
+// Une demande restaurateur n'est jamais approuvée sans au moins une photo de l'établissement.
+export async function addRestaurantPhoto(token: string) {
+  const form = new FormData();
+  form.append("file", new Blob([Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00])], { type: "image/jpeg" }), "facade.jpg");
+  return api("/restaurants/me/photos", { method: "POST", body: form as any }, token);
+}
 export const adminToken = () => loginOrRegister("+33600000001");
 export const organizerToken = () => loginOrRegister("+33600000002");
 

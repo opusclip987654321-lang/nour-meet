@@ -19,7 +19,10 @@ app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER)
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
   const events = await prisma.event.findMany({ where: restaurant ? { controllerRestaurantId: restaurant.id } : undefined, include: { quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } } }, orderBy: { startsAt: "asc" } });
-  return events.map(e => ({ ...e, imageUrl: e.imageUrl ?? defaultCategoryImage(e.category) }));
+  // genderPricingEnabled : un tarif homme/femme n'est proposé à la saisie que s'il sera réellement
+  // appliqué (drapeau ENABLE_GENDER_PRICING) — jamais un réglage enregistré puis ignoré en silence.
+  const genderPricingEnabled = getSetting("ENABLE_GENDER_PRICING");
+  return events.map(e => ({ ...e, genderPricingEnabled, imageUrl: e.imageUrl ?? defaultCategoryImage(e.category) }));
 });
 app.post("/admin/events/:id/quotas", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -234,10 +237,14 @@ app.get("/admin/events/:id/shares", { preHandler: roles(UserRole.ADMIN, UserRole
     bySharer
   };
 });
+const RESTAURANT_PHOTO_REQUIRED = "Ajoutez au moins une photo de votre établissement (Mon établissement → Galerie) avant de soumettre une soirée.";
 app.post("/admin/events/:id/submit-for-review", { preHandler: roles(UserRole.ORGANIZER) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const event = await assertEventAccess(request, id);
   if (event.status !== EventStatus.DRAFT) return reply.code(409).send({ error: "Seul un événement en brouillon peut être soumis" });
+  // Une soirée n'est jamais soumise sans au moins une photo réelle de l'établissement qui l'accueille.
+  const restaurantId = event.venueRestaurantId ?? event.controllerRestaurantId;
+  if (!restaurantId || (await prisma.restaurantPhoto.count({ where: { restaurantId } })) === 0) return reply.code(409).send({ error: RESTAURANT_PHOTO_REQUIRED });
   const updated = await prisma.event.update({ where: { id }, data: { status: EventStatus.PENDING_REVIEW, submittedForReviewAt: new Date(), reviewNote: null } });
   const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
   await Promise.all(admins.map(a => notify(a.id, "Événement à valider", `« ${event.title} » attend votre validation avant publication.`, `/admin/events?highlight=${event.id}`)));

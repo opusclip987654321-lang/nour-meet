@@ -44,6 +44,8 @@ function NetworkingFollowUp({ applicationId }: { applicationId: string }) {
 
 function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { application: any; event: PublicEvent; onPaid: () => void; onWaitlisted: () => void }) {
   const [showPayment, setShowPayment] = useState(false);
+  // Montant résolu par le serveur (tarif différencié compris) : jamais le prix de base de la fiche.
+  const amountCents: number = application.amountCents ?? event.priceCents;
   if (application.status === "REFUSED") return <Notice kind="error">Votre candidature n’a pas été retenue pour cet événement.</Notice>;
   if (application.status === "CANCELLED") return <Notice kind="error">Cette candidature a été annulée.</Notice>;
   if (application.status === "CONFIRMED") return <>
@@ -54,8 +56,8 @@ function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { 
   // (§5) : le clic sur "Payer" est ce qui pose réellement le verrou, via PaymentModal.
   if (application.status === "PAYMENT_PENDING") return <div className="payment-block">
     {event.viewerStatus === "WAITLIST" ? <Notice kind="info">Vous êtes sur la liste d’attente. Dès qu’une place se libère, vous êtes prévenu(e) : elle revient à la première personne qui finalise son paiement.</Notice> : <Notice kind="success">{application.reservation ? `Votre place est retenue quelques minutes (jusqu’au ${dateTime(application.reservation.expiresAt)}) : finalisez votre paiement.` : "Vous pouvez régler votre billet dès maintenant."}</Notice>}
-    <button className="button full" onClick={() => setShowPayment(true)}>{event.priceCents === 0 ? "Confirmer ma place (gratuit)" : `Payer par carte · ${money(event.priceCents)}`}</button>
-    {showPayment && <Suspense fallback={null}><PaymentModal applicationId={application.id} eventId={event.id} amountCents={event.priceCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }} onWaitlisted={onWaitlisted}/></Suspense>}
+    <button className="button full" onClick={() => setShowPayment(true)}>{amountCents === 0 ? "Confirmer ma place (gratuit)" : `Payer par carte · ${money(amountCents)}`}</button>
+    {showPayment && <Suspense fallback={null}><PaymentModal applicationId={application.id} eventId={event.id} amountCents={amountCents} onClose={() => setShowPayment(false)} onConfirmed={() => { setShowPayment(false); onPaid(); }} onWaitlisted={onWaitlisted}/></Suspense>}
   </div>;
   if (application.call) return <div className="call-scheduled"><span className="eyebrow">Entretien programmé</span><strong>{dateTime(application.call.startsAt)}</strong><p>L’équipe Nūr Meet vous appellera à cette heure, puis vous serez informé(e) de sa décision.</p></div>;
   return null;
@@ -86,7 +88,7 @@ export function EventDetail() {
   const [loadingApplication,setLoadingApplication]=useState(true);
   const [notice,setNotice]=useState<{kind:"error"|"success"|"info";text:string}|null>(null);
   const [waitlistEntry,setWaitlistEntry]=useState<any>(null);
-  const [altOffer,setAltOffer]=useState<any>(null);
+  const [altOffers,setAltOffers]=useState<any[]>([]);
   const [busy,setBusy]=useState(false);
   const [showQuestionnaire,setShowQuestionnaire]=useState(false);
 
@@ -108,7 +110,7 @@ export function EventDetail() {
     let ignore=false; setLoadingApplication(true);
     api<any>(`/events/${eventId}/my-application`).then(a=>!ignore&&setApplication(a)).catch(()=>!ignore&&setApplication(null)).finally(()=>!ignore&&setLoadingApplication(false));
     api<any>(`/events/${eventId}/waitlist/me`).then(w=>!ignore&&setWaitlistEntry(w)).catch(()=>!ignore&&setWaitlistEntry(null));
-    api<any[]>("/me/alternative-offers").then(list=>{if(ignore)return;setAltOffer(list.find(o=>o.originalEventId===eventId&&o.status==="PENDING")??null)}).catch(()=>{});
+    api<any[]>("/me/alternative-offers").then(list=>{if(ignore)return;setAltOffers(list.filter(o=>o.originalEventId===eventId&&o.status==="PENDING"))}).catch(()=>{});
     return ()=>{ignore=true};
   },[user,eventId]);
 
@@ -193,15 +195,16 @@ export function EventDetail() {
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}
   };
-  const respondAltOffer=async(accept:boolean)=>{
-    if(!altOffer)return;
+  // Toutes les propositions en attente, comme dans l'espace personnel — jamais seulement la première.
+  const respondAltOffer=async(offerId:string,accept:boolean)=>{
     setBusy(true);setNotice(null);
-    try{await api(`/alternative-offers/${altOffer.id}/respond`,{method:"POST",body:JSON.stringify({accept})});setAltOffer(null);setNotice({kind:"success",text:accept?"Place réservée sur l’événement alternatif : consultez votre espace personnel pour payer.":"Proposition refusée."})}
+    try{await api(`/alternative-offers/${offerId}/respond`,{method:"POST",body:JSON.stringify({accept})});setAltOffers(prev=>prev.filter(o=>o.id!==offerId));setNotice({kind:"success",text:accept?"Place réservée sur l’événement alternatif : consultez votre espace personnel pour payer.":"Proposition refusée."})}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}
   };
 
   const perkLabels=[event.perks.drink&&"Boisson incluse",event.perks.starter&&"Entrée incluse",event.perks.main&&"Plat inclus",event.perks.dessert&&"Dessert inclus"].filter(Boolean) as string[];
+  const free=event.priceTiers.length===0&&event.priceCents===0;
   const priceText=event.priceTiers.length>0?`dès ${money(Math.min(...event.priceTiers.map(t=>t.amountCents)))}`:event.priceCents===0?"Gratuit":money(event.priceCents);
   const ageText=event.minAge&&event.maxAge?`${event.minAge} à ${event.maxAge} ans`:event.minAge?`${event.minAge} ans et plus`:event.maxAge?`Jusqu’à ${event.maxAge} ans`:null;
   const time=new Intl.DateTimeFormat("fr-FR",{hour:"2-digit",minute:"2-digit"}).format(new Date(event.startsAt)).replace(":","h");
@@ -235,8 +238,8 @@ export function EventDetail() {
         <section aria-labelledby="deroulement" className="event-block">
           <h2 id="deroulement">Comment ça se passe</h2>
           <ol className="steps compact">
-            {requiresScreening?<li><b>Votre profil est validé</b><span>Un court entretien avec l’équipe, une seule fois, avant votre première soirée de rencontre.</span></li>:<li><b>Vous vous inscrivez</b><span>Aucune étape préalable : la place est à vous dès le paiement confirmé.</span></li>}
-            <li><b>Vous réservez votre place</b><span>Paiement sécurisé par Stripe ; votre billet avec QR code arrive aussitôt.</span></li>
+            {requiresScreening?<li><b>Votre profil est validé</b><span>Un court entretien avec l’équipe, une seule fois, avant votre première soirée de rencontre.</span></li>:<li><b>Vous vous inscrivez</b><span>Aucune étape préalable : la place est à vous dès {free?"votre confirmation":"le paiement confirmé"}.</span></li>}
+            <li><b>Vous réservez votre place</b><span>{free?"Soirée gratuite : une simple confirmation, et votre billet avec QR code arrive aussitôt.":"Paiement sécurisé par Stripe ; votre billet avec QR code arrive aussitôt."}</span></li>
             <li><b>Le jour J</b><span>L’équipe vous accueille sur place et anime la soirée{event.hasQuotas?", avec des places équilibrées entre femmes et hommes":""}.</span></li>
             <li><b>Après la soirée</b><span>Vous pouvez demander à revoir quelqu’un ; l’échange ne s’ouvre que si l’intérêt est réciproque.</span></li>
           </ol>
@@ -249,10 +252,10 @@ export function EventDetail() {
       </article>
       <aside className="booking" id="reserver" aria-labelledby="booking-title">
         <h2 id="booking-title" className="visually-hidden">Réserver</h2>
-        <div className="booking-price">{event.priceTiers.length>0?<div className="quota-rows">{event.priceTiers.map(t=><div key={t.category} className="quota-row"><span>{t.category==="HOMME"?"Hommes":"Femmes"}</span><b>{money(t.amountCents)}</b></div>)}</div>:<><strong>{priceText}</strong><span>par personne, TTC</span></>}</div>
+        <div className="booking-price">{event.priceTiers.length>0?<div className="quota-rows">{event.priceTiers.map(t=><div key={t.category} className="quota-row"><span>{t.category==="HOMME"?"Hommes":"Femmes"}</span><b>{money(t.amountCents)}</b></div>)}</div>:<><strong>{priceText}</strong>{!free&&<span>par personne, TTC</span>}</>}</div>
         <div className="booking-row"><span>Disponibilité</span><b>{availabilityLabel(event.availability)}</b></div>
         {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
-    {altOffer&&<div className="alt-offer"><span className="eyebrow">Événement alternatif proposé</span><h3>{altOffer.alternativeEvent.title}</h3><p>{dateTime(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</p><p><b>{money(altOffer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busy} onClick={()=>respondAltOffer(true)}>Accepter</button><button className="button secondary" disabled={busy} onClick={()=>respondAltOffer(false)}>Refuser</button></div></div>}
+    {altOffers.map(altOffer=><div key={altOffer.id} className="alt-offer"><span className="eyebrow">Événement alternatif proposé</span><h3>{altOffer.alternativeEvent.title}</h3><p>{dateTime(altOffer.alternativeEvent.startsAt)} · {altOffer.alternativeEvent.district}</p><p><b>{altOffer.alternativeEvent.priceCents===0?"Gratuit":money(altOffer.alternativeEvent.priceCents)}</b></p><div className="decision-buttons"><button className="button" disabled={busy} onClick={()=>respondAltOffer(altOffer.id,true)}>Accepter</button><button className="button secondary" disabled={busy} onClick={()=>respondAltOffer(altOffer.id,false)}>Refuser</button></div></div>)}
     {!user?<Link className="button full" to="/login">Se connecter pour vous inscrire</Link>
     :loadingApplication?<div className="calendar-state"><div className="spinner small"/><span>Chargement…</span></div>
     :application?<>
@@ -267,7 +270,7 @@ export function EventDetail() {
     :categoryUnknown?<Notice kind="error">Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement.</Notice>
     :requiresScreening&&showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>
     :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même vous inscrire : au moment de payer, vous serez placé(e) sur liste d’attente et, si possible, une soirée comparable vous sera proposée.</Notice>}<button className="button full" disabled={busy} onClick={()=>requiresScreening?setShowQuestionnaire(true):apply()}>{requiresScreening?"Candidater":busy?"…":"S’inscrire"}</button></>}
-    <p className="fine">{requiresScreening?"Le paiement est proposé immédiatement après le questionnaire ; la place n’est acquise qu’une fois le paiement confirmé.":"Le paiement est proposé immédiatement après l’inscription ; la place n’est acquise qu’une fois le paiement confirmé."}</p>
+    <p className="fine">{free?`La confirmation est proposée immédiatement après ${requiresScreening?"le questionnaire":"l’inscription"} ; la place n’est acquise qu’une fois confirmée.`:`Le paiement est proposé immédiatement après ${requiresScreening?"le questionnaire":"l’inscription"} ; la place n’est acquise qu’une fois le paiement confirmé.`}</p>
         <ShareButton event={event}/>
       </aside>
     </div>

@@ -10,9 +10,15 @@ import { imgUrl, money } from "../lib/format";
 // Avatar : vraie photo de profil si elle existe, sinon les initiales — jamais l'inverse, jamais un
 // visage générique. Même composant partout (dashboard, messagerie, entretiens) pour que l'ajout
 // d'une photo se reflète immédiatement à tous les endroits où le compte apparaît.
+// Initiales du prénom et du nom (« Karim Benali » → KB) ; un seul mot → ses deux premières lettres.
+export const initials = (name?: string | null) => {
+  const words = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  return (words.length > 1 ? words[0][0] + words[words.length - 1][0] : words[0].slice(0, 2)).toUpperCase();
+};
 export const Avatar = ({ name, photoUrl, size, className, verified }: { name?: string | null; photoUrl?: string | null; size?: "large"; className?: string; verified?: boolean }) => {
   const cls = `avatar${size ? ` ${size}` : ""}${className ? ` ${className}` : ""}`;
-  const img = photoUrl ? <img className={cls} src={imgUrl(photoUrl)} alt="" /> : <div className={cls}>{(name ?? "?").slice(0, 2).toUpperCase()}</div>;
+  const img = photoUrl ? <img className={cls} src={imgUrl(photoUrl)} alt="" /> : <div className={cls}>{initials(name)}</div>;
   if (!verified) return img;
   return <div className="avatar-wrap">{img}<span className="verified-badge" title="Profil vérifié"><BadgeCheck size={13} aria-hidden="true"/>Vérifié</span></div>;
 };

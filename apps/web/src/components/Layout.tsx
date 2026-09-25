@@ -85,6 +85,9 @@ function Header() {
 
 function Footer() {
   const year = new Date().getFullYear();
+  // Connecté : l'espace du compte (ou l'administration pour l'équipe), jamais « Créer un compte ».
+  const { user, account } = useNavLinks();
+  const accountLink = !user ? { to: "/login", label: "Créer un compte" } : account ?? { to: "/admin", label: "Administration" };
   return (
     <footer className="site-footer">
       <div className="site-footer-inner">
@@ -98,7 +101,7 @@ function Footer() {
             <li><Link to="/events">Prochaines soirées</Link></li>
             <li><Link to="/concept">Comment ça marche</Link></li>
             <li><Link to="/blog">Le journal</Link></li>
-            <li><Link to="/login">Créer un compte</Link></li>
+            <li><Link to={accountLink.to}>{accountLink.label}</Link></li>
           </ul>
         </nav>
         <nav aria-labelledby="footer-pros">
