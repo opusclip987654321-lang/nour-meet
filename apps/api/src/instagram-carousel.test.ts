@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { articleCarouselPlan, shortText } from "./services/instagram-carousel.js";
+import type { CarouselDraft, CarouselDraftSlide } from "./ai-provider.js";
+import { MAX_SCENE_IMAGES, articleCarouselPlan, parseCarouselScript, shortText } from "./services/instagram-carousel.js";
 import { loadImage, renderArticleCarousel, renderEventVisual } from "./services/instagram.js";
 
 // Carrousel Instagram de l'article du jour (décision v2 §6) et visuel d'événement (§14).
@@ -95,4 +96,57 @@ describe("rendu des visuels Instagram", () => {
     const publicDir = await mkdtemp(path.join(os.tmpdir(), "nour-ig-"));
     await expect(renderEventVisual({ title: "T", category: "Networking", startsAt: new Date(), district: "Paris", imageUrl: "/static/../../etc/passwd" }, { publicDir, webOrigin: "http://127.0.0.1:9" }, "/static/x.jpg")).rejects.toThrow();
   });
+});
+
+// Carrousel réécrit par Claude (refonte du 2026-09-26) : formats variés, aucun chiffre ajouté.
+const slide = (fields: Partial<CarouselDraftSlide> & Pick<CarouselDraftSlide, "kind">): CarouselDraftSlide => ({ title: "", text: "", items: [], myth: "", reality: "", highlight: "", imagePrompt: "", ...fields });
+const draft: CarouselDraft = {
+  hook: "Tu n’es pas « trop exigeant(e) ».",
+  subtitle: "Pourquoi se faire des amis devient plus dur après 30 ans, et comment y remédier.",
+  slides: [
+    slide({ kind: "contrast", myth: "Les amitiés viennent toutes seules", reality: "C’est la répétition, plus que l’intensité, qui fait naître une amitié." }),
+    slide({ kind: "scene", title: "Oser la régularité", text: "Revoir les mêmes personnes chaque semaine crée la confiance.", imagePrompt: "Friends meeting again at a Parisian café terrace" }),
+    slide({ kind: "list", title: "Des cadres qui aident", items: ["Un atelier ou un club", "Un bénévolat régulier", "Des soirées où l’on vient seul"] }),
+    slide({ kind: "statement", text: "Ce n’est pas une question de personnalité. C’est une question de fréquence.", highlight: "fréquence" }),
+    slide({ kind: "quote", text: "Proposer un café reste le geste le plus simple." })
+  ],
+  ctaHeadline: "Recrée le hasard, ce soir.",
+  ctaDetail: "Une soirée Nūr Meet près de chez toi, avec des gens qui cherchent la même chose.",
+  caption: "Se faire des amis après 30 ans ? C’est possible.\n\nArticle complet : lien en bio\n\n#amitie #paris"
+};
+
+describe("carrousel réécrit", () => {
+  it("garde les formats valides, borne les illustrations et reprend la légende courte", () => {
+    const script = parseCarouselScript({ ...draft, slides: [...draft.slides, slide({ kind: "scene", title: "Un deuxième point", text: "Texte.", imagePrompt: "A" }), slide({ kind: "scene", title: "Un troisième", text: "Texte.", imagePrompt: "B" })] }, article);
+    expect(script.slides.map(s => s.kind)).toEqual(["contrast", "scene", "list", "statement", "quote"]);
+    const withPrompt = parseCarouselScript({ ...draft, slides: [slide({ kind: "scene", title: "A", text: "a", imagePrompt: "a" }), slide({ kind: "scene", title: "B", text: "b", imagePrompt: "b" }), slide({ kind: "scene", title: "C", text: "c", imagePrompt: "c" })] }, article);
+    expect(withPrompt.slides.filter(s => s.kind === "scene" && s.imagePrompt).length).toBe(MAX_SCENE_IMAGES);
+    expect(script.caption).toContain("lien en bio");
+    const statement = script.slides.find(s => s.kind === "statement");
+    expect(statement && statement.kind === "statement" && statement.highlight).toBe("fréquence");
+  });
+
+  it("refuse tout chiffre absent de l’article, et un texte contraire à la charte", () => {
+    const invented = { ...draft, slides: [...draft.slides.slice(0, 2), slide({ kind: "quote", text: "67 % des gens se sentent seuls." })] };
+    expect(() => parseCarouselScript(invented, article)).toThrow("Chiffre absent");
+    // Un chiffre présent dans l'article est accepté (« 30 ans » figure dans le titre).
+    expect(() => parseCarouselScript(draft, article)).not.toThrow();
+    expect(() => parseCarouselScript({ ...draft, hook: "Rencontres musulmanes" }, article)).toThrow("charte");
+    expect(() => parseCarouselScript({ ...draft, slides: draft.slides.slice(0, 1) }, article)).toThrow("trop court");
+  });
+
+  it("rend chaque format en JPEG carré 1080 × 1080, graphique sourcé compris", async () => {
+    const publicDir = await mkdtemp(path.join(os.tmpdir(), "nour-ig-"));
+    await mkdir(path.join(publicDir, "uploads", "articles"), { recursive: true });
+    const photo = await sharp({ create: { width: 1600, height: 1000, channels: 3, background: "#8a6d5a" } }).webp().toBuffer();
+    await writeFile(path.join(publicDir, "uploads", "articles", "cover.webp"), photo);
+    await writeFile(path.join(publicDir, "uploads", "articles", "scene-slide.jpg"), await sharp(photo).jpeg().toBuffer());
+    const script = parseCarouselScript(draft, article);
+    const scene = script.slides.find(s => s.kind === "scene");
+    if (scene?.kind === "scene") scene.image = "/static/uploads/articles/scene-slide.jpg";
+    const slides = await renderArticleCarousel({ ...article, instagramCarousel: script }, { publicDir, webOrigin: "https://nourmeet.com" });
+    // Couverture + 5 slides + graphique de l'article + appel à l'action.
+    expect(slides.length).toBe(8);
+    for (const jpeg of slides) expect(await sharp(jpeg).metadata()).toMatchObject({ format: "jpeg", width: 1080, height: 1080 });
+  }, 60_000);
 });

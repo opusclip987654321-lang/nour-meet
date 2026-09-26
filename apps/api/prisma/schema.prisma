@@ -915,6 +915,10 @@ model Article {
   // Verrou de publication (v2 §6) : posé atomiquement avant l'envoi à Instagram, pour qu'un nouvel essai
   // manuel et la tâche automatique ne publient jamais deux fois le même carrousel.
   instagramPublishingAt DateTime?
+  // Carrousel réécrit par Claude (refonte du 2026-09-26) : textes des slides, formats et illustrations
+  // par slide, préparé une seule fois puis réutilisé tel quel par Instagram et Facebook. Absent : le
+  // carrousel est extrait de l'article comme avant.
+  instagramCarousel    Json?
   // Publication sur la Page Facebook (même carrousel qu'Instagram) : identifiant, date, verrou, erreur.
   facebookPostId       String?
   facebookPublishedAt  DateTime?

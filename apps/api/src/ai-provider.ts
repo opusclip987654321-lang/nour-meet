@@ -28,6 +28,19 @@ export interface GeneratedArticle extends ArticleDraft {
 }
 // Verdict du contrôle visuel d'une illustration générée, avant toute publication.
 export interface ImageReview { approved: boolean; issues: string[]; altText: string }
+// Carrousel Instagram réécrit (refonte du 2026-09-26) : texte brut renvoyé par Claude, validé ensuite par
+// parseCarouselScript (instagram-carousel.ts) avant tout usage. Champs sans objet pour un format : "".
+export interface CarouselDraftSlide {
+  kind: "contrast" | "statement" | "list" | "quote" | "scene";
+  title: string;
+  text: string;
+  items: string[];
+  myth: string;
+  reality: string;
+  highlight: string;
+  imagePrompt: string;
+}
+export interface CarouselDraft { hook: string; subtitle: string; slides: CarouselDraftSlide[]; ctaHeadline: string; ctaDetail: string; caption: string }
 export interface ArticleGenerationContext {
   today: string;
   categories: string[];
@@ -41,6 +54,7 @@ export interface AIProvider {
   // URLs réellement renvoyées par la recherche web : seules sources que l'article publié pourra citer.
   generateArticle?(context: ArticleGenerationContext): Promise<{ article: GeneratedArticle; searchedUrls: string[] }>;
   reviewCoverImage?(image: Buffer, context: { title: string; imagePrompt: string }): Promise<ImageReview>;
+  writeCarousel?(article: { title: string; excerpt: string | null; content: string; category: string }): Promise<CarouselDraft>;
 }
 
 // Génération locale, sans appel externe ni coût : produit un brouillon structuré à partir du sujet
@@ -76,6 +90,11 @@ export class LocalAIProvider implements AIProvider {
 
 const MODEL = "claude-opus-5";
 
+// Charte des illustrations générées, commune à la couverture et aux slides du carrousel.
+const ILLUSTRATION_CHARTER = "une scène photographique réaliste, naturelle et chaleureuse qui illustre le sujet. Personnes : adultes français d'origine majoritairement maghrébine et subsaharienne, femmes avec ou sans foulard, dans un décor urbain français reconnaissable (café, restaurant, terrasse ou appartement parisien). Privilégie les scènes, les mains, les silhouettes et les personnes de trois quarts ou de dos plutôt que les gros plans de visages. Interdits : alcool et toute boisson qui pourrait y ressembler (cocktail, grand verre avec glaçons et paille, verre à pied, bouteille) — si des boissons apparaissent, uniquement du thé chaud dans de petits verres ou du café ; symboles ou lieux religieux, calligraphie, texte, logos, filigranes. Composition centrée (l'image sera recadrée en carré pour Instagram).";
+// Légende courte et accrocheuse (refonte du 2026-09-26), à la place de « titre + chapô + hashtags génériques ».
+const CAPTION_RULES = "400 caractères au plus hors hashtags. Une première ligne qui accroche (une phrase courte, pas le titre recopié), une ou deux phrases au plus qui donnent envie de lire, « Article complet : lien en bio », puis 3 à 5 hashtags précis liés au sujet, en minuscules. Pas d'URL, un emoji au plus, jamais le mot « musulman ».";
+
 const SYSTEM_PROMPT = `Tu es le rédacteur en chef du journal de Nūr Meet, une plateforme française de soirées en petit comité dans des restaurants partenaires à Paris et en Île-de-France : speed dating avec entretien de validation, et soirées networking en accès direct. Le public : des adultes urbains et actifs qui cherchent des rencontres sérieuses, de l'amitié ou du réseau professionnel, dans un cadre respectueux. Ton : chaleureux, concret, en « vous », jamais paternaliste.
 
 Tu écris un article de blog original en français, de 900 à 1 400 mots, puis tu l'envoies avec l'outil submit_article.
@@ -100,9 +119,9 @@ Format du champ content (Markdown réduit, blocs séparés par une ligne vide) :
 - Appel à l'action : une ligne seule « [[cta:/chemin|Libellé du bouton]] ».
 - Pas de titre de niveau 1 (le titre de l'article est affiché à part), pas de section « Sources » : elle est ajoutée automatiquement à partir du champ sources.
 
-Illustration de couverture (champ imagePrompt, en anglais) : une scène photographique réaliste, naturelle et chaleureuse qui illustre le sujet. Personnes : adultes français d'origine majoritairement maghrébine et subsaharienne, femmes avec ou sans foulard, dans un décor urbain français reconnaissable (café, restaurant, terrasse ou appartement parisien). Privilégie les scènes, les mains, les silhouettes et les personnes de trois quarts ou de dos plutôt que les gros plans de visages. Interdits : alcool et toute boisson qui pourrait y ressembler (cocktail, grand verre avec glaçons et paille, verre à pied, bouteille) — si des boissons apparaissent, uniquement du thé chaud dans de petits verres ou du café ; symboles ou lieux religieux, calligraphie, texte, logos, filigranes. Composition centrée (l'image sera recadrée en carré pour Instagram).
+Illustration de couverture (champ imagePrompt, en anglais) : ${ILLUSTRATION_CHARTER}
 
-Légende Instagram (champ instagramCaption, en français, 1 200 caractères au plus) : une accroche forte en première ligne, 2 à 4 phrases qui donnent envie de lire, « Article complet : lien en bio », puis 5 à 8 hashtags pertinents en minuscules. Pas d'URL, pas d'emoji en excès, jamais le mot « musulman ».
+Légende Instagram (champ instagramCaption, en français) : ${CAPTION_RULES}
 
 Photothèque (nom : description) :
 ${Object.entries(ARTICLE_PHOTOS).map(([name, description]) => `- ${name} : ${description}`).join("\n")}`;
@@ -214,7 +233,81 @@ Fais les recherches web nécessaires, rédige l'article, puis appelle submit_art
     if (!verdict) throw new Error("Contrôle d'image sans verdict");
     return verdict.input as ImageReview;
   }
+
+  // Carrousel Instagram réécrit (refonte du 2026-09-26) : une version courte et percutante de l'article,
+  // sans aucun fait ni chiffre ajouté. Pas de recherche web : l'article publié est la seule source.
+  async writeCarousel(article: { title: string; excerpt: string | null; content: string; category: string }): Promise<CarouselDraft> {
+    const response = await this.client.messages.create({
+      model: MODEL,
+      max_tokens: 4000,
+      system: CAROUSEL_PROMPT,
+      tools: [carouselTool],
+      tool_choice: { type: "tool", name: "submit_carousel" },
+      messages: [{ role: "user", content: `Article du journal Nūr Meet (${article.category}).\n\nTitre : ${article.title}\n\nChapô : ${article.excerpt ?? "(aucun)"}\n\n${article.content}` }]
+    });
+    if (response.stop_reason === "refusal") throw new Error("Carrousel refusé par le modèle");
+    const submitted = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+    if (!submitted) throw new Error("Carrousel non renvoyé par le modèle");
+    return submitted.input as CarouselDraft;
+  }
 }
+
+const CAROUSEL_PROMPT = `Tu adaptes un article du journal de Nūr Meet (soirées de rencontre et de networking en petit comité à Paris) en carrousel Instagram, puis tu l'envoies avec l'outil submit_carousel.
+
+Ton : réseaux sociaux, en « tu », court et percutant, chaleureux, jamais racoleur ni paternaliste. Chaque slide se lit en trois secondes.
+
+Règle absolue de fidélité : tu reformules, tu n'ajoutes rien. Aucun fait, chiffre, pourcentage, âge, étude, citation ou exemple qui ne figure pas dans l'article. Un chiffre repris l'est exactement. Si l'article ne permet pas un format, choisis-en un autre plutôt que d'inventer.
+
+Structure :
+- hook : accroche de couverture, 70 caractères au plus, qui interpelle (pas le titre recopié) ; subtitle : une phrase de 150 caractères au plus qui dit de quoi parle l'article.
+- slides : 3 à 5 slides intermédiaires, dans l'ordre de lecture, avec au moins une de chacun de ces formats : « contrast », « list », « quote ». Formats :
+  - contrast : idée reçue contredite par l'article. myth = l'idée reçue formulée comme on l'entend (100 caractères au plus, sans guillemets) ; reality = ce que dit l'article (120 caractères au plus).
+  - list : title = 40 caractères au plus ; items = 2 à 4 éléments de 60 caractères au plus chacun, repris des conseils ou points de l'article.
+  - quote : une seule grande phrase à retenir (110 caractères au plus) dans text.
+  - statement : un recadrage en une ou deux phrases courtes (130 caractères au plus) dans text ; highlight = un mot ou groupe de mots de text à mettre en couleur (ou "").
+  - scene : un point fort de l'article illustré par une image. title = 60 caractères au plus ; text = 140 caractères au plus ; imagePrompt = description en anglais d'une image qui illustre précisément CE point (pas l'article en général) : ${ILLUSTRATION_CHARTER} Au plus 2 slides « scene ».
+  Pour les champs sans objet dans un format, renvoie "" (ou [] pour items).
+- ctaHeadline : 40 caractères au plus, qui invite à passer à l'action en lien avec le sujet ; ctaDetail : 110 caractères au plus sur les soirées Nūr Meet, sans promesse chiffrée.
+- caption : légende Instagram, ${CAPTION_RULES}
+
+Ne nomme jamais une religion ou une origine, pas de markdown, pas d'emoji dans les slides.`;
+
+const carouselText = (description: string) => ({ type: "string", description });
+const carouselTool: Anthropic.Tool = {
+  name: "submit_carousel",
+  description: "Envoie le carrousel Instagram terminé.",
+  strict: true,
+  input_schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["hook", "subtitle", "slides", "ctaHeadline", "ctaDetail", "caption"],
+    properties: {
+      hook: carouselText("Accroche de couverture"),
+      subtitle: carouselText("Phrase sous l'accroche"),
+      slides: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "title", "text", "items", "myth", "reality", "highlight", "imagePrompt"],
+          properties: {
+            kind: { type: "string", enum: ["contrast", "statement", "list", "quote", "scene"] },
+            title: carouselText("Titre (list, scene)"),
+            text: carouselText("Texte (quote, statement, scene)"),
+            items: { type: "array", items: { type: "string" }, description: "Éléments (list)" },
+            myth: carouselText("Idée reçue (contrast)"),
+            reality: carouselText("Ce que dit l'article (contrast)"),
+            highlight: carouselText("Mot à mettre en couleur (statement)"),
+            imagePrompt: carouselText("Description en anglais de l'image (scene)")
+          }
+        }
+      },
+      ctaHeadline: carouselText("Titre de la slide finale"),
+      ctaDetail: carouselText("Phrase de la slide finale"),
+      caption: carouselText("Légende Instagram")
+    }
+  }
+};
 
 export function createAIProvider(apiKey?: string): AIProvider {
   return apiKey ? new AnthropicAIProvider(apiKey) : new LocalAIProvider();
