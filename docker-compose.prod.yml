@@ -110,6 +110,8 @@ services:
       - "443:443"
     volumes:
       - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Vidéos de l'agent vidéo (/opt/nour-video-agent), servies sur /va/ pour que Meta les télécharge.
+      - /opt/nour-video-agent/data/public:/srv/va:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
