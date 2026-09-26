@@ -4,7 +4,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import type { CarouselDraft, CarouselDraftSlide } from "./ai-provider.js";
-import { articleCarouselPlan, parseCarouselScript, photoSlots, shortText } from "./services/instagram-carousel.js";
+import { articleCarouselPlan, parseCarouselScript, photoSlots, prepareArticleCarousel, shortText } from "./services/instagram-carousel.js";
 import { loadImage, renderArticleCarousel, renderEventVisual } from "./services/instagram.js";
 import { statementSlide } from "./services/social-visuals.js";
 
@@ -168,4 +168,16 @@ describe("carrousel réécrit", () => {
 it("met en couleur un mot sans casser un caractère échappé (&)", async () => {
   const jpeg = await statementSlide(null, "Toi & ta soirée", "a", "2/6");
   expect((await sharp(jpeg).metadata()).width).toBe(1080);
+});
+
+it("redemande le carrousel une fois, avec la raison du refus, avant de renoncer", async () => {
+  const stored: { data?: unknown } = {};
+  const prisma = { article: { findUniqueOrThrow: async () => ({ ...article, id: "a1", publishedAt: new Date(), instagramCarousel: null }), update: async (args: { data: unknown }) => { stored.data = args.data; } } };
+  const feedbacks: (string | undefined)[] = [];
+  const invented = { ...draft, slides: [...draft.slides.slice(1), slide({ kind: "quote", text: "300 personnes sont venues." })] };
+  const aiProvider = { mode: "external", generateDraft: async () => ({ title: "", excerpt: "", content: "", keywords: [] }), generateSocialCopy: async () => [], writeCarousel: async (_a: unknown, _b: string[], feedback?: string) => { feedbacks.push(feedback); return feedback ? draft : invented; } } as const;
+  const script = await prepareArticleCarousel(prisma as never, { aiProvider, log: { warn: () => {} } }, "a1");
+  expect(feedbacks).toEqual([undefined, "Chiffre absent de l’article : 300"]);
+  expect(script?.slides.some(s => s.kind === "stat")).toBe(true);
+  expect(stored.data).toHaveProperty("instagramCarousel");
 });
