@@ -59,7 +59,8 @@ export interface AIProvider {
   generateArticle?(context: ArticleGenerationContext): Promise<{ article: GeneratedArticle; searchedUrls: string[] }>;
   reviewCoverImage?(image: Buffer, context: { title: string; imagePrompt: string }): Promise<ImageReview>;
   // briefs : consignes visuelles imposées, une par slide dans l'ordre, la dernière pour l'appel à l'action.
-  writeCarousel?(article: { title: string; excerpt: string | null; content: string; category: string }, briefs: string[]): Promise<CarouselDraft>;
+  // feedback : raison du refus d'une première proposition (validation), pour que la suivante l'évite.
+  writeCarousel?(article: { title: string; excerpt: string | null; content: string; category: string }, briefs: string[], feedback?: string): Promise<CarouselDraft>;
 }
 
 // Génération locale, sans appel externe ni coût : produit un brouillon structuré à partir du sujet
@@ -243,7 +244,7 @@ ${context.coverBrief ? `Consigne visuelle imposée pour l'illustration de couver
 
   // Carrousel Instagram réécrit (refonte du 2026-09-26) : une version courte et percutante de l'article,
   // sans aucun fait ni chiffre ajouté. Pas de recherche web : l'article publié est la seule source.
-  async writeCarousel(article: { title: string; excerpt: string | null; content: string; category: string }, briefs: string[]): Promise<CarouselDraft> {
+  async writeCarousel(article: { title: string; excerpt: string | null; content: string; category: string }, briefs: string[], feedback?: string): Promise<CarouselDraft> {
     const slideBriefs = briefs.slice(0, -1).map((b, i) => `- slide ${i + 1} : ${b}`).join("\n");
     const visual = briefs.length ? `\n\nConsignes visuelles imposées, une par image, pour que chaque photo soit différente des autres (décor, cadrage, lumière, personnes) — reprends-les dans chaque imagePrompt en les adaptant au sujet de la slide :\n${slideBriefs}\n- ctaImagePrompt : ${briefs[briefs.length - 1]}` : "";
     const response = await this.client.messages.create({
@@ -252,7 +253,7 @@ ${context.coverBrief ? `Consigne visuelle imposée pour l'illustration de couver
       system: CAROUSEL_PROMPT,
       tools: [carouselTool],
       tool_choice: { type: "tool", name: "submit_carousel" },
-      messages: [{ role: "user", content: `Article du journal Nūr Meet (${article.category}).\n\nTitre : ${article.title}\n\nChapô : ${article.excerpt ?? "(aucun)"}\n\n${article.content}${visual}` }]
+      messages: [{ role: "user", content: `Article du journal Nūr Meet (${article.category}).\n\nTitre : ${article.title}\n\nChapô : ${article.excerpt ?? "(aucun)"}\n\n${article.content}${visual}${feedback ? `\n\nUne première proposition a été refusée par la validation automatique : ${feedback}. Corrige ce point.` : ""}` }]
     });
     if (response.stop_reason === "refusal") throw new Error("Carrousel refusé par le modèle");
     const submitted = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
@@ -265,7 +266,7 @@ const CAROUSEL_PROMPT = `Tu adaptes un article du journal de Nūr Meet (soirées
 
 Ton : réseaux sociaux, en « tu », court et percutant, chaleureux. Joue sur l'émotion : parle de ce que le lecteur ressent et vit (l'appréhension avant d'aborder quelqu'un, le dimanche soir un peu vide, la joie d'une vraie conversation, le soulagement d'être compris), pour qu'il se reconnaisse et ait envie de glisser jusqu'à la fin. Jamais racoleur, jamais culpabilisant ni paternaliste. Chaque slide se lit en trois secondes.
 
-Règle absolue de fidélité : tu reformules, tu n'ajoutes rien. Aucun fait, chiffre, pourcentage, âge, étude, citation ou exemple qui ne figure pas dans l'article. Un chiffre repris l'est exactement. Si l'article ne permet pas un format, choisis-en un autre plutôt que d'inventer.
+Règle absolue de fidélité : tu reformules, tu n'ajoutes rien. Aucun fait, chiffre, pourcentage, âge, étude, citation ou exemple qui ne figure pas dans l'article. Un chiffre repris l'est exactement, écrit comme dans l'article : en lettres si l'article l'écrit en lettres (« trois cents », jamais « 300 »), en chiffres s'il l'écrit en chiffres. Toute écriture en chiffres absente de l'article fait refuser le carrousel. Si l'article ne permet pas un format, choisis-en un autre plutôt que d'inventer.
 
 Structure :
 - hook : accroche de couverture, 70 caractères au plus, qui touche une émotion ou une situation vécue (pas le titre recopié) ; subtitle : une phrase de 150 caractères au plus qui dit de quoi parle l'article.

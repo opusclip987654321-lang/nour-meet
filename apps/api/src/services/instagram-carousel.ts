@@ -214,7 +214,14 @@ export async function prepareArticleCarousel(prisma: PrismaClient, deps: Prepare
   try {
     // Consignes visuelles n°1 à 7 du jour de publication (la n°0 est celle de la couverture).
     const briefs = visualBriefs(varietySeed(article.publishedAt ?? new Date()), 1, CAROUSEL_MAX - 1);
-    const script = parseCarouselScript(await deps.aiProvider.writeCarousel(article, briefs), article);
+    // Deux propositions au plus : la seconde connaît la raison du refus de la première (par exemple un
+    // chiffre écrit en chiffres alors que l'article l'écrit en lettres).
+    let script: CarouselScript | null = null, feedback: string | undefined;
+    for (let attempt = 0; attempt < 2 && !script; attempt++) {
+      try { script = parseCarouselScript(await deps.aiProvider.writeCarousel(article, briefs, feedback), article); }
+      catch (err) { feedback = (err as Error).message; if (attempt === 1) throw err; }
+    }
+    if (!script) return null;
     for (const [i, slot] of photoSlots(script).entries()) {
       const illustration = slot.imagePrompt && deps.illustrate && i < MAX_SLIDE_IMAGES ? await deps.illustrate({ title: article.title, imagePrompt: slot.imagePrompt }).catch(() => null) : null;
       Object.assign(slot, illustration ? { image: illustration.image, altText: illustration.altText } : { image: article.imageUrl, altText: null, fromCover: true });
