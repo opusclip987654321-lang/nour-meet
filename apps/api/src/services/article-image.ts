@@ -17,7 +17,7 @@ const OPENAI_TIMEOUT_MS = 180_000;
 export const MAX_ILLUSTRATION_ATTEMPTS = 5;
 // Garde-fou ajouté à chaque description, indépendamment de ce que propose Claude : charte « aucun alcool
 // à l'image » — y compris ce qui pourrait y ressembler (un thé glacé à la menthe passe pour un mojito).
-const IMAGE_GUARDRAILS = " Strict rules: absolutely no alcohol and nothing that could be mistaken for alcohol — no cocktails, no tall glasses with ice or straws, no wine or champagne glasses, no bottles. If drinks appear, they are hot mint tea in small traditional tea glasses or coffee cups. No text, letters, logos or watermarks. No religious symbols or places.";
+const IMAGE_GUARDRAILS = " Strict rules: absolutely no alcohol and nothing that could be mistaken for alcohol — no cocktails, no tall glasses with ice or straws, no wine or champagne glasses, no bottles. Drinks are optional and never the focus; if drinks appear, they are hot mint tea in small traditional tea glasses or coffee cups. No text, letters, logos or watermarks. No religious symbols or places.";
 
 async function generateImage(config: IllustrationConfig, prompt: string): Promise<Buffer> {
   const response = await fetch("https://api.openai.com/v1/images/generations", {
@@ -89,6 +89,7 @@ export async function illustrateSlide(config: IllustrationConfig, reviewer: AIPr
   return { image: `${config.publicPrefix}${name}`, altText: approved.altText };
 }
 
-// Description d'illustration pour un article sans consigne rédigée par Claude (article de la réserve).
-export const defaultImagePrompt = (article: { title: string; excerpt: string | null; category: string }) =>
-  `Photorealistic, warm and natural scene illustrating a French lifestyle article titled "${article.title}" (${article.category})${article.excerpt ? ` — ${article.excerpt}` : ""}. Adults of mostly North African and West African descent, women with or without a headscarf, in a recognisable Parisian setting (café, restaurant, terrace or apartment), candid atmosphere, people seen in three-quarter view or from behind rather than close-up faces, centred composition.`;
+// Description d'illustration pour un article sans consigne rédigée par Claude (article de la réserve),
+// avec la consigne visuelle du jour (image-variety.ts) pour ne pas refaire toujours la même scène.
+export const defaultImagePrompt = (article: { title: string; excerpt: string | null; category: string }, brief: string) =>
+  `Photorealistic, warm and natural scene illustrating a French lifestyle article titled "${article.title}" (${article.category})${article.excerpt ? ` — ${article.excerpt}` : ""}. Adults of mostly North African and West African descent, men and women, women with or without a headscarf, in a recognisable French urban setting, candid atmosphere, people seen in three-quarter view or from behind rather than close-up faces, centred composition. ${brief}`;
