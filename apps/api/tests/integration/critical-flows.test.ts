@@ -1180,3 +1180,13 @@ describe("événements Nūr Meet du super-admin et cycle « À modifier » (v3)"
     expect(again.body.reviewNote).toBeNull();
   }, 30_000);
 });
+
+// Audit v3 §10.6 : robots.txt protège les espaces privés sans bloquer la page publique /restaurateurs.
+describe("robots.txt (v3 §10.6)", () => {
+  it("n’exclut pas /restaurateurs par préfixe, exclut l’espace restaurateur et les espaces privés", async () => {
+    const res = await fetch(`${process.env.API_URL ?? "http://localhost:4000"}/robots.txt`);
+    const lines = (await res.text()).split("\n");
+    expect(lines).not.toContain("Disallow: /restaurant");
+    for (const rule of ["Disallow: /restaurant$", "Disallow: /restaurant/", "Disallow: /bienvenue", "Disallow: /admin", "Disallow: /dashboard"]) expect(lines).toContain(rule);
+  });
+});

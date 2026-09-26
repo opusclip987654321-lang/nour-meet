@@ -51,7 +51,9 @@ app.get("/sitemap.xml", async (_request, reply) => {
 // (soirées, journal, pages juridiques) restent ouvertes, y compris aux robots des moteurs IA.
 app.get("/robots.txt", async (_request, reply) => {
   reply.header("Content-Type", "text/plain; charset=utf-8").header("Cache-Control", "public, max-age=86400");
-  return ["User-agent: *", "Allow: /", "Disallow: /admin", "Disallow: /dashboard", "Disallow: /restaurant", "Disallow: /notifications", "Disallow: /pay/", "Disallow: /login", "", `Sitemap: ${SITE_ORIGIN}/sitemap.xml`, ""].join("\n");
+  // « /restaurant » seul (préfixe) bloquait aussi la page publique /restaurateurs (audit v3 §10.6) :
+  // l'espace restaurateur est exclu par chemin exact ($) et par sous-chemins.
+  return ["User-agent: *", "Allow: /", "Disallow: /admin", "Disallow: /dashboard", "Disallow: /restaurant$", "Disallow: /restaurant?", "Disallow: /restaurant/", "Disallow: /notifications", "Disallow: /bienvenue", "Disallow: /auth/", "Disallow: /scanner", "Disallow: /pay/", "Disallow: /login", "", `Sitemap: ${SITE_ORIGIN}/sitemap.xml`, ""].join("\n");
 });
 // llms.txt (proposition llmstxt.org) : résumé factuel du service et liens vers les pages utiles, avec
 // les soirées réservables à venir et les derniers articles — généré à la demande, jamais figé.
