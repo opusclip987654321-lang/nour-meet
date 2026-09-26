@@ -31,16 +31,18 @@ export interface ImageReview { approved: boolean; issues: string[]; altText: str
 // Carrousel Instagram réécrit (refonte du 2026-09-26) : texte brut renvoyé par Claude, validé ensuite par
 // parseCarouselScript (instagram-carousel.ts) avant tout usage. Champs sans objet pour un format : "".
 export interface CarouselDraftSlide {
-  kind: "contrast" | "statement" | "list" | "quote" | "scene";
+  kind: "contrast" | "statement" | "list" | "quote" | "scene" | "stat";
   title: string;
   text: string;
   items: string[];
   myth: string;
   reality: string;
   highlight: string;
+  value: string;
+  source: string;
   imagePrompt: string;
 }
-export interface CarouselDraft { hook: string; subtitle: string; slides: CarouselDraftSlide[]; ctaHeadline: string; ctaDetail: string; caption: string }
+export interface CarouselDraft { hook: string; subtitle: string; slides: CarouselDraftSlide[]; ctaHeadline: string; ctaDetail: string; ctaImagePrompt: string; caption: string }
 export interface ArticleGenerationContext {
   today: string;
   categories: string[];
@@ -239,7 +241,7 @@ Fais les recherches web nécessaires, rédige l'article, puis appelle submit_art
   async writeCarousel(article: { title: string; excerpt: string | null; content: string; category: string }): Promise<CarouselDraft> {
     const response = await this.client.messages.create({
       model: MODEL,
-      max_tokens: 4000,
+      max_tokens: 8000,
       system: CAROUSEL_PROMPT,
       tools: [carouselTool],
       tool_choice: { type: "tool", name: "submit_carousel" },
@@ -254,20 +256,22 @@ Fais les recherches web nécessaires, rédige l'article, puis appelle submit_art
 
 const CAROUSEL_PROMPT = `Tu adaptes un article du journal de Nūr Meet (soirées de rencontre et de networking en petit comité à Paris) en carrousel Instagram, puis tu l'envoies avec l'outil submit_carousel.
 
-Ton : réseaux sociaux, en « tu », court et percutant, chaleureux, jamais racoleur ni paternaliste. Chaque slide se lit en trois secondes.
+Ton : réseaux sociaux, en « tu », court et percutant, chaleureux. Joue sur l'émotion : parle de ce que le lecteur ressent et vit (l'appréhension avant d'aborder quelqu'un, le dimanche soir un peu vide, la joie d'une vraie conversation, le soulagement d'être compris), pour qu'il se reconnaisse et ait envie de glisser jusqu'à la fin. Jamais racoleur, jamais culpabilisant ni paternaliste. Chaque slide se lit en trois secondes.
 
 Règle absolue de fidélité : tu reformules, tu n'ajoutes rien. Aucun fait, chiffre, pourcentage, âge, étude, citation ou exemple qui ne figure pas dans l'article. Un chiffre repris l'est exactement. Si l'article ne permet pas un format, choisis-en un autre plutôt que d'inventer.
 
 Structure :
-- hook : accroche de couverture, 70 caractères au plus, qui interpelle (pas le titre recopié) ; subtitle : une phrase de 150 caractères au plus qui dit de quoi parle l'article.
-- slides : 3 à 5 slides intermédiaires, dans l'ordre de lecture, avec au moins une de chacun de ces formats : « contrast », « list », « quote ». Formats :
+- hook : accroche de couverture, 70 caractères au plus, qui touche une émotion ou une situation vécue (pas le titre recopié) ; subtitle : une phrase de 150 caractères au plus qui dit de quoi parle l'article.
+- slides : 4 à 6 slides intermédiaires, dans l'ordre de lecture qui crée le plus d'envie de continuer, avec au moins une de chacun de ces formats : « contrast », « list », « quote ». Formats :
+  - stat : si l'article cite un chiffre sourcé frappant, mets-le en avant (une seule fois). value = le chiffre tel qu'écrit dans l'article, court (« 1 sur 5 », « 21 % ») ; text = ce qu'il signifie pour le lecteur, 110 caractères au plus ; source = le nom de la source tel qu'il apparaît dans l'article. Jamais de chiffre sans source citée dans l'article.
   - contrast : idée reçue contredite par l'article. myth = l'idée reçue formulée comme on l'entend (100 caractères au plus, sans guillemets) ; reality = ce que dit l'article (120 caractères au plus).
   - list : title = 40 caractères au plus ; items = 2 à 4 éléments de 60 caractères au plus chacun, repris des conseils ou points de l'article.
-  - quote : une seule grande phrase à retenir (110 caractères au plus) dans text.
+  - quote : une seule grande phrase à retenir, qui touche (110 caractères au plus), dans text.
   - statement : un recadrage en une ou deux phrases courtes (130 caractères au plus) dans text ; highlight = un mot ou groupe de mots de text à mettre en couleur (ou "").
-  - scene : un point fort de l'article illustré par une image. title = 60 caractères au plus ; text = 140 caractères au plus ; imagePrompt = description en anglais d'une image qui illustre précisément CE point (pas l'article en général) : ${ILLUSTRATION_CHARTER} Au plus 2 slides « scene ».
+  - scene : un moment fort de l'article raconté comme une scène vécue. title = 60 caractères au plus ; text = 140 caractères au plus.
   Pour les champs sans objet dans un format, renvoie "" (ou [] pour items).
-- ctaHeadline : 40 caractères au plus, qui invite à passer à l'action en lien avec le sujet ; ctaDetail : 110 caractères au plus sur les soirées Nūr Meet, sans promesse chiffrée.
+- imagePrompt, pour CHAQUE slide (une partie seulement sera illustrée, une image tous les deux écrans) : description en anglais d'une photo qui illustre précisément CETTE slide et son émotion (pas l'article en général). Une vraie scène de vie, lumière chaude et cinématographique, couleurs vives, faible profondeur de champ, l'émotion portée par les gestes, les postures, les regards échangés et la lumière. ${ILLUSTRATION_CHARTER}
+- ctaHeadline : 40 caractères au plus, qui invite à passer à l'action en lien avec le sujet ; ctaDetail : 110 caractères au plus sur les soirées Nūr Meet, sans promesse chiffrée ; ctaImagePrompt : description en anglais d'une photo chaleureuse de soirée en petit comité dans un restaurant parisien, selon la même charte.
 - caption : légende Instagram, ${CAPTION_RULES}
 
 Ne nomme jamais une religion ou une origine, pas de markdown, pas d'emoji dans les slides.`;
@@ -280,7 +284,7 @@ const carouselTool: Anthropic.Tool = {
   input_schema: {
     type: "object",
     additionalProperties: false,
-    required: ["hook", "subtitle", "slides", "ctaHeadline", "ctaDetail", "caption"],
+    required: ["hook", "subtitle", "slides", "ctaHeadline", "ctaDetail", "ctaImagePrompt", "caption"],
     properties: {
       hook: carouselText("Accroche de couverture"),
       subtitle: carouselText("Phrase sous l'accroche"),
@@ -289,21 +293,24 @@ const carouselTool: Anthropic.Tool = {
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["kind", "title", "text", "items", "myth", "reality", "highlight", "imagePrompt"],
+          required: ["kind", "title", "text", "items", "myth", "reality", "highlight", "value", "source", "imagePrompt"],
           properties: {
-            kind: { type: "string", enum: ["contrast", "statement", "list", "quote", "scene"] },
+            kind: { type: "string", enum: ["contrast", "statement", "list", "quote", "scene", "stat"] },
             title: carouselText("Titre (list, scene)"),
             text: carouselText("Texte (quote, statement, scene)"),
             items: { type: "array", items: { type: "string" }, description: "Éléments (list)" },
             myth: carouselText("Idée reçue (contrast)"),
             reality: carouselText("Ce que dit l'article (contrast)"),
             highlight: carouselText("Mot à mettre en couleur (statement)"),
-            imagePrompt: carouselText("Description en anglais de l'image (scene)")
+            value: carouselText("Chiffre tel qu'écrit dans l'article (stat)"),
+            source: carouselText("Source du chiffre, citée dans l'article (stat)"),
+            imagePrompt: carouselText("Description en anglais de la photo de cette slide")
           }
         }
       },
       ctaHeadline: carouselText("Titre de la slide finale"),
       ctaDetail: carouselText("Phrase de la slide finale"),
+      ctaImagePrompt: carouselText("Description en anglais de la photo de la slide finale"),
       caption: carouselText("Légende Instagram")
     }
   }

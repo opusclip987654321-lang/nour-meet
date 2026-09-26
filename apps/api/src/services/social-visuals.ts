@@ -55,7 +55,7 @@ async function footer(color: string, position?: string): Promise<Layer[]> {
 /** Couverture : photo plein cadre, dégradé sombre en haut (rubrique lisible) et en bas, accroche et sous-titre. */
 export async function coverSlide(background: Buffer, title: string, label: string, position?: string, subtitle?: string) {
   const base = sharp(background).resize(SIZE, SIZE, { fit: "cover", position: "attention" });
-  const shade = svg(`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${BRAND.night3}" stop-opacity="0.6"/><stop offset="0.22" stop-color="${BRAND.night3}" stop-opacity="0"/><stop offset="0.52" stop-color="${BRAND.night3}" stop-opacity="0.55"/><stop offset="1" stop-color="${BRAND.night3}" stop-opacity="0.95"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/>`);
+  const shade = svg(`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${BRAND.night3}" stop-opacity="0.8"/><stop offset="0.24" stop-color="${BRAND.night3}" stop-opacity="0"/><stop offset="0.52" stop-color="${BRAND.night3}" stop-opacity="0.55"/><stop offset="1" stop-color="${BRAND.night3}" stop-opacity="0.95"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/>`);
   const labelBlock = await textBlock(label.toUpperCase(), { font: "text", size: 24, weight: 700, color: BRAND.saffron, width: SIZE - 2 * MARGIN, maxHeight: 40, letterSpacing: 2 });
   const titleBlock = await textBlock(title, { font: "display", size: 76, weight: 800, color: BRAND.onNight, width: SIZE - 2 * MARGIN, maxHeight: subtitle ? 340 : 420, minSize: 44 });
   const sub = subtitle ? await textBlock(subtitle, { font: "text", size: 32, color: BRAND.onNight2, width: 820, maxHeight: 150, minSize: 24 }) : null;
@@ -71,19 +71,31 @@ export async function coverSlide(background: Buffer, title: string, label: strin
 }
 
 // Gabarits du carrousel réécrit (refonte du 2026-09-26, maquette « Carrousel Nūr Meet — nouvelle
-// version ») : chaque format a son fond et sa mise en page, pour ne plus répéter la même slide.
+// version ») : chaque format a son fond et sa mise en page, et une variante photo — au moins une image
+// tous les deux écrans. Sur une photo, un voile bleu nuit garantit la lisibilité du texte blanc.
 
-/** Contraste « idée reçue / en réalité » : bandeau bleu nuit barré, puis la réponse sur fond safran. */
-export async function contrastSlide(myth: string, reality: string, position: string) {
-  const TOP = 460, PAD = 64;
-  const mythLabel = await textBlock("CE QU’ON ENTEND", { font: "text", size: 22, weight: 700, color: BRAND.onNight2, width: 600, maxHeight: 40, letterSpacing: 2 });
-  const mythText = await textBlock(`« ${myth} »`, { font: "display", size: 48, weight: 700, color: BRAND.onNight2, width: SIZE - 2 * MARGIN, maxHeight: TOP - 2 * PAD - mythLabel.height - 20, minSize: 30, italic: true, strike: true });
+// Voile dégradé : dense derrière le texte, léger ailleurs, pour que la photo reste vivante.
+const gradientVeil = (from: number, to: number) => svg(`<defs><linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${BRAND.night3}" stop-opacity="${from}"/><stop offset="1" stop-color="${BRAND.night3}" stop-opacity="${to}"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#v)"/>`);
+const veil = (opacity: number, height = SIZE) => svg(`<rect width="${SIZE}" height="${height}" fill="${BRAND.night3}" fill-opacity="${opacity}"/>`);
+const photoBase = (photo: Buffer) => sharp(photo).resize(SIZE, SIZE, { fit: "cover", position: "attention" });
+// Bandeau photo (haut de slide) déjà recadré, à composer sur un fond uni.
+const photoBand = (photo: Buffer, height: number) => sharp(photo).resize(SIZE, height, { fit: "cover", position: "attention" }).toBuffer();
+
+/** Contraste « idée reçue / en réalité » : idée reçue barrée en haut (photo voilée ou bleu nuit), réponse sur safran. */
+export async function contrastSlide(photo: Buffer | null, myth: string, reality: string, position: string) {
+  const TOP = photo ? 500 : 460, PAD = 64;
+  const mythColor = photo ? BRAND.onNight : BRAND.onNight2;
+  const mythLabel = await textBlock("CE QU’ON ENTEND", { font: "text", size: 22, weight: 700, color: mythColor, width: 600, maxHeight: 40, letterSpacing: 2 });
+  const mythText = await textBlock(`« ${myth} »`, { font: "display", size: 48, weight: 700, color: mythColor, width: SIZE - 2 * MARGIN, maxHeight: TOP - 2 * PAD - mythLabel.height - 20, minSize: 30, italic: true, strike: true });
   const realLabel = await textBlock("EN RÉALITÉ", { font: "text", size: 22, weight: 800, color: BRAND.saffronInk, width: 600, maxHeight: 40, letterSpacing: 2 });
   const realText = await textBlock(reality, { font: "display", size: 52, weight: 800, color: BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: SIZE - TOP - 2 * PAD - 90 - realLabel.height, minSize: 32 });
-  const mythTop = Math.round((TOP - mythLabel.height - 20 - mythText.height) / 2);
+  const mythTop = photo ? TOP - PAD - mythText.height - 20 - mythLabel.height : Math.round((TOP - mythLabel.height - 20 - mythText.height) / 2);
   const realTop = TOP + Math.round((SIZE - TOP - 90 - realLabel.height - 20 - realText.height) / 2);
+  const top: Layer[] = photo
+    ? [{ input: await photoBand(photo, TOP), top: 0, left: 0 }, { input: veil(0.5, TOP), top: 0, left: 0 }]
+    : [{ input: svg(`<rect width="${SIZE}" height="${TOP}" fill="${BRAND.night}"/>`), top: 0, left: 0 }];
   return toJpeg(solid(BRAND.saffron), [
-    { input: svg(`<rect width="${SIZE}" height="${TOP}" fill="${BRAND.night}"/>`), top: 0, left: 0 },
+    ...top,
     { input: mythLabel.input, top: mythTop, left: MARGIN },
     { input: mythText.input, top: mythTop + mythLabel.height + 20, left: MARGIN },
     { input: realLabel.input, top: realTop, left: MARGIN },
@@ -92,20 +104,19 @@ export async function contrastSlide(myth: string, reality: string, position: str
   ]);
 }
 
-/** Recadrage : grand guillemet safran et phrase sur fond clair, un mot mis en couleur. */
-export async function statementSlide(text: string, highlight: string | null, position: string) {
-  const mark = await textBlock("“", { font: "display", size: 128, weight: 800, color: BRAND.saffron, width: 200, maxHeight: 150 });
-  const body = await textBlock(text, { font: "display", size: 64, weight: 700, color: BRAND.ink, width: SIZE - 2 * MARGIN, maxHeight: 560, minSize: 36, highlight: highlight ? { text: highlight, color: BRAND.saffronInk } : null });
-  const top = Math.max(MARGIN, Math.round((SIZE - 120 - mark.height - 12 - body.height) / 2));
-  return toJpeg(solid(BRAND.canvas), [
-    { input: mark.input, top, left: MARGIN },
-    { input: body.input, top: top + mark.height + 12, left: MARGIN },
-    ...await footer(BRAND.ink2, position)
-  ]);
+/** Recadrage : grand guillemet safran et phrase, un mot mis en couleur ; sur fond clair ou sur photo voilée. */
+export async function statementSlide(photo: Buffer | null, text: string, highlight: string | null, position: string) {
+  const ink = photo ? BRAND.onNight : BRAND.ink;
+  // Guillemet ouvrant dessiné (tracé Lucide « quote », retourné) : sa taille ne dépend pas du glyphe de la police.
+  const mark = { input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 24 24" fill="${BRAND.saffron}"><g transform="rotate(180 12 12)"><path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/></g></svg>`), height: 150 };
+  const body = await textBlock(text, { font: "display", size: 64, weight: 700, color: ink, width: SIZE - 2 * MARGIN, maxHeight: 560, minSize: 36, highlight: highlight ? { text: highlight, color: photo ? BRAND.saffron : BRAND.saffronInk } : null });
+  const top = Math.max(MARGIN, Math.round((SIZE - 120 - mark.height - body.height) / 2));
+  const layers: Layer[] = [{ input: mark.input, top, left: MARGIN - 8 }, { input: body.input, top: top + mark.height, left: MARGIN }, ...await footer(photo ? BRAND.onNight : BRAND.ink2, position)];
+  return photo ? toJpeg(photoBase(photo), [{ input: veil(0.62), top: 0, left: 0 }, ...layers]) : toJpeg(solid(BRAND.canvas), layers);
 }
 
 /** Liste courte : titre safran en capitales, puis 2 à 4 lignes précédées d'une flèche. */
-export async function listSlide(title: string, items: string[], position: string) {
+export async function listSlide(photo: Buffer | null, title: string, items: string[], position: string) {
   const head = await textBlock(title.toUpperCase(), { font: "text", size: 24, weight: 700, color: BRAND.saffron, width: SIZE - 2 * MARGIN, maxHeight: 80, letterSpacing: 2 });
   const textLeft = MARGIN + 72, textWidth = SIZE - textLeft - MARGIN;
   const rows = await Promise.all(items.map(item => textBlock(item, { font: "text", size: 40, weight: 600, color: BRAND.onNight, width: textWidth, maxHeight: 170, minSize: 28 })));
@@ -122,23 +133,41 @@ export async function listSlide(title: string, items: string[], position: string
     layers.push({ input: row.input, top: y, left: textLeft });
     y += row.height + GAP;
   }
-  return toJpeg(solid(BRAND.night), [{ input: svg(arrows.join("")), top: 0, left: 0 }, ...layers, ...await footer(BRAND.onNight2, position)]);
+  const content = [{ input: svg(arrows.join("")), top: 0, left: 0 }, ...layers, ...await footer(photo ? BRAND.onNight : BRAND.onNight2, position)];
+  return photo ? toJpeg(photoBase(photo), [{ input: gradientVeil(0.5, 0.82), top: 0, left: 0 }, ...content]) : toJpeg(solid(BRAND.night), content);
 }
 
-/** Phrase à retenir, seule sur fond safran, avec l'invitation à enregistrer le post. */
-export async function quoteSlide(text: string, position: string) {
-  const body = await textBlock(text, { font: "display", size: 64, weight: 800, color: BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: 600, minSize: 36 });
+/** Phrase à retenir sur fond safran (sous une photo si elle en a une), avec l'invitation à enregistrer le post. */
+export async function quoteSlide(photo: Buffer | null, text: string, position: string) {
+  const TOP = photo ? 470 : 0;
+  const body = await textBlock(text, { font: "display", size: photo ? 54 : 64, weight: 800, color: BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: photo ? 330 : 600, minSize: 34 });
   const save = await textBlock("À retenir · enregistre ce post", { font: "text", size: 28, weight: 700, color: BRAND.saffronInk, width: 800, maxHeight: 44 });
-  const top = Math.max(MARGIN, Math.round((SIZE - 120 - body.height - 40 - save.height) / 2));
+  const top = TOP + Math.max(photo ? 56 : MARGIN, Math.round((SIZE - TOP - 120 - body.height - 40 - save.height) / 2));
   const saveTop = top + body.height + 40;
   // Icône « signet » (tracé Lucide bookmark), à l'échelle du texte.
   const bookmark = svg(`<g transform="translate(${MARGIN} ${saveTop + Math.round((save.height - 32) / 2)}) scale(1.33)" fill="none" stroke="${BRAND.saffronInk}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></g>`);
   return toJpeg(solid(BRAND.saffron), [
+    ...(photo ? [{ input: await photoBand(photo, TOP), top: 0, left: 0 }] : []),
     { input: body.input, top, left: MARGIN },
     { input: bookmark, top: 0, left: 0 },
     { input: save.input, top: saveTop, left: MARGIN + 48 },
     ...await footer(BRAND.saffronInk, position)
   ]);
+}
+
+/** Chiffre clé de l'article : très grand nombre, sa signification et sa source ; sur safran ou sur photo voilée. */
+export async function statSlide(photo: Buffer | null, value: string, text: string, source: string, position: string) {
+  const number = await textBlock(value, { font: "display", size: 230, weight: 800, color: photo ? BRAND.saffron : BRAND.night, width: SIZE - 2 * MARGIN, maxHeight: 280, minSize: 110 });
+  const body = await textBlock(text, { font: "display", size: 50, weight: 700, color: photo ? BRAND.onNight : BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: 300, minSize: 32 });
+  const src = await textBlock(`Source : ${source}`, { font: "text", size: 26, weight: 600, color: photo ? BRAND.onNight2 : BRAND.saffronInk, width: SIZE - 2 * MARGIN, maxHeight: 70, minSize: 20 });
+  const top = Math.max(MARGIN, Math.round((SIZE - 120 - number.height - 24 - body.height - 36 - src.height) / 2));
+  const layers: Layer[] = [
+    { input: number.input, top, left: MARGIN },
+    { input: body.input, top: top + number.height + 24, left: MARGIN },
+    { input: src.input, top: top + number.height + 24 + body.height + 36, left: MARGIN },
+    ...await footer(photo ? BRAND.onNight : BRAND.saffronInk, position)
+  ];
+  return photo ? toJpeg(photoBase(photo), [{ input: veil(0.6), top: 0, left: 0 }, ...layers]) : toJpeg(solid(BRAND.saffron), layers);
 }
 
 /** Point fort illustré : image propre à la slide, dégradé, titre et phrase ; sans image, fond bleu nuit. */
@@ -152,7 +181,7 @@ export async function sceneSlide(background: Buffer | null, title: string, text:
   const bodyTop = SIZE - MARGIN - 90 - body.height, headTop = bodyTop - 24 - head.height;
   const layers: Layer[] = [{ input: head.input, top: headTop, left: MARGIN }, { input: body.input, top: bodyTop, left: MARGIN }, ...await footer(BRAND.onNight, position)];
   const shade = svg(`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0.3" stop-color="${BRAND.night3}" stop-opacity="0"/><stop offset="0.62" stop-color="${BRAND.night3}" stop-opacity="0.6"/><stop offset="1" stop-color="${BRAND.night3}" stop-opacity="0.95"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/>`);
-  return toJpeg(sharp(background).resize(SIZE, SIZE, { fit: "cover", position: "attention" }), [{ input: shade, top: 0, left: 0 }, ...layers]);
+  return toJpeg(photoBase(background), [{ input: shade, top: 0, left: 0 }, ...layers]);
 }
 
 /** Point clé : numéro, intertitre et une ou deux phrases reprises de l'article, sur fond bleu nuit. */
@@ -197,21 +226,22 @@ export async function chartSlide(chart: ChartData, position: string) {
   return toJpeg(solid(BRAND.canvas), [...layers, ...await footer(BRAND.ink2, position)]);
 }
 
-/** Dernière slide : appel à l'action sur fond bleu nuit, adresse du site dans une pastille. */
-export async function ctaSlide(headline: string, detail: string, site: string, position?: string) {
+/** Dernière slide : appel à l'action sur fond bleu nuit ou photo voilée, adresse du site dans une pastille. */
+export async function ctaSlide(headline: string, detail: string, site: string, position?: string, photo: Buffer | null = null) {
   const head = await textBlock(headline, { font: "display", size: 68, weight: 800, color: BRAND.onNight, width: SIZE - 2 * MARGIN, maxHeight: 320, minSize: 44 });
-  const sub = await textBlock(detail, { font: "text", size: 36, color: BRAND.onNight2, width: 840, maxHeight: 220, minSize: 26 });
+  const sub = await textBlock(detail, { font: "text", size: 36, color: photo ? BRAND.onNight : BRAND.onNight2, width: 840, maxHeight: 220, minSize: 26 });
   const siteBlock = await textBlock(site, { font: "display", size: 32, weight: 700, color: BRAND.saffron, width: SIZE - 2 * MARGIN, maxHeight: 50 });
   const pillW = siteBlock.width + 72, pillH = siteBlock.height + 40;
   const top = Math.max(MARGIN, Math.round((SIZE - 120 - head.height - 32 - sub.height - 44 - pillH) / 2));
   const pillTop = top + head.height + 32 + sub.height + 44;
-  return toJpeg(solid(BRAND.night), [
+  const layers: Layer[] = [
     { input: head.input, top, left: MARGIN },
     { input: sub.input, top: top + head.height + 32, left: MARGIN },
     { input: svg(`<rect x="${MARGIN}" y="${pillTop}" width="${pillW}" height="${pillH}" rx="${pillH / 2}" fill="${BRAND.night3}" stroke="${BRAND.onNightLine}" stroke-width="2"/>`), top: 0, left: 0 },
     { input: siteBlock.input, top: pillTop + 20, left: MARGIN + 36 },
-    ...await footer(BRAND.onNight2, position)
-  ]);
+    ...await footer(photo ? BRAND.onNight : BRAND.onNight2, position)
+  ];
+  return photo ? toJpeg(photoBase(photo), [{ input: gradientVeil(0.78, 0.3), top: 0, left: 0 }, ...layers]) : toJpeg(solid(BRAND.night), layers);
 }
 
 /** Visuel d'un événement publié (§14) : photo, catégorie, titre, date, quartier et appel à l'action. */

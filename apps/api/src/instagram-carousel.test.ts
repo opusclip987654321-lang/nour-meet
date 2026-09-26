@@ -4,7 +4,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import type { CarouselDraft, CarouselDraftSlide } from "./ai-provider.js";
-import { MAX_SCENE_IMAGES, articleCarouselPlan, parseCarouselScript, shortText } from "./services/instagram-carousel.js";
+import { articleCarouselPlan, parseCarouselScript, photoSlots, shortText } from "./services/instagram-carousel.js";
 import { loadImage, renderArticleCarousel, renderEventVisual } from "./services/instagram.js";
 import { statementSlide } from "./services/social-visuals.js";
 
@@ -99,60 +99,73 @@ describe("rendu des visuels Instagram", () => {
   });
 });
 
-// Carrousel réécrit par Claude (refonte du 2026-09-26) : formats variés, aucun chiffre ajouté.
-const slide = (fields: Partial<CarouselDraftSlide> & Pick<CarouselDraftSlide, "kind">): CarouselDraftSlide => ({ title: "", text: "", items: [], myth: "", reality: "", highlight: "", imagePrompt: "", ...fields });
+// Carrousel réécrit par Claude (refonte du 2026-09-26) : formats variés, aucun chiffre ajouté, et au
+// moins une image tous les deux écrans.
+const slide = (fields: Partial<CarouselDraftSlide> & Pick<CarouselDraftSlide, "kind">): CarouselDraftSlide => ({ title: "", text: "", items: [], myth: "", reality: "", highlight: "", value: "", source: "", imagePrompt: "A warm Parisian scene", ...fields });
 const draft: CarouselDraft = {
   hook: "Tu n’es pas « trop exigeant(e) ».",
   subtitle: "Pourquoi se faire des amis devient plus dur après 30 ans, et comment y remédier.",
   slides: [
+    slide({ kind: "stat", value: "21 %", text: "des gens se sentent seuls. Tu n’es pas un cas à part.", source: "Fondation de France" }),
     slide({ kind: "contrast", myth: "Les amitiés viennent toutes seules", reality: "C’est la répétition, plus que l’intensité, qui fait naître une amitié." }),
-    slide({ kind: "scene", title: "Oser la régularité", text: "Revoir les mêmes personnes chaque semaine crée la confiance.", imagePrompt: "Friends meeting again at a Parisian café terrace" }),
+    slide({ kind: "scene", title: "Oser la régularité", text: "Revoir les mêmes personnes chaque semaine crée la confiance." }),
     slide({ kind: "list", title: "Des cadres qui aident", items: ["Un atelier ou un club", "Un bénévolat régulier", "Des soirées où l’on vient seul"] }),
-    slide({ kind: "statement", text: "Ce n’est pas une question de personnalité. C’est une question de fréquence.", highlight: "fréquence" }),
     slide({ kind: "quote", text: "Proposer un café reste le geste le plus simple." })
   ],
   ctaHeadline: "Recrée le hasard, ce soir.",
   ctaDetail: "Une soirée Nūr Meet près de chez toi, avec des gens qui cherchent la même chose.",
+  ctaImagePrompt: "A small group dinner in a Parisian restaurant",
   caption: "Se faire des amis après 30 ans ? C’est possible.\n\nArticle complet : lien en bio\n\n#amitie #paris"
 };
 
 describe("carrousel réécrit", () => {
-  it("garde les formats valides, borne les illustrations et reprend la légende courte", () => {
-    const script = parseCarouselScript({ ...draft, slides: [...draft.slides, slide({ kind: "scene", title: "Un deuxième point", text: "Texte.", imagePrompt: "A" }), slide({ kind: "scene", title: "Un troisième", text: "Texte.", imagePrompt: "B" })] }, article);
-    expect(script.slides.map(s => s.kind)).toEqual(["contrast", "scene", "list", "statement", "quote"]);
-    const withPrompt = parseCarouselScript({ ...draft, slides: [slide({ kind: "scene", title: "A", text: "a", imagePrompt: "a" }), slide({ kind: "scene", title: "B", text: "b", imagePrompt: "b" }), slide({ kind: "scene", title: "C", text: "c", imagePrompt: "c" })] }, article);
-    expect(withPrompt.slides.filter(s => s.kind === "scene" && s.imagePrompt).length).toBe(MAX_SCENE_IMAGES);
+  it("garde les formats valides, place le graphique sourcé après la couverture et reprend la légende courte", () => {
+    const script = parseCarouselScript(draft, article);
+    expect(script.slides.map(s => s.kind)).toEqual(["chart", "stat", "contrast", "scene", "list", "quote"]);
     expect(script.caption).toContain("lien en bio");
-    const statement = script.slides.find(s => s.kind === "statement");
-    expect(statement && statement.kind === "statement" && statement.highlight).toBe("fréquence");
+  });
+
+  it("ne montre un chiffre qu’avec une source citée dans l’article", () => {
+    const unsourced = parseCarouselScript({ ...draft, slides: [slide({ kind: "stat", value: "21 %", text: "Seuls.", source: "Institut inconnu" }), ...draft.slides.slice(1)] }, article);
+    expect(unsourced.slides.some(s => s.kind === "stat")).toBe(false);
+  });
+
+  it("met une image au moins tous les deux écrans, et toujours sur une scène", () => {
+    const script = parseCarouselScript(draft, article);
+    const slots = new Set(photoSlots(script));
+    // Écrans : couverture (photo), graphique, chiffre, contraste, scène, liste, citation, appel à l'action.
+    const screens = [true, ...script.slides.map(s => slots.has(s)), slots.has(script.cta)];
+    for (let i = 1; i < screens.length; i++) expect(screens[i] || screens[i - 1]).toBe(true);
+    expect(slots.has(script.slides.find(s => s.kind === "scene")!)).toBe(true);
+    expect(slots.has(script.slides.find(s => s.kind === "chart")!)).toBe(false);
   });
 
   it("refuse tout chiffre absent de l’article, et un texte contraire à la charte", () => {
-    const invented = { ...draft, slides: [...draft.slides.slice(0, 2), slide({ kind: "quote", text: "67 % des gens se sentent seuls." })] };
+    const invented = { ...draft, slides: [...draft.slides.slice(1, 3), slide({ kind: "quote", text: "67 % des gens se sentent seuls." })] };
     expect(() => parseCarouselScript(invented, article)).toThrow("Chiffre absent");
-    // Un chiffre présent dans l'article est accepté (« 30 ans » figure dans le titre).
-    expect(() => parseCarouselScript(draft, article)).not.toThrow();
     expect(() => parseCarouselScript({ ...draft, hook: "Rencontres musulmanes" }, article)).toThrow("charte");
     expect(() => parseCarouselScript({ ...draft, slides: draft.slides.slice(0, 1) }, article)).toThrow("trop court");
   });
 
-  it("rend chaque format en JPEG carré 1080 × 1080, graphique sourcé compris", async () => {
+  it("rend chaque format, avec et sans photo, en JPEG carré 1080 × 1080", async () => {
     const publicDir = await mkdtemp(path.join(os.tmpdir(), "nour-ig-"));
     await mkdir(path.join(publicDir, "uploads", "articles"), { recursive: true });
     const photo = await sharp({ create: { width: 1600, height: 1000, channels: 3, background: "#8a6d5a" } }).webp().toBuffer();
     await writeFile(path.join(publicDir, "uploads", "articles", "cover.webp"), photo);
     await writeFile(path.join(publicDir, "uploads", "articles", "scene-slide.jpg"), await sharp(photo).jpeg().toBuffer());
     const script = parseCarouselScript(draft, article);
-    const scene = script.slides.find(s => s.kind === "scene");
-    if (scene?.kind === "scene") scene.image = "/static/uploads/articles/scene-slide.jpg";
-    const slides = await renderArticleCarousel({ ...article, instagramCarousel: script }, { publicDir, webOrigin: "https://nourmeet.com" });
-    // Couverture + 5 slides + graphique de l'article + appel à l'action.
-    expect(slides.length).toBe(8);
-    for (const jpeg of slides) expect(await sharp(jpeg).metadata()).toMatchObject({ format: "jpeg", width: 1080, height: 1080 });
-  }, 60_000);
+    // Une photo générée, les autres écrans en détail de la couverture, et chaque format aussi sans photo.
+    photoSlots(script).forEach((slot, i) => Object.assign(slot, i === 0 ? { image: "/static/uploads/articles/scene-slide.jpg" } : { image: article.imageUrl, fromCover: true }));
+    const bare = { ...script, slides: script.slides.map(s => ({ ...s, image: null })) };
+    for (const s of [script, bare]) {
+      const slides = await renderArticleCarousel({ ...article, instagramCarousel: s }, { publicDir, webOrigin: "https://nourmeet.com" });
+      expect(slides.length).toBe(8);
+      for (const jpeg of slides) expect(await sharp(jpeg).metadata()).toMatchObject({ format: "jpeg", width: 1080, height: 1080 });
+    }
+  }, 120_000);
 });
 
 it("met en couleur un mot sans casser un caractère échappé (&)", async () => {
-  const jpeg = await statementSlide("Toi & ta soirée", "a", "2/6");
+  const jpeg = await statementSlide(null, "Toi & ta soirée", "a", "2/6");
   expect((await sharp(jpeg).metadata()).width).toBe(1080);
 });
