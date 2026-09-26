@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { CarouselDraft, CarouselDraftSlide } from "./ai-provider.js";
 import { MAX_SCENE_IMAGES, articleCarouselPlan, parseCarouselScript, shortText } from "./services/instagram-carousel.js";
 import { loadImage, renderArticleCarousel, renderEventVisual } from "./services/instagram.js";
+import { statementSlide } from "./services/social-visuals.js";
 
 // Carrousel Instagram de l'article du jour (décision v2 §6) et visuel d'événement (§14).
 const article = {
@@ -149,4 +150,9 @@ describe("carrousel réécrit", () => {
     expect(slides.length).toBe(8);
     for (const jpeg of slides) expect(await sharp(jpeg).metadata()).toMatchObject({ format: "jpeg", width: 1080, height: 1080 });
   }, 60_000);
+});
+
+it("met en couleur un mot sans casser un caractère échappé (&)", async () => {
+  const jpeg = await statementSlide("Toi & ta soirée", "a", "2/6");
+  expect((await sharp(jpeg).metadata()).width).toBe(1080);
 });

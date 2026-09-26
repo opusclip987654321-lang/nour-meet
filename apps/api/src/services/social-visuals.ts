@@ -25,9 +25,10 @@ type Layer = { input: Buffer; top: number; left: number };
 /** Bloc de texte rendu en PNG transparent, réduit par paliers jusqu'à tenir dans maxHeight. */
 export async function textBlock(text: string, options: TextOptions): Promise<{ input: Buffer; width: number; height: number }> {
   const font = FONTS[options.font];
-  let inner = escapeMarkup(text);
-  // Mot mis en couleur (slide de recadrage) : première occurrence seulement, texte déjà échappé.
-  if (options.highlight?.text) inner = inner.replace(escapeMarkup(options.highlight.text), m => `<span foreground="${options.highlight!.color}">${m}</span>`);
+  // Mot mis en couleur (slide de recadrage) : cherché dans le texte brut, puis chaque morceau échappé à
+  // part — jamais une recherche dans le texte échappé, qui pourrait couper une entité (&amp;).
+  const at = options.highlight?.text ? text.indexOf(options.highlight.text) : -1;
+  const inner = at < 0 ? escapeMarkup(text) : `${escapeMarkup(text.slice(0, at))}<span foreground="${options.highlight!.color}">${escapeMarkup(options.highlight!.text)}</span>${escapeMarkup(text.slice(at + options.highlight!.text.length))}`;
   const attributes = [`foreground="${options.color}"`, options.weight && `weight="${options.weight}"`, options.italic && `style="italic"`, options.strike && `strikethrough="true"`, options.letterSpacing && `letter_spacing="${options.letterSpacing * 1024}"`].filter(Boolean).join(" ");
   const markup = `<span ${attributes}>${inner}</span>`;
   for (let size = options.size; ; size -= 4) {

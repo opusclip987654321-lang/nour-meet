@@ -1,4 +1,4 @@
-import { UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -58,7 +58,10 @@ app.patch("/admin/articles/:id", { preHandler: roles(UserRole.ADMIN) }, async (r
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const input = z.object({ ...Object.fromEntries(Object.entries(articleWritableFields).map(([k, v]) => [k, (v as z.ZodTypeAny).optional()])) }).parse(request.body);
   assertNoForbiddenWord(input.title, input.excerpt, input.content, input.metaTitle, input.metaDescription);
-  const updated = await prisma.article.update({ where: { id }, data: input });
+  // Texte modifié : le carrousel réécrit (et sa vérification des chiffres) portait sur l'ancienne version,
+  // il sera réécrit au prochain partage.
+  const textChanged = input.title !== undefined || input.excerpt !== undefined || input.content !== undefined;
+  const updated = await prisma.article.update({ where: { id }, data: { ...input, ...(textChanged ? { instagramCarousel: Prisma.DbNull } : {}) } });
   await audit(currentId(request), "UPDATE_ARTICLE", "Article", id);
   return updated;
 });
@@ -166,7 +169,8 @@ app.post("/admin/articles/:id/instagram", { preHandler: roles(UserRole.ADMIN), c
   // Carrousel réécrit s'il manque (article écrit à la main, échec de la tâche du jour) : texte seul,
   // sans nouvelles illustrations, pour ne pas faire attendre l'administrateur plusieurs minutes. Il
   // enregistre alors sa légende courte ; celle saisie ici reste prioritaire.
-  if (!article.instagramMediaId) await prepareArticleCarousel(prisma, { aiProvider, log: request.log }, id);
+  // Pas de réécriture pendant un envoi en cours (double clic) : le verrou le refusera de toute façon.
+  if (!article.instagramMediaId && !article.instagramPublishingAt) await prepareArticleCarousel(prisma, { aiProvider, log: request.log }, id);
   const stored = (await prisma.article.findUniqueOrThrow({ where: { id } })).instagramCaption;
   const finalCaption = clean ?? stored ?? sanitizeInstagramCaption(`${article.title}\n\nArticle complet : lien en bio\n\n#nurmeet #rencontres`);
   await prisma.article.update({ where: { id }, data: { instagramCaption: finalCaption } });

@@ -5,7 +5,7 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sanitizeInstagramCaption } from "./blog-content.js";
 import type { Prisma } from "@prisma/client";
-import { CAROUSEL_MAX, CAROUSEL_MIN, articleCarouselPlan, storedCarousel, type CarouselMiddle, type CarouselSlide } from "./instagram-carousel.js";
+import { CAROUSEL_MAX, CAROUSEL_MIN, articleCarouselPlan, storedCarousel, type CarouselMiddle, type CarouselPlan, type CarouselScript, type CarouselSlide } from "./instagram-carousel.js";
 import { chartSlide, contrastSlide, coverSlide, ctaSlide, eventVisual, listSlide, pointSlide, quoteSlide, sceneSlide, statementSlide } from "./social-visuals.js";
 
 // Publication Instagram via l'API Instagram avec connexion Instagram (compte professionnel) :
@@ -123,22 +123,27 @@ async function renderSlide(slide: CarouselSlide, position: string, config: Pick<
   }
 }
 
+// Carrousel réécrit : un graphique sourcé de l'article garde sa place, en deuxième position.
+async function renderScript(script: CarouselScript, plan: CarouselPlan, cover: Buffer, config: Pick<InstagramConfig, "publicDir" | "webOrigin">) {
+  const chart = plan.middle.find((m): m is Extract<CarouselMiddle, { kind: "chart" }> => m.kind === "chart");
+  const middle: (CarouselSlide | Extract<CarouselMiddle, { kind: "chart" }>)[] = [...script.slides];
+  if (chart && middle.length < CAROUSEL_MAX - 2) middle.splice(1, 0, chart);
+  const total = middle.length + 2;
+  const slides = [await coverSlide(cover, script.hook, plan.label, `1/${total}`, script.subtitle || undefined)];
+  for (const [i, m] of middle.entries()) slides.push(m.kind === "chart" ? await chartSlide(m.chart, `${i + 2}/${total}`) : await renderSlide(m, `${i + 2}/${total}`, config));
+  slides.push(await ctaSlide(script.ctaHeadline, script.ctaDetail, siteLabel(config), `${total}/${total}`));
+  return slides;
+}
+
 /** Slides JPEG du carrousel d'un article (exporté pour les tests et l'aperçu). */
 export async function renderArticleCarousel(article: CarouselArticle, config: Pick<InstagramConfig, "publicDir" | "webOrigin">) {
   const cover = await loadImage(article.imageUrl, config);
   const plan = articleCarouselPlan(article);
   const script = storedCarousel(article.instagramCarousel);
-  if (script) {
-    // Carrousel réécrit : un graphique sourcé de l'article garde sa place, en deuxième position.
-    const chart = plan.middle.find((m): m is Extract<CarouselMiddle, { kind: "chart" }> => m.kind === "chart");
-    const middle: (CarouselSlide | Extract<CarouselMiddle, { kind: "chart" }>)[] = [...script.slides];
-    if (chart && middle.length < CAROUSEL_MAX - 2) middle.splice(1, 0, chart);
-    const total = middle.length + 2;
-    const slides = [await coverSlide(cover, script.hook, plan.label, `1/${total}`, script.subtitle || undefined)];
-    for (const [i, m] of middle.entries()) slides.push(m.kind === "chart" ? await chartSlide(m.chart, `${i + 2}/${total}`) : await renderSlide(m, `${i + 2}/${total}`, config));
-    slides.push(await ctaSlide(script.ctaHeadline, script.ctaDetail, siteLabel(config), `${total}/${total}`));
-    return slides;
-  }
+  // Un carrousel réécrit qui ne se rend pas (donnée enregistrée inattendue) ne bloque jamais la
+  // publication : l'extraction de l'article prend le relais.
+  const rewritten = script ? await renderScript(script, plan, cover, config).catch(() => null) : null;
+  if (rewritten) return rewritten;
   const total = plan.middle.length + 2;
   if (total < CAROUSEL_MIN) throw new Error("Article trop court pour un carrousel de 4 slides au moins");
   const slides = [await coverSlide(cover, plan.title, plan.label, `1/${total}`)];
