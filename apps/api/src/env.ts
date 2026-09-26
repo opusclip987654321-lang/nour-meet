@@ -58,6 +58,9 @@ const envSchema = z.object({
   FACEBOOK_GRAPH_VERSION: z.string().default("v24.0"),
   // Adresse publique de l'API (ex. https://api.nourmeet.com) : Instagram télécharge l'image depuis cette
   // adresse, qui doit donc être joignable depuis Internet.
+  // Fiche App Store de l'application Nūr Meet, une fois publiée (v3 §5.2) : sans elle, aucun e-mail ni
+  // page ne renvoie vers l'App Store — jamais une adresse inventée ou générique.
+  APP_STORE_URL: z.preprocess((v) => typeof v === "string" && v.trim() === "" ? undefined : v, z.string().url().optional()),
   API_PUBLIC_URL: z.preprocess((v) => typeof v === "string" && v.trim() === "" ? undefined : v, z.string().url().optional()),
   // See the comment beside its only use in index.ts (perWorkerConnectionLimit) for why
   // this is a total budget across all cluster workers, not a per-worker value. Keep it

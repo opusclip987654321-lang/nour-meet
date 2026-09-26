@@ -486,6 +486,28 @@ label > textarea {
   color: var(--on-night);
 }
 
+/* ---------- Invitation par e-mail (v3 §4.3) ---------- */
+.share-email-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+
+.share-email {
+  display: grid;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+}
+
+.share-email textarea {
+  min-height: 80px;
+}
+
+.share-login {
+  margin-top: var(--s-2);
+}
+
 /* ---------- Champ de recherche avec loupe ---------- */
 /* Commun à tous les champs de recherche (catalogue, centres d'intérêt…) : la loupe est posée dans le
    champ, à gauche, et le texte commence après elle — jamais de chevauchement (v3 §1.2). */

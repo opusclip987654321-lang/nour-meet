@@ -9,7 +9,8 @@ import { anonymizeUser, hasAcceptedCurrent, profileAge, recordAcceptance } from 
 import { audit } from "../services/audit.js";
 import { EXPO_PUSH_TOKEN, MAX_PUSH_TOKENS_PER_USER } from "../services/push.js";
 import { TokenUser, auth, currentId } from "../services/auth.js";
-import { SESSION_RENEW_AFTER_SECONDS, signSession } from "../services/session.js";
+import { SESSION_RENEW_AFTER_SECONDS, needsAccountType, signSession } from "../services/session.js";
+import { sendWelcomeEmailOnce } from "../services/welcome.js";
 
 app.get("/me", { preHandler: auth }, async (request) => {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: currentId(request) }, include: { profile: true } });
@@ -23,7 +24,20 @@ app.get("/me", { preHandler: auth }, async (request) => {
   const token = request.user as TokenUser;
   const refreshedToken = token.iat && Date.now() / 1000 - token.iat > SESSION_RENEW_AFTER_SECONDS ? signSession(user) : undefined;
   const googleLinked = !!(await prisma.authIdentity.findFirst({ where: { userId: user.id, provider: "google" }, select: { id: true } }));
-  return { id: user.id, phone: user.phone, phoneVerified: !!user.phoneVerifiedAt, email: user.email, displayName: user.displayName, role: user.role, profile: user.profile, age: profileAge(user.profile?.birthDate), hasRestaurant: !!restaurant, cguAccepted, googleLinked, ...(refreshedToken ? { refreshedToken } : {}) };
+  return { id: user.id, phone: user.phone, phoneVerified: !!user.phoneVerifiedAt, email: user.email, displayName: user.displayName, role: user.role, profile: user.profile, age: profileAge(user.profile?.birthDate), hasRestaurant: !!restaurant, needsAccountType: needsAccountType(user, !!restaurant), cguAccepted, googleLinked, ...(refreshedToken ? { refreshedToken } : {}) };
+});
+
+// Choix « Participer aux événements » (v3 §5.1) : rend le type de compte définitif, puis envoie l'e-mail
+// de bienvenue Participant. Le choix Restaurateur, lui, ne devient définitif qu'à la soumission réelle du
+// formulaire restaurateur (POST /restaurants/apply) : l'interrompre ne crée jamais un compte participant.
+app.post("/me/account-type", { preHandler: auth }, async (request, reply) => {
+  z.object({ type: z.literal("PARTICIPANT") }).parse(request.body);
+  const userId = currentId(request);
+  if (await prisma.restaurant.findUnique({ where: { ownerId: userId }, select: { id: true } })) return reply.code(409).send({ error: "Ce compte est déjà un compte restaurateur." });
+  await prisma.user.updateMany({ where: { id: userId, accountTypeChosenAt: null }, data: { accountTypeChosenAt: new Date() } });
+  await audit(userId, "CHOOSE_ACCOUNT_TYPE", "User", userId, { type: "PARTICIPANT" });
+  await sendWelcomeEmailOnce(userId).catch(err => request.log.warn({ err }, "E-mail de bienvenue non envoyé"));
+  return { ok: true };
 });
 
 // CGU §2 : la date de naissance est obligatoire et doit correspondre à une personne majeure ; les
@@ -41,6 +55,12 @@ app.patch("/me/profile", { preHandler: auth }, async (request, reply) => {
   const emailChanged = input.email !== undefined && (input.email?.toLowerCase() ?? null) !== previousEmail;
   const user = await prisma.user.update({ where: { id: userId }, data: { displayName: input.displayName, email: input.email?.toLowerCase() ?? input.email, ...(emailChanged ? { emailVerifiedAt: null } : {}), profile: { upsert: { create: profileData, update: profileData } } }, include: { profile: true } });
   await audit(userId, "UPDATE_PROFILE", "User", userId);
+  // Un profil participant complété vaut choix « Participer » (v3 §5.1) — notamment depuis l'application
+  // mobile, qui ne présente pas l'écran de choix. Jamais pour un compte restaurateur.
+  if (!user.accountTypeChosenAt && !(await prisma.restaurant.findUnique({ where: { ownerId: userId }, select: { id: true } }))) {
+    await prisma.user.update({ where: { id: userId }, data: { accountTypeChosenAt: new Date() } });
+    await sendWelcomeEmailOnce(userId).catch(err => request.log.warn({ err }, "E-mail de bienvenue non envoyé"));
+  }
   return user;
 });
 

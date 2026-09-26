@@ -10,6 +10,7 @@ import { hasAcceptedCurrent, recordAcceptance } from "../services/account.js";
 import { audit } from "../services/audit.js";
 import { auth, currentId, roles } from "../services/auth.js";
 import { notify } from "../services/notify.js";
+import { sendWelcomeEmailOnce } from "../services/welcome.js";
 import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, subscriptionOverview, syncSubscriptionFromStripe } from "../services/subscriptions.js";
 import { eventCreateData, eventCreateSchema } from "../services/event-drafts.js";
 
@@ -52,6 +53,10 @@ app.post("/restaurants/apply", { preHandler: auth, config: { rateLimit: { max: s
     update: { ...input, status: "PENDING", submittedAt: new Date(), rejectionReason: null, reviewedBy: null },
     create: { ownerId: userId, ...input, status: "PENDING" }
   });
+  // Formulaire réellement soumis : le type de compte Restaurateur devient définitif (v3 §5.1), et l'e-mail
+  // de bienvenue Restaurateur peut partir.
+  await prisma.user.updateMany({ where: { id: userId, accountTypeChosenAt: null }, data: { accountTypeChosenAt: new Date() } });
+  await sendWelcomeEmailOnce(userId).catch(err => request.log.warn({ err }, "E-mail de bienvenue non envoyé"));
   const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
   await Promise.all(admins.map(a => notify(a.id, "Nouvelle demande restaurateur", `${input.name} souhaite ouvrir un compte professionnel.`, "/admin/restaurants")));
   await audit(userId, "APPLY_RESTAURANT", "Restaurant", restaurant.id);

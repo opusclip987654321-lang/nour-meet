@@ -94,6 +94,8 @@ export interface SessionUser {
   phone: string | null;
   phoneVerified?: boolean;
   googleLinked?: boolean;
+  // Type de compte pas encore définitif (v3 §5.1) : le choix Participant / Restaurateur doit être redemandé.
+  needsAccountType?: boolean;
   email?: string | null;
   displayName: string;
   role: UserRole;
