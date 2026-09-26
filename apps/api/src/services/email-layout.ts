@@ -1,3 +1,4 @@
+import { SOCIAL_LINKS } from "@nour/shared";
 import { SITE_ORIGIN } from "../env.js";
 import { BRAND } from "./social-visuals.js";
 
@@ -46,7 +47,7 @@ ${image}
 <h1 style="margin:0 0 16px;font-size:24px;line-height:1.25;font-weight:800;color:${BRAND.ink};">${escape(content.heading)}</h1>
 ${paragraphs}${details}${cta}${links}
 </td></tr>
-<tr><td style="padding:20px 28px;background:${BRAND.canvas};font-size:12px;line-height:1.6;color:${BRAND.ink2};">Nūr Meet · des soirées en petit comité dans des restaurants partenaires à Paris et en Île-de-France.<br><a href="${SITE_ORIGIN}" style="color:${BRAND.ink2};">${new URL(SITE_ORIGIN).host}</a> · contact@nourmeet.com</td></tr>
+<tr><td style="padding:20px 28px;background:${BRAND.canvas};font-size:12px;line-height:1.6;color:${BRAND.ink2};">Nūr Meet · des soirées en petit comité dans des restaurants partenaires à Paris et en Île-de-France.<br><a href="${SITE_ORIGIN}" style="color:${BRAND.ink2};">${new URL(SITE_ORIGIN).host}</a> · contact@nourmeet.com<br>Suivez-nous : <a href="${SOCIAL_LINKS.instagram.url}" style="color:${BRAND.ink2};">Instagram</a> · <a href="${SOCIAL_LINKS.facebook.url}" style="color:${BRAND.ink2};">Facebook</a></td></tr>
 </table></td></tr></table></body></html>`;
   const text = [
     content.heading, "",
@@ -55,7 +56,7 @@ ${paragraphs}${details}${cta}${links}
     ...(content.details?.length ? [""] : []),
     ...(content.cta ? [`${content.cta.label} : ${content.cta.url}`, ""] : []),
     ...(content.links ?? []).map(l => `${l.label} : ${l.url}`),
-    "", "L’équipe Nūr Meet", "contact@nourmeet.com"
+    "", "L’équipe Nūr Meet", "contact@nourmeet.com", `Instagram : ${SOCIAL_LINKS.instagram.url}`, `Facebook : ${SOCIAL_LINKS.facebook.url}`
   ].join("\n");
   return { html, text };
 }

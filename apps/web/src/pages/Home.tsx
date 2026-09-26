@@ -3,7 +3,8 @@ import { ArrowRight, BadgeCheck, CalendarDays, Check, Flag, Handshake, Heart, Lo
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { Picture } from "../components/brand";
+import { SOCIAL_LINKS } from "@nour/shared";
+import { Picture, SocialLinks } from "../components/brand";
 import { ContactExplainer, InterviewExplainer } from "../components/explainers";
 import { Layout } from "../components/Layout";
 import { ShareSiteButton } from "../components/ShareSite";
@@ -74,7 +75,7 @@ export function Home() {
   useEffect(()=>{api<Paginated<PublicEvent>>("/events?pageSize=6").then(r=>setEvents(r.items)).catch(()=>setEvents([]))},[]);
   // Organisation, site et FAQ : uniquement des informations visibles sur la page ou dans le pied de page.
   useSeo({title:`${SITE_NAME} — rencontres et soirées en petit comité à Paris`,path:"/",jsonLd:[
-    {"@context":"https://schema.org","@type":"Organization",name:SITE_NAME,url:SITE_URL,logo:absoluteUrl("/icon-512.png"),email:"contact@nourmeet.com",areaServed:{"@type":"AdministrativeArea",name:"Île-de-France"}},
+    {"@context":"https://schema.org","@type":"Organization",name:SITE_NAME,url:SITE_URL,logo:absoluteUrl("/icon-512.png"),email:"contact@nourmeet.com",areaServed:{"@type":"AdministrativeArea",name:"Île-de-France"},sameAs:[SOCIAL_LINKS.instagram.url,SOCIAL_LINKS.facebook.url]},
     {"@context":"https://schema.org","@type":"WebSite",name:SITE_NAME,url:SITE_URL,inLanguage:"fr-FR"},
     {"@context":"https://schema.org","@type":"FAQPage",mainEntity:FAQ.map(f=>({"@type":"Question",name:f.q,acceptedAnswer:{"@type":"Answer",text:f.a}}))}
   ]});
@@ -187,6 +188,14 @@ export function Home() {
     </section>
 
     <TestimonialsSection/>
+
+    {/* Réseaux sociaux mis en avant : les coulisses des soirées et les prochaines dates. */}
+    <section className="section social-band" aria-labelledby="social-title">
+      <div className="social-band-inner">
+        <div><h2 id="social-title">Suivez Nūr Meet sur les réseaux</h2><p>Les prochaines soirées, les articles du journal et l’esprit Nūr Meet, au quotidien.</p></div>
+        <SocialLinks className="large" showHandles/>
+      </div>
+    </section>
 
     <section className="section faq" aria-labelledby="faq-title">
       <div className="section-title"><h2 id="faq-title">Vos questions</h2></div>

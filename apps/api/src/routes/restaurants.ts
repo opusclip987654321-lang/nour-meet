@@ -11,6 +11,7 @@ import { audit } from "../services/audit.js";
 import { auth, currentId, roles } from "../services/auth.js";
 import { notify } from "../services/notify.js";
 import { sendWelcomeEmailOnce } from "../services/welcome.js";
+import { searchRestaurants } from "../services/restaurant-search.js";
 import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, subscriptionOverview, syncSubscriptionFromStripe } from "../services/subscriptions.js";
 import { eventCreateData, eventCreateSchema } from "../services/event-drafts.js";
 
@@ -27,6 +28,14 @@ app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
   const usage = await prisma.restaurantMonthlyUsage.findUnique({ where: { restaurantId_yearMonth: { restaurantId: restaurant.id, yearMonth: currentYearMonth() } } });
   return { ...ownRestaurantView(restaurant), currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
 });
+// Autocomplétion à l'inscription (v3 §6.1) : relais vers l'API publique de recherche d'entreprises, réservé
+// aux personnes connectées et limité en débit ; une panne renvoie une liste vide, jamais une erreur bloquante.
+app.get("/restaurants/search", { preHandler: auth, config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
+  const { q } = z.object({ q: z.string().trim().min(3).max(100) }).parse(request.query);
+  try { return { results: await searchRestaurants(q) }; }
+  catch (err) { request.log.warn({ err: (err as Error).message }, "Autocomplétion restaurant indisponible"); return { results: [], unavailable: true }; }
+});
+
 // Onglet « Validations » (v3 §6.4) : l'état réel de l'établissement et de chacune de ses soirées, dans les
 // termes du restaurateur. Aucune donnée interne (notes de l'administration, commission).
 app.get("/restaurants/me/validations", { preHandler: auth }, async (request, reply) => {
@@ -144,9 +153,22 @@ app.post("/restaurants/me/photos", { preHandler: auth, config: PHOTO_RATE_LIMIT 
   if (buffer.byteLength > MAX_IMAGE_BYTES) return reply.code(413).send({ error: "Image trop volumineuse (5 Mo maximum)" });
   const filename = `${randomUUID()}.${extension}`;
   await writeFile(path.join(restaurantUploadsDir, filename), buffer);
-  const photo = await prisma.restaurantPhoto.create({ data: { restaurantId: restaurant.id, url: `/static/uploads/restaurants/${filename}`, position: count } });
+  // Toujours après la dernière photo (les suppressions laissent des trous dans les positions).
+  const last = await prisma.restaurantPhoto.findFirst({ where: { restaurantId: restaurant.id }, orderBy: { position: "desc" }, select: { position: true } });
+  const photo = await prisma.restaurantPhoto.create({ data: { restaurantId: restaurant.id, url: `/static/uploads/restaurants/${filename}`, position: (last?.position ?? -1) + 1 } });
   await audit(currentId(request), "ADD_RESTAURANT_PHOTO", "Restaurant", restaurant.id);
   return reply.code(201).send(photo);
+});
+// Ordre de la galerie (v3 §6.2) : la première photo est la photo principale de l'établissement. La liste
+// envoyée doit contenir exactement les photos de ce restaurant, sans en ajouter ni en omettre.
+app.put("/restaurants/me/photos/order", { preHandler: auth, config: PHOTO_RATE_LIMIT }, async (request, reply) => {
+  const { ids } = z.object({ ids: z.array(z.string()).min(1).max(8) }).parse(request.body);
+  const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) } });
+  if (!restaurant || !galleryEditable(restaurant.status)) return reply.code(403).send({ error: "Aucun établissement modifiable pour ce compte" });
+  const photos = await prisma.restaurantPhoto.findMany({ where: { restaurantId: restaurant.id }, select: { id: true } });
+  if (photos.length !== ids.length || new Set(ids).size !== ids.length || !photos.every(p => ids.includes(p.id))) return reply.code(400).send({ error: "L’ordre envoyé ne correspond pas aux photos de votre galerie." });
+  await prisma.$transaction(ids.map((id, position) => prisma.restaurantPhoto.update({ where: { id }, data: { position } })));
+  return prisma.restaurantPhoto.findMany({ where: { restaurantId: restaurant.id }, orderBy: { position: "asc" } });
 });
 app.delete("/restaurants/me/photos/:photoId", { preHandler: auth, config: PHOTO_RATE_LIMIT }, async (request, reply) => {
   const { photoId } = z.object({ photoId: z.string() }).parse(request.params);
