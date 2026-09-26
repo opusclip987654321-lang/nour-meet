@@ -60,7 +60,7 @@ export function Restaurateurs() {
         <p className="page-lead">Vous accueillez des soirées speed dating ou networking dans votre restaurant. Nūr Meet les présente à ses membres, gère la billetterie et le paiement.</p>
         <div className="hero-actions"><Link className="button" to={start}>{startLabel}<ArrowRight size={18} aria-hidden="true"/></Link><a className="button secondary" href="#tarifs">Voir les tarifs</a></div>
       </div>
-      <Picture name="ai-soiree" className="concept-visual" sizes="(max-width: 900px) 92vw, 40vw" priority/>
+      <Picture name="ai-restaurateur" className="concept-visual" sizes="(max-width: 900px) 92vw, 40vw" priority/>
     </section>
 
     <section className="section" aria-labelledby="avantages">

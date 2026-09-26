@@ -42,6 +42,7 @@ export const PHOTOS: Record<string, { w: number; h: number; alt: string; ai?: bo
   "ai-networking": { w: 1536, h: 1024, alt: "Des professionnels échangent leurs cartes lors d'une soirée networking dans un restaurant", ai: true },
   "ai-entretien": { w: 1536, h: 1024, alt: "Une jeune femme souriante au téléphone chez elle, près d'une fenêtre parisienne", ai: true },
   "ai-echange-code": { w: 1536, h: 1024, alt: "À table, une participante scanne avec son téléphone le code affiché sur le téléphone d'un participant", ai: true },
+  "ai-restaurateur": { w: 1024, h: 1536, alt: "Un restaurateur souriant, bras croisés, devant le comptoir et les tables dressées de son restaurant", ai: true },
   "ai-apres-soiree": { w: 1536, h: 1024, alt: "Le lendemain, un homme sourit en lisant un message sur son téléphone à une terrasse de café", ai: true },
   "friends-duo": { w: 1600, h: 1067, alt: "Deux amies souriantes dans un parc" },
   "portrait-woman": { w: 1600, h: 2400, alt: "Une jeune femme dans une rue de Paris" },
