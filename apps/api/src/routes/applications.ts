@@ -46,21 +46,52 @@ const networkingAnswersSchema = z.object({
 //   /applications/:id/networking-answers).
 // Dans les deux cas, aucune place n'est retenue ici : la candidature autorise seulement à tenter le
 // paiement via POST /applications/:id/payment-intent, qui pose le verrou technique court.
+// Conditions communes à une inscription et à une entrée directe en liste d'attente (v3 §4.2) : les
+// mêmes règles s'appliquent dans les deux cas, jamais un raccourci qui contournerait l'une d'elles.
+async function assertCanJoin(userId: string, eventId: string) {
+  // Un compte restaurateur (candidature en cours ou déjà approuvée) n'a jamais le droit de participer
+  // aux événements en tant que participant, quel que soit le statut de sa fiche Restaurant.
+  if (await prisma.restaurant.findUnique({ where: { ownerId: userId } })) throw httpError(403, "Les comptes restaurateurs ne peuvent pas participer aux événements");
+  // Numéro vérifié une seule fois par SMS avant la première inscription (connexion Google/e-mail).
+  await assertPhoneVerified(userId);
+  const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId }, include: { priceTiers: true } });
+  const requiresScreening = eventRequiresScreening(event);
+  const profile = await prisma.profile.findUnique({ where: { userId } });
+  if (!profile?.profileCompleted) throw httpError(409, "Complétez votre profil avant de vous inscrire");
+  // Profils complétés avant l'obligation de date de naissance : bloqués ici jusqu'à mise à jour.
+  if (!isAdult(profile.birthDate)) throw httpError(409, ADULT_ONLY_ERROR);
+  if (requiresScreening && !profile.validatedAt) throw httpError(409, "Votre profil doit d’abord être validé lors d’un entretien avant de vous inscrire à un événement de ce type");
+  const quotas = await prisma.eventQuota.findMany({ where: { eventId } });
+  // La catégorie est nécessaire pour les quotas (speed dating) ET pour résoudre un tarif différencié
+  // éventuel (networking inclus) — sans jamais transformer ce tarif en quota implicite pour autant.
+  // Un tarif différencié configuré mais inactif (ENABLE_GENDER_PRICING=false, §6) ne doit rien exiger.
+  const needsCategory = quotas.length > 0 || (getSetting("ENABLE_GENDER_PRICING") && event.priceTiers.length > 0);
+  if (needsCategory && !profile.quotaCategory) throw httpError(409, "Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement");
+  const quotaCategory: QuotaCategory | null = needsCategory ? profile.quotaCategory : null;
+  // Complet pour ce participant, vérifié en base au moment de la demande (même décompte que
+  // claimReservation, qui reste la seule attribution atomique d'une place).
+  const quota = quotaCategory ? quotas.find(q => q.category === quotaCategory) : null;
+  const full = quotas.length > 0
+    ? !quota || quota.heldCount >= quota.capacity
+    : (await prisma.reservation.count({ where: { eventId, cancelledAt: null } })) >= event.capacity;
+  return { event, requiresScreening, quotaCategory, full };
+}
+
+// Entrée en liste d'attente d'une candidature (position à la suite), avec la notification associée.
+async function addToWaitlist(userId: string, application: { id: string; eventId: string | null; quotaCategory: QuotaCategory | null }, eventTitle: string) {
+  const eventId = application.eventId!;
+  const existing = await prisma.waitlistEntry.findUnique({ where: { eventId_userId: { eventId, userId } } });
+  if (existing) return existing;
+  const entry = await prisma.waitlistEntry.create({ data: { eventId, userId, applicationId: application.id, quotaCategory: application.quotaCategory, position: (await prisma.waitlistEntry.count({ where: { eventId } })) + 1 } });
+  await audit(userId, "JOIN_WAITLIST", "WaitlistEntry", entry.id);
+  await notify(userId, "Liste d’attente", `Vous êtes sur la liste d’attente de « ${eventTitle} ». Dès qu’une place se libère, vous êtes prévenu(e) : aucun paiement n’est demandé d’ici là.`, links.reservation(application.id));
+  return entry;
+}
+
 app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const userId = currentId(request);
-  // Un compte restaurateur (candidature en cours ou déjà approuvée) n'a jamais le droit de participer
-  // aux événements en tant que participant, quel que soit le statut de sa fiche Restaurant.
-  if (await prisma.restaurant.findUnique({ where: { ownerId: userId } })) return reply.code(403).send({ error: "Les comptes restaurateurs ne peuvent pas participer aux événements" });
-  // Numéro vérifié une seule fois par SMS avant la première inscription (connexion Google/e-mail).
-  await assertPhoneVerified(userId);
-  const event = await prisma.event.findUniqueOrThrow({ where: { id }, include: { priceTiers: true } });
-  const requiresScreening = eventRequiresScreening(event);
-  const profile = await prisma.profile.findUnique({ where: { userId } });
-  if (!profile?.profileCompleted) return reply.code(409).send({ error: "Complétez votre profil avant de vous inscrire" });
-  // Profils complétés avant l'obligation de date de naissance : bloqués ici jusqu'à mise à jour.
-  if (!isAdult(profile.birthDate)) return reply.code(409).send({ error: ADULT_ONLY_ERROR });
-  if (requiresScreening && !profile.validatedAt) return reply.code(409).send({ error: "Votre profil doit d’abord être validé lors d’un entretien avant de vous inscrire à un événement de ce type" });
+  const { event, requiresScreening, quotaCategory, full } = await assertCanJoin(userId, id);
   const existing = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
   if (existing) return reply.code(409).send({ error: "Vous êtes déjà inscrit(e) à cet événement", application: existing });
   const input = requiresScreening
@@ -69,16 +100,6 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
   // Partage attribué (§12) : le code vient de l'URL au moment de la visite, jamais recalculé après
   // coup ; un code inconnu ou expiré n'échoue jamais la candidature, il est simplement ignoré.
   const shareLink = input.shareCode ? await prisma.shareLink.findUnique({ where: { code: input.shareCode } }) : null;
-  const quotas = await prisma.eventQuota.findMany({ where: { eventId: id } });
-  // La catégorie est nécessaire pour les quotas (speed dating) ET pour résoudre un tarif différencié
-  // éventuel (networking inclus) — sans jamais transformer ce tarif en quota implicite pour autant.
-  // Un tarif différencié configuré mais inactif (ENABLE_GENDER_PRICING=false, §6) ne doit rien exiger.
-  const needsCategory = quotas.length > 0 || (getSetting("ENABLE_GENDER_PRICING") && event.priceTiers.length > 0);
-  let quotaCategory: QuotaCategory | null = null;
-  if (needsCategory) {
-    if (!profile.quotaCategory) return reply.code(409).send({ error: "Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement" });
-    quotaCategory = profile.quotaCategory;
-  }
   const application = await prisma.application.create({
     data: {
       eventId: id, userId, quotaCategory, status: ApplicationStatus.PAYMENT_PENDING,
@@ -89,6 +110,12 @@ app.post("/events/:id/apply", { preHandler: auth }, async (request, reply) => {
     }
   });
   await audit(userId, "CREATE_APPLICATION", "Application", application.id);
+  // v3 §4.2 : événement complet pour ce participant → jamais de passage au paiement, entrée directe en
+  // liste d'attente (le site propose alors « Rejoindre la liste d'attente » sans même ce détour).
+  if (full) {
+    const waitlistEntry = await addToWaitlist(userId, application, event.title);
+    return reply.code(201).send({ application: { ...application, amountCents: applicationAmountCents(event, application.quotaCategory) }, waitlisted: true, waitlistEntry });
+  }
   await notify(userId, "Inscription enregistrée", `Vous pouvez maintenant régler votre billet pour « ${event.title} » (${(resolvePriceCents(event, quotaCategory, getSetting("ENABLE_GENDER_PRICING")) / 100).toFixed(2)} €). La place n’est confirmée qu’une fois le paiement réussi.`, links.reservation(application.id));
   return reply.code(201).send({ application: { ...application, amountCents: applicationAmountCents(event, application.quotaCategory) } });
 });
@@ -252,16 +279,25 @@ app.post("/me/applications/:id/cancel", { preHandler: auth }, async (request, re
   return reply.send({ cancelled: true, refunded, refundedAmountCents, eligible });
 });
 
+// Liste d'attente (v3 §4.2) : sur un événement complet, un participant éligible (profil déjà validé
+// pour le speed dating : aucun nouvel entretien) rejoint la liste d'attente en un clic, sans paiement
+// ni questionnaire. Sans candidature existante, elle est créée ici, avec les mêmes conditions qu'une
+// inscription et seulement si l'événement est réellement complet au moment de la demande — sinon la
+// place se prend par l'inscription normale. Aucune place n'est retenue et aucun paiement n'est créé.
 app.post("/events/:id/waitlist", { preHandler: auth }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params); const userId = currentId(request);
   const existingEntry = await prisma.waitlistEntry.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
   if (existingEntry) return existingEntry;
-  const application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
-  if (!application) return reply.code(409).send({ error: "Candidatez d’abord à cet événement avant de rejoindre la liste d’attente" });
-  const position = await prisma.waitlistEntry.count({ where: { eventId: id } }) + 1;
-  const entry = await prisma.waitlistEntry.create({ data: { eventId: id, userId, applicationId: application.id, quotaCategory: application.quotaCategory, position } });
-  await audit(userId, "JOIN_WAITLIST", "WaitlistEntry", entry.id);
-  return reply.code(201).send(entry);
+  let application = await prisma.application.findUnique({ where: { eventId_userId: { eventId: id, userId } } });
+  if (application && [ApplicationStatus.CONFIRMED, ApplicationStatus.REFUSED, ApplicationStatus.CANCELLED].some(s => s === application!.status)) return reply.code(409).send({ error: "Cette inscription ne peut plus rejoindre la liste d’attente" });
+  const { event, quotaCategory, full } = await assertCanJoin(userId, id);
+  if (!full) return reply.code(409).send({ error: "Des places sont disponibles : inscrivez-vous directement." });
+  if (!application) {
+    application = await prisma.application.create({ data: { eventId: id, userId, quotaCategory, status: ApplicationStatus.PAYMENT_PENDING } });
+    await audit(userId, "CREATE_APPLICATION", "Application", application.id);
+  }
+  const entry = await addToWaitlist(userId, application, event.title);
+  return reply.code(201).send({ ...entry, application });
 });
 
 app.get("/events/:id/waitlist/me", { preHandler: auth }, async (request, reply) => {

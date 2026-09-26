@@ -1045,3 +1045,58 @@ describe("signalement et confidentialité entre participants", () => {
     expect((await api(`/profiles/code/${await shareCodeOf(a.userId)}`, {}, b.token)).status).toBe(403);
   });
 });
+
+// v3 §4.2 : un événement complet ne mène jamais au paiement — le participant rejoint la liste d'attente
+// en un clic, sans paiement ni verrou de place ; la capacité est vérifiée en base au moment de la demande.
+describe("événement complet : liste d’attente directe, aucun paiement (v3 §4.2)", () => {
+  it("inscrit en liste d’attente sans place retenue ni paiement, et refuse la liste d’attente s’il reste des places", async () => {
+    const base = Date.now() + 240 * 86_400_000;
+    const fullEvent = await prisma.event.create({ data: {
+      slug: `test-complet-attente-${Date.now()}`, title: "Test complet → liste d’attente", category: "Networking", flow: "DIRECT",
+      description: "Événement de test complet.", startsAt: new Date(base), endsAt: new Date(base + 3 * 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 1, priceCents: 2500, status: "PUBLISHED"
+    } });
+    const openEvent = await prisma.event.create({ data: {
+      slug: `test-places-libres-${Date.now()}`, title: "Test places libres", category: "Networking", flow: "DIRECT",
+      description: "Événement de test avec des places.", startsAt: new Date(base + 86_400_000), endsAt: new Date(base + 86_400_000 + 3 * 3_600_000),
+      district: "Paris", address: "1 rue de test", zone: "Paris intra-muros", capacity: 10, priceCents: 2500, status: "PUBLISHED"
+    } });
+    createdEventIds.push(fullEvent.id, openEvent.id);
+    // La seule place est prise par un autre participant.
+    const holder = await directParticipant("ComplétDétenteur");
+    createdUserIds.push(holder.userId);
+    const holderApp = await prisma.application.create({ data: { eventId: fullEvent.id, userId: holder.userId, status: "CONFIRMED" } });
+    await prisma.reservation.create({ data: { eventId: fullEvent.id, userId: holder.userId, applicationId: holderApp.id, expiresAt: new Date(base) } });
+
+    // Entrée directe en liste d'attente, sans candidature préalable.
+    const waiter = await directParticipant("ComplétAttente");
+    createdUserIds.push(waiter.userId);
+    const join = await api(`/events/${fullEvent.id}/waitlist`, { method: "POST" }, waiter.token);
+    expect(join.status).toBe(201);
+    const waiterApp = await prisma.application.findUniqueOrThrow({ where: { eventId_userId: { eventId: fullEvent.id, userId: waiter.userId } }, include: { reservation: true, waitlistEntry: true } });
+    expect(waiterApp.waitlistEntry).not.toBeNull();
+    expect(waiterApp.reservation).toBeNull();
+
+    // Tenter quand même de payer : refusé, aucun verrou ni paiement créé.
+    const pay = await api(`/applications/${waiterApp.id}/payment-intent`, { method: "POST", body: JSON.stringify({ acceptCgv: true }) }, waiter.token);
+    // 409 « complet » avec Stripe configuré (CI) ; 503 sans clé Stripe (poste local) : dans les deux cas,
+    // rien n'est créé.
+    expect([409, 503]).toContain(pay.status);
+    if (pay.status === 409) expect((pay.body as any).waitlisted).toBe(true);
+    expect(await prisma.reservation.count({ where: { applicationId: waiterApp.id, cancelledAt: null } })).toBe(0);
+    expect(await prisma.payment.count({ where: { reservation: { applicationId: waiterApp.id } } })).toBe(0);
+
+    // Une inscription « normale » sur l'événement complet aboutit aussi en liste d'attente.
+    const late = await directParticipant("ComplétInscription");
+    createdUserIds.push(late.userId);
+    const apply = await applyToEvent(fullEvent.id, late.token, {});
+    expect(apply.status).toBe(201);
+    expect((apply.body as any).waitlisted).toBe(true);
+    expect(await prisma.waitlistEntry.count({ where: { eventId: fullEvent.id } })).toBe(2);
+
+    // Il reste des places : pas de liste d'attente, l'inscription normale s'applique.
+    const early = await api(`/events/${openEvent.id}/waitlist`, { method: "POST" }, waiter.token);
+    expect(early.status).toBe(409);
+    expect(await prisma.application.count({ where: { eventId: openEvent.id, userId: waiter.userId } })).toBe(0);
+  }, 30_000);
+});
