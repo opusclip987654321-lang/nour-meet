@@ -1,7 +1,7 @@
 import { EVENT_VIEWER_STATUS_LABEL } from "@nour/shared";
 import type { EventViewerStatus, PublicEvent } from "@nour/shared";
-import { ArrowRight, BadgeCheck, CalendarDays, CircleCheck, Heart, Hourglass, MapPin, Share2, Users } from "lucide-react";
-import { ReactNode, useState } from "react";
+import { ArrowRight, BadgeCheck, CalendarDays, CircleCheck, Heart, Hourglass, Mail, MapPin, Share2, Users } from "lucide-react";
+import { FormEvent, ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
@@ -55,7 +55,32 @@ export function ShareButton({ event }: { event: PublicEvent }) {
     <button type="button" className="button secondary full" onClick={share}><Share2 size={18} aria-hidden="true"/>Inviter un ami</button>
     {copied && <p className="fine share-copied">Lien copié !</p>}
     {error && <p className="fine share-copied">{error}</p>}
+    <EmailInvite event={event}/>
   </div>;
+}
+
+// Invitation par e-mail (v3 §4.3) : un vrai e-mail Nūr Meet envoyé par le serveur (logo, image, date,
+// lieu, prix, bouton « Voir l'événement »), au lieu du simple texte d'une feuille de partage. Réservé
+// aux personnes connectées, pour que le site ne serve pas de relais d'envoi anonyme.
+function EmailInvite({ event }: { event: PublicEvent }) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState(""), [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false), [result, setResult] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  if (!user) return <p className="fine share-login"><Link className="text-link" to="/login">Connectez-vous</Link> pour inviter un ami par e-mail.</p>;
+  if (!open) return <button type="button" className="link-button share-email-toggle" onClick={() => setOpen(true)}><Mail size={16} aria-hidden="true"/>Inviter par e-mail</button>;
+  const send = async (e: FormEvent) => {
+    e.preventDefault(); setBusy(true); setResult(null);
+    try { await api(`/events/${event.id}/invite-by-email`, { method: "POST", body: JSON.stringify({ email, note: note.trim() || undefined }) }); setResult({ kind: "success", text: `Invitation envoyée à ${email}.` }); setEmail(""); setNote(""); }
+    catch (err) { setResult({ kind: "error", text: (err as Error).message }); }
+    finally { setBusy(false); }
+  };
+  return <form className="share-email" onSubmit={send}>
+    <label>E-mail de la personne à inviter<input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="ami@exemple.fr" autoComplete="off"/></label>
+    <label>Un petit mot (facultatif)<textarea maxLength={300} value={note} onChange={e => setNote(e.target.value)} placeholder="Ça te dirait de venir avec moi ?"/></label>
+    {result && <Notice kind={result.kind}>{result.text}</Notice>}
+    <button className="button full" disabled={busy}>{busy ? "Envoi…" : "Envoyer l’invitation"}</button>
+  </form>;
 }
 
 // §15 : couleur, icône et badge distincts par type d'événement. Côté web, la couleur vient des

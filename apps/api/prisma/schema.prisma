@@ -110,6 +110,10 @@ model User {
   emailVerifiedAt  DateTime?
   // E-mail de bienvenue envoyé une seule fois, dès la première adresse vérifiée (décision v2 §4).
   welcomeEmailSentAt DateTime?
+  // Type de compte définitif (v3 §5.1) : posé au choix « Participer aux événements » ou à la soumission
+  // réelle du formulaire restaurateur. Tant qu'il est nul, le choix Participant / Restaurateur est
+  // redemandé à la connexion — jamais un compte participant créé silencieusement par défaut.
+  accountTypeChosenAt DateTime?
   displayName      String
   role             UserRole         @default(PARTICIPANT)
   suspendedAt      DateTime?

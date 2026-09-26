@@ -1100,3 +1100,42 @@ describe("événement complet : liste d’attente directe, aucun paiement (v3 §
     expect(await prisma.application.count({ where: { eventId: openEvent.id, userId: waiter.userId } })).toBe(0);
   }, 30_000);
 });
+
+// v3 §5.1 : tant que le type de compte n'est pas définitif, le choix est redemandé — un onboarding
+// restaurateur interrompu ne crée jamais un compte participant par défaut.
+describe("type de compte définitif seulement après un vrai choix (v3 §5.1)", () => {
+  it("redemande le choix après un onboarding restaurateur interrompu, puis l’enregistre", async () => {
+    const phone = testPhone();
+    await api("/auth/request-otp", { method: "POST", body: JSON.stringify({ phone }) });
+    const first = await api<{ token: string; needsAccountType: boolean }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456", displayName: "Choix Interrompu" }) });
+    expect(first.body.needsAccountType).toBe(true);
+    const me = await api<{ id: string; needsAccountType: boolean }>("/me", {}, first.body.token);
+    createdUserIds.push(me.body.id);
+    // Choisit « Restaurateur », revient en arrière sans soumettre : à la reconnexion, le choix revient.
+    await api("/auth/request-otp", { method: "POST", body: JSON.stringify({ phone }) });
+    const again = await api<{ token: string; needsAccountType: boolean }>("/auth/verify-otp", { method: "POST", body: JSON.stringify({ phone, code: "123456" }) });
+    expect(again.body.needsAccountType).toBe(true);
+    // Choix « Participer » : définitif.
+    expect((await api("/me/account-type", { method: "POST", body: JSON.stringify({ type: "PARTICIPANT" }) }, again.body.token)).status).toBe(200);
+    expect((await api<{ needsAccountType: boolean }>("/me", {}, again.body.token)).body.needsAccountType).toBe(false);
+  }, 20_000);
+});
+
+// v3 §4.3 : invitation par e-mail — un vrai e-mail avec l'URL absolue de la fiche, borné contre l'abus.
+describe("invitation à un événement par e-mail (v3 §4.3)", () => {
+  it("envoie un e-mail avec le lien absolu de la fiche, refuse un doublon et sa propre adresse", async () => {
+    const event = await prisma.event.findFirstOrThrow({ where: { status: "PUBLISHED", startsAt: { gt: new Date() } } });
+    const sender = await directParticipant("Inviteur");
+    createdUserIds.push(sender.userId);
+    const to = `invite-${Date.now()}@test.nourmeet.local`;
+    const sent = await api(`/events/${event.id}/invite-by-email`, { method: "POST", body: JSON.stringify({ email: to, note: "Viens avec moi https://exemple.com" }) }, sender.token);
+    expect(sent.status).toBe(201);
+    const message = await prisma.outboxMessage.findFirstOrThrow({ where: { recipient: to } });
+    expect(message.body).toMatch(new RegExp(`https?://[^\\s]+/events/${event.slug}\\?ref=`));
+    expect(message.body).not.toContain("exemple.com");
+    expect((await api(`/events/${event.id}/invite-by-email`, { method: "POST", body: JSON.stringify({ email: to }) }, sender.token)).status).toBe(409);
+    await prisma.outboxMessage.deleteMany({ where: { recipient: to } });
+    const image = await fetch(`${process.env.API_URL ?? "http://localhost:4000"}/events/${event.slug}/email-image.jpg`);
+    expect(image.headers.get("content-type")).toBe("image/jpeg");
+  }, 20_000);
+});

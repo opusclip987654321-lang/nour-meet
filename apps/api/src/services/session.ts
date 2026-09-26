@@ -12,13 +12,18 @@ export const signSession = (user: Pick<User, "id" | "role">) => app.jwt.sign({ s
 
 // Réponse commune à toutes les méthodes de connexion (SMS, e-mail, Google) : même forme, pour que
 // le site et l'application traitent la connexion de la même façon quel que soit le moyen choisi.
+// Type de compte encore indécis (v3 §5.1) : aucun choix « Participer » enregistré et aucun formulaire
+// restaurateur soumis. Le choix Participant / Restaurateur est alors redemandé, à chaque connexion.
+export const needsAccountType = (user: { role: string; accountTypeChosenAt: Date | null }, hasRestaurant: boolean) =>
+  user.role === "PARTICIPANT" && !user.accountTypeChosenAt && !hasRestaurant;
+
 export const loginResponse = async (userId: string, isNewUser: boolean) => {
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { profile: true } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { profile: true, ownedRestaurant: { select: { id: true } } } });
   if (user.suspendedAt) throw httpError(403, "Compte suspendu");
   if (user.deletedAt) throw httpError(403, "Compte supprimé");
   // Jamais bloquant pour la connexion : toute erreur est absorbée (voir services/welcome.ts).
   await sendWelcomeEmailOnce(user.id).catch(err => app.log.warn({ err }, "E-mail de bienvenue non envoyé"));
-  return { token: signSession(user), isNewUser, user: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profileCompleted: user.profile?.profileCompleted ?? false } };
+  return { token: signSession(user), isNewUser, needsAccountType: needsAccountType(user, !!user.ownedRestaurant), user: { id: user.id, phone: user.phone, email: user.email, displayName: user.displayName, role: user.role, profileCompleted: user.profile?.profileCompleted ?? false } };
 };
 
 // Numéro vérifié une seule fois, avant la première inscription à une soirée (entretien compris) :

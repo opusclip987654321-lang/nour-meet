@@ -1,26 +1,27 @@
 export interface EmailProvider {
   readonly mode: "mock" | "resend";
-  send(to: string, subject: string, body: string): Promise<void>;
+  // html : version mise en forme (services/email-layout.ts), envoyée avec la version texte.
+  send(to: string, subject: string, body: string, html?: string): Promise<void>;
 }
 
 // Aucun envoi réel : reflète honnêtement qu'aucun fournisseur d'e-mail n'est configuré.
 export class MockEmailProvider implements EmailProvider {
   readonly mode = "mock" as const;
-  async send(_to: string, _subject: string, _body: string): Promise<void> {}
+  async send(_to: string, _subject: string, _body: string, _html?: string): Promise<void> {}
 }
 
 export class ResendEmailProvider implements EmailProvider {
   readonly mode = "resend" as const;
   constructor(private readonly apiKey: string, private readonly from: string, private readonly http: typeof fetch = fetch) {}
 
-  async send(to: string, subject: string, body: string): Promise<void> {
+  async send(to: string, subject: string, body: string, html?: string): Promise<void> {
     // §21 : délai borné — l'envoi a lieu pendant une requête utilisateur, qui ne doit jamais rester
     // suspendue à Resend ; l'échec est tracé dans l'outbox (FAILED) par l'appelant.
     const response = await this.http("https://api.resend.com/emails", {
       signal: AbortSignal.timeout(10_000),
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: this.from, to, subject, text: body })
+      body: JSON.stringify({ from: this.from, to, subject, text: body, ...(html ? { html } : {}) })
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");

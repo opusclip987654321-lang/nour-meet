@@ -44,20 +44,32 @@ const QUICK_LOGIN_GROUPS: {title:string; items:{label:string; phone:string}[]}[]
 
 // Connexion (2026-09-24) : Google ou code par e-mail, sans SMS. Le SMS reste proposé pour les comptes
 // créés avec un numéro ; ailleurs, il n'est demandé qu'une fois, avant la première réservation.
-type LoginResult = { token: string; isNewUser?: boolean; user: { role: string } };
+type LoginResult = { token: string; isNewUser?: boolean; needsAccountType?: boolean; user: { role: string } };
+
+const authVisual=<div className="auth-visual" style={{backgroundImage:"url(/images/paris-street-1600.webp)"}}><blockquote>Une belle rencontre commence par un cadre de confiance.</blockquote></div>;
+
+// Choix du type de compte (§5, puis v3 §5.1) : redemandé à chaque connexion tant qu'il n'est pas
+// définitif. « Participer » est enregistré aussitôt ; « Restaurateur » ne le devient qu'à la soumission
+// réelle du formulaire restaurateur — revenir en arrière avant ne crée jamais un compte participant.
+export function AccountTypeChoice() {
+  useSeo({title:"Bienvenue",noindex:true});
+  const {refresh}=useAuth(); const navigate=useNavigate();
+  const [busy,setBusy]=useState(false),[error,setError]=useState("");
+  const participate=async()=>{setBusy(true);setError("");try{await api("/me/account-type",{method:"POST",body:JSON.stringify({type:"PARTICIPANT"})});await refresh();navigate("/dashboard")}catch(err){setError((err as Error).message)}finally{setBusy(false)}};
+  return <Layout><section className="auth-page">{authVisual}<div className="auth-form"><h1>Que souhaitez-vous faire sur Nūr Meet ?</h1><p>Ce choix détermine votre espace. Côté restaurateur, il ne devient définitif qu’une fois votre établissement présenté.</p>{error&&<Notice kind="error">{error}</Notice>}<div className="role-choice"><button type="button" className="button full" disabled={busy} onClick={participate}>{busy?"Patientez…":"Participer aux événements"}</button><button type="button" className="button secondary full" disabled={busy} onClick={()=>navigate("/restaurant")}>Je suis restaurateur</button></div></div></section></Layout>;
+}
 
 export function Login() {
   useSeo({title:"Connexion",description:"Connectez-vous à Nūr Meet avec Google ou votre adresse e-mail.",path:"/login",noindex:true});
   const [method,setMethod]=useState<"email"|"sms">("email");
-  const [identifier,setIdentifier]=useState(""),[code,setCode]=useState(""),[step,setStep]=useState<1|2|3>(1),[error,setError]=useState(""),[devCode,setDevCode]=useState<string|null>(null),[busy,setBusy]=useState(false); const {refresh}=useAuth(); const navigate=useNavigate();
+  const [identifier,setIdentifier]=useState(""),[code,setCode]=useState(""),[step,setStep]=useState<1|2>(1),[error,setError]=useState(""),[devCode,setDevCode]=useState<string|null>(null),[busy,setBusy]=useState(false); const {refresh}=useAuth(); const navigate=useNavigate();
   const [smsMode,setSmsMode]=useState<string|null>(null); const [quickLoginBusy,setQuickLoginBusy]=useState<string|null>(null);
   useEffect(()=>{api<{smsMode:string}>("/health").then(r=>setSmsMode(r.smsMode)).catch(()=>{})},[]);
-  // isNewUser (renvoyé une seule fois, à la création du compte) déclenche l'écran de choix
-  // participant/restaurateur (§5) avant toute navigation ; un compte déjà existant navigue tout de
-  // suite comme avant, sans jamais revoir cet écran.
+  // Type de compte pas encore définitif (v3 §5.1, y compris un onboarding restaurateur interrompu) :
+  // écran de choix avant toute navigation ; un compte au type connu navigue tout de suite.
   const afterVerify=async(result:LoginResult)=>{
     setToken(result.token);await refresh();
-    if(result.isNewUser){setStep(3);return}
+    if(result.needsAccountType){navigate("/bienvenue");return}
     navigate(homeFor(result.user));
   };
   const switchMethod=(m:"email"|"sms")=>{setMethod(m);setStep(1);setIdentifier("");setCode("");setError("");setDevCode(null)};
@@ -74,8 +86,7 @@ export function Login() {
   const google=async(credential:string)=>{setError("");try{await afterVerify(await api<LoginResult>("/auth/google",{method:"POST",body:JSON.stringify({credential})}))}catch(err){setError((err as Error).message)}};
   const quickLogin=async(label:string,quickPhone:string)=>{setError("");setQuickLoginBusy(label);try{await api("/auth/request-otp",{method:"POST",body:JSON.stringify({phone:quickPhone})});await afterVerify(await api<LoginResult>("/auth/verify-otp",{method:"POST",body:JSON.stringify({phone:quickPhone,code:"123456"})}))}catch(err){setError((err as Error).message)}finally{setQuickLoginBusy(null)}};
   const quickLoginNew=()=>quickLogin("Nouveau compte","+336"+Math.floor(10_000_000+Math.random()*89_999_999));
-  const visual=<div className="auth-visual" style={{backgroundImage:"url(/images/paris-street-1600.webp)"}}><blockquote>Une belle rencontre commence par un cadre de confiance.</blockquote></div>;
-  if(step===3)return <Layout><section className="auth-page">{visual}<div className="auth-form"><h1>Que souhaitez-vous faire sur Nūr Meet ?</h1><p>Ce choix détermine votre espace ; il ne peut être fait qu’une seule fois, à la création du compte.</p><div className="role-choice"><button type="button" className="button full" onClick={()=>navigate("/dashboard")}>Participer aux événements</button><button type="button" className="button secondary full" onClick={()=>navigate("/restaurant")}>Je suis restaurateur</button></div></div></section></Layout>;
+  const visual=authVisual;
   return <Layout><section className="auth-page">{visual}<form className="auth-form" onSubmit={submit}>
     <h1>{step===1?"Bienvenue sur Nūr Meet.":"Entrez le code reçu."}</h1>
     <p>{step===1?"Aucun mot de passe à mémoriser.":method==="email"?`Code envoyé à ${identifier}. Pensez à vérifier vos courriers indésirables.`:`Code envoyé au ${identifier}`}</p>
