@@ -16,6 +16,12 @@
 	handle @seo {
 		reverse_proxy api:4000
 	}
+	# Agent vidéo : fichiers publics téléchargés par Instagram/Facebook lors de la publication.
+	handle_path /va/* {
+		root * /srv/va
+		file_server
+	}
+
 	handle {
 		reverse_proxy web:80
 	}
