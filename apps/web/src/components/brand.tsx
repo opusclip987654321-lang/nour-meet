@@ -1,3 +1,4 @@
+import { SOCIAL_LINKS } from "@nour/shared";
 import { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -12,6 +13,22 @@ export function BrandMark({ size = 32, title }: { size?: number; title?: string 
       <path d="M10.2 14.2v5.6a5.8 5.8 0 0 0 11.6 0v-5.6" fill="none" stroke="#fff" strokeWidth="3.4" strokeLinecap="round" />
     </svg>
   );
+}
+
+// Icônes Instagram et Facebook : tracés des anciennes icônes Lucide (licence ISC), retirées de
+// lucide-react 1.x avec toutes les marques — même grille 24 px et même trait que les autres icônes.
+export function InstagramIcon({ size = 20 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>;
+}
+export function FacebookIcon({ size = 20 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>;
+}
+// Liens vers les comptes officiels (pied de page, accueil) : nouvel onglet, libellé explicite.
+export function SocialLinks({ className, showHandles = false }: { className?: string; showHandles?: boolean }) {
+  return <ul className={`social-links${className ? ` ${className}` : ""}`}>
+    <li><a href={SOCIAL_LINKS.instagram.url} target="_blank" rel="noopener noreferrer" aria-label={`Nūr Meet sur Instagram (${SOCIAL_LINKS.instagram.handle})`}><InstagramIcon/><span>{showHandles ? SOCIAL_LINKS.instagram.handle : "Instagram"}</span></a></li>
+    <li><a href={SOCIAL_LINKS.facebook.url} target="_blank" rel="noopener noreferrer" aria-label="Nūr Meet sur Facebook"><FacebookIcon/><span>Facebook</span></a></li>
+  </ul>;
 }
 
 export function Wordmark({ className }: { className?: string }) {

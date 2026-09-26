@@ -186,6 +186,12 @@ export const LEGAL_VERSIONS = { CGU: "2026-09-25", CGV: "2026-09-25.2" } as cons
 // Service réservé aux personnes majeures (CGU §2) : l'âge est calculé en années révolues, à la
 // date du jour, jamais approximé en divisant une durée par 365,25 jours.
 export const MINIMUM_AGE = 18;
+
+// Comptes officiels Nūr Meet sur les réseaux sociaux, mis en avant sur le site et dans les e-mails.
+export const SOCIAL_LINKS = {
+  instagram: { label: "Instagram", handle: "@nour_meetup", url: "https://www.instagram.com/nour_meetup/" },
+  facebook: { label: "Facebook", handle: "Nūr Meet", url: "https://www.facebook.com/profile.php?id=61594690745588" }
+} as const;
 export const ageInYears = (birthDate: Date | string, now: Date = new Date()): number => {
   const birth = new Date(birthDate);
   const age = now.getUTCFullYear() - birth.getUTCFullYear();

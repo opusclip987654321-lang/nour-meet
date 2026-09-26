@@ -1357,3 +1357,171 @@ img.avatar {
     justify-content: flex-start;
   }
 }
+
+/* ---------- Autocomplétion (v3 §6.1) ---------- */
+.autocomplete {
+  position: relative;
+  display: block;
+}
+
+.autocomplete-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  margin: 0;
+  padding: var(--s-1);
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.autocomplete-list li {
+  display: grid;
+  gap: 2px;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-weight: 400;
+}
+
+.autocomplete-list li small {
+  color: var(--ink-3);
+}
+
+.autocomplete-list li.active,
+.autocomplete-list li:hover {
+  background: var(--surface-2);
+}
+
+/* ---------- Photos ordonnées (v3 §6.2) ---------- */
+.photo-picker {
+  display: grid;
+  gap: var(--s-2);
+  justify-items: start;
+}
+
+.photo-picker-title {
+  font-size: var(--fs-sm);
+}
+
+.photo-picker .photo-order {
+  justify-self: stretch;
+}
+
+.photo-order {
+  list-style: none;
+  margin: var(--s-2) 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--s-3);
+}
+
+.photo-order li {
+  position: relative;
+  display: grid;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.photo-order img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+}
+
+.photo-main-tag {
+  position: absolute;
+  top: var(--s-2);
+  left: var(--s-2);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--saffron);
+  color: var(--on-saffron);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+
+.photo-order-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--s-1);
+}
+
+/* ---------- Réseaux sociaux ---------- */
+.social-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.social-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 44px;
+  padding: 0 var(--s-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.social-links a:hover {
+  border-color: var(--saffron);
+  color: var(--saffron-ink);
+}
+
+.social-links.on-night a {
+  border-color: var(--on-night-line);
+  color: var(--on-night);
+}
+
+.social-links.on-night a:hover {
+  border-color: var(--saffron);
+  color: var(--saffron);
+}
+
+.social-links.large a {
+  min-height: 52px;
+  padding: 0 var(--s-5);
+  background: var(--surface);
+}
+
+.footer-follow {
+  margin: var(--s-4) 0 var(--s-2);
+  color: var(--on-night);
+  font-weight: 700;
+}
+
+.social-band-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-5);
+  padding: var(--s-6);
+  border-radius: var(--r-lg);
+  background: var(--saffron-soft);
+}
+
+.social-band-inner h2 {
+  margin: 0 0 var(--s-2);
+}
+
+.social-band-inner p {
+  margin: 0;
+  color: var(--ink-2);
+}

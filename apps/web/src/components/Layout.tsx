@@ -4,7 +4,7 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { homeFor } from "../lib/spaces";
-import { Logo } from "./brand";
+import { Logo, SocialLinks } from "./brand";
 import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "./ThemeToggle";
 import { CookieConsent } from "./CookieConsent";
@@ -101,6 +101,8 @@ function Footer() {
         <div>
           <Logo onNight />
           <p>Des soirées en petit comité dans des restaurants partenaires à Paris et en Île-de-France : speed dating avec sélection, networking en accès direct.</p>
+          <p className="footer-follow">Suivez-nous</p>
+          <SocialLinks className="on-night"/>
         </div>
         <nav aria-labelledby="footer-discover">
           <h2 id="footer-discover">Découvrir</h2>
