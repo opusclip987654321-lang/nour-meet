@@ -486,24 +486,54 @@ label > textarea {
   color: var(--on-night);
 }
 
+/* ---------- Champ de recherche avec loupe ---------- */
+/* Commun à tous les champs de recherche (catalogue, centres d'intérêt…) : la loupe est posée dans le
+   champ, à gauche, et le texte commence après elle — jamais de chevauchement (v3 §1.2). */
+.search-field {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.search-field svg {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-3);
+  pointer-events: none;
+}
+
+.search-field input {
+  padding-left: 44px;
+}
+
 /* ---------- Avatars ---------- */
 .avatar {
   width: 44px;
   height: 44px;
   flex: 0 0 auto;
-  display: grid;
-  place-items: center;
   border-radius: 50%;
   background: var(--night);
+}
+
+/* Initiales parfaitement centrées, quel que soit le conteneur (v3 §1.1) : double classe pour l'emporter
+   sur les règles de conteneur (« .x > div », « .x span ») ; line-height 1, sinon les métriques de la
+   police d'affichage décalent le texte vers le bas (décision v2 §1.1). */
+.avatar.avatar-initials {
+  display: inline-grid;
+  place-items: center;
+  justify-self: auto;
+  margin: 0;
+  padding: 0;
   color: var(--on-night);
   font-family: var(--font-display);
   font-weight: 700;
   font-size: var(--fs-sm);
-  /* Initiales parfaitement centrées : sans cela, les métriques de la police d'affichage décalent
-     le texte vers le bas (décision v2 §1.1). */
   line-height: 1;
   text-align: center;
   letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 img.avatar {
@@ -514,6 +544,9 @@ img.avatar {
 .avatar.large {
   width: 80px;
   height: 80px;
+}
+
+.avatar.large.avatar-initials {
   font-size: 1.5rem;
 }
 
@@ -1019,7 +1052,6 @@ img.avatar {
   align-items: center;
   gap: 6px;
   min-height: 24px;
-  margin-left: auto;
   padding: 2px 10px;
   border-radius: var(--r-pill);
   font-size: var(--fs-xs);

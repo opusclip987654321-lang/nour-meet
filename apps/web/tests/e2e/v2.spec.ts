@@ -85,7 +85,12 @@ test.describe("entretien de validation", () => {
     await expect(page.getByText(/Entretien programmé :/)).not.toContainText(first);
 
     await page.getByRole("button", { name: "Annuler ma demande d’entretien" }).click();
-    await expect(page.getByText(/Votre demande d’entretien est annulée/)).toBeVisible();
+    // v3 §7.2 : confirmation verte de l'annulation, plus un avertissement rouge qui persiste.
+    await expect(page.getByText("Votre demande d’annulation a bien été prise en compte.")).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "Votre entretien a été annulé." })).toBeVisible();
+    await expect(page.locator(".profile-card")).toContainText("Entretien annulé");
+    await page.reload();
+    await expect(page.getByText("Votre entretien a été annulé.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Demander mon entretien" })).toBeVisible();
   });
 });

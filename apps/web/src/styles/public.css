@@ -583,6 +583,13 @@ a.next-card:hover {
   text-transform: none;
 }
 
+/* Statut du visiteur poussé à droite de la date, sur la carte seulement : appliquée partout, cette
+   marge projetait aussi le badge (et les suivants) à l'autre bout de la rangée de badges de la fiche
+   dès qu'un statut existait (v3 §4.1). */
+.event-date .viewer-badge {
+  margin-left: auto;
+}
+
 .event-date::first-letter {
   text-transform: uppercase;
 }
@@ -734,17 +741,14 @@ a.next-card:hover {
   font-size: var(--fs-sm);
 }
 
-.testimonial-avatar {
+/* Avatar partagé (components/ui.tsx), en format réduit pour les témoignages. */
+.avatar.testimonial-avatar {
   width: 40px;
   height: 40px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--night);
-  color: var(--on-night);
+}
+
+.avatar.avatar-initials.testimonial-avatar {
   font-size: var(--fs-xs);
-  font-weight: 700;
 }
 
 .faq-list {
@@ -837,23 +841,6 @@ a.next-card:hover {
   align-items: center;
   gap: var(--s-3);
   margin: 0 0 var(--s-6);
-}
-
-.filters .search-field {
-  position: relative;
-}
-
-.filters .search-field svg {
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--ink-3);
-  pointer-events: none;
-}
-
-.filters .search-field input {
-  padding-left: 44px;
 }
 
 .category-tabs {
