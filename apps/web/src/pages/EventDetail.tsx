@@ -43,7 +43,7 @@ function NetworkingFollowUp({ applicationId }: { applicationId: string }) {
   </form>;
 }
 
-function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { application: any; event: PublicEvent; onPaid: () => void; onWaitlisted: () => void }) {
+function ApplicationStatusPanel({ application, event, full, onPaid, onWaitlisted }: { application: any; event: PublicEvent; full: boolean; onPaid: () => void; onWaitlisted: () => void }) {
   const [showPayment, setShowPayment] = useState(false);
   // Montant résolu par le serveur (tarif différencié compris) : jamais le prix de base de la fiche.
   const amountCents: number = application.amountCents ?? event.priceCents;
@@ -55,6 +55,13 @@ function ApplicationStatusPanel({ application, event, onPaid, onWaitlisted }: { 
   </>;
   // La candidature autorise à tenter le paiement, elle ne garantit jamais de place à elle seule
   // (§5) : le clic sur "Payer" est ce qui pose réellement le verrou, via PaymentModal.
+  // v3 §4.2 : événement complet et aucune place retenue → jamais de bouton de paiement. La personne est
+  // (ou peut se mettre, juste en dessous) sur liste d'attente ; le paiement redevient possible dès
+  // qu'une place se libère.
+  const heldPlace = application.reservation && !application.reservation.cancelledAt && new Date(application.reservation.expiresAt) > new Date();
+  if (application.status === "PAYMENT_PENDING" && full && !heldPlace) return event.viewerStatus === "WAITLIST"
+    ? <Notice kind="info">Vous êtes sur la liste d’attente. Aucun paiement n’est demandé pour l’instant : dès qu’une place se libère, vous êtes prévenu(e), et elle revient à la première personne qui finalise son paiement.</Notice>
+    : null;
   if (application.status === "PAYMENT_PENDING") return <div className="payment-block">
     {event.viewerStatus === "WAITLIST" ? <Notice kind="info">Vous êtes sur la liste d’attente. Dès qu’une place se libère, vous êtes prévenu(e) : elle revient à la première personne qui finalise son paiement.</Notice> : <Notice kind="success">{application.reservation ? `Votre place est retenue quelques minutes (jusqu’au ${dateTime(application.reservation.expiresAt)}) : finalisez votre paiement.` : "Vous pouvez régler votre billet dès maintenant."}</Notice>}
     <button className="button full" onClick={() => setShowPayment(true)}>{amountCents === 0 ? "Confirmer ma place (gratuit)" : `Payer par carte · ${money(amountCents)}`}</button>
@@ -95,6 +102,8 @@ export function EventDetail() {
 
   // Un lien périmé ou mal copié ne doit jamais laisser la page bloquée sur « Chargement… ».
   useEffect(()=>{setNotFound(false);api<PublicEvent>(`/events/${id}`).then(setEvent).catch(()=>setNotFound(true))},[id]);
+  // Après une entrée en liste d'attente : le statut du visiteur et la disponibilité viennent du serveur.
+  const refreshEvent=()=>api<PublicEvent>(`/events/${id}`).then(setEvent).catch(()=>{});
 
   // Partage attribué (§12) : le code de la personne qui a partagé le lien est capturé une seule
   // fois, dès la visite, puis conservé pour la candidature — jamais recalculé après coup.
@@ -163,6 +172,7 @@ export function EventDetail() {
       const body=requiresScreening?{screeningAnswers:answers,shareCode:storedRef}:{shareCode:storedRef};
       const result=await api<any>(`/events/${event.id}/apply`,{method:"POST",body:JSON.stringify(body)});
       setApplication(result.application);setShowQuestionnaire(false);
+      if(result.waitlisted){setWaitlistEntry(result.waitlistEntry);await refreshEvent();setNotice({kind:"success",text:"C’est fait : l’événement étant complet, vous êtes sur la liste d’attente."});return}
       setNotice({kind:"success",text:"Candidature envoyée : vous pouvez maintenant régler votre billet."});
     }
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
@@ -170,7 +180,7 @@ export function EventDetail() {
   };
   const joinWaitlist=async()=>{
     setBusy(true);setNotice(null);
-    try{setWaitlistEntry(await api<any>(`/events/${event.id}/waitlist`,{method:"POST"}));setNotice({kind:"success",text:"Vous êtes inscrit(e) sur la liste d’attente."})}
+    try{const entry=await api<any>(`/events/${event.id}/waitlist`,{method:"POST"});setWaitlistEntry(entry);if(entry.application)setApplication(entry.application);await refreshEvent();setNotice({kind:"success",text:"C’est fait : vous êtes sur la liste d’attente."})}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}
   };
@@ -255,12 +265,12 @@ export function EventDetail() {
         <h2 id="booking-title" className="visually-hidden">Réserver</h2>
         <div className="booking-price">{event.priceTiers.length>0?<div className="quota-rows">{event.priceTiers.map(t=><div key={t.category} className="quota-row"><span>{t.category==="HOMME"?"Hommes":"Femmes"}</span><b>{money(t.amountCents)}</b></div>)}</div>:<><strong>{priceText}</strong>{!free&&<span>par personne, TTC</span>}</>}</div>
         <div className="booking-row"><span>Disponibilité</span><b>{availabilityLabel(event.availability)}</b></div>
-        {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
+        {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}{application&&<p className="fine status-line">Statut : <b>{application.status==="PAYMENT_PENDING"&&waitlistEntry&&bucketFull?"Liste d’attente":APPLICATION_STATUS_LABEL[application.status]??application.status}</b></p>}
     {altOffers.map(altOffer=><AltOfferCard key={altOffer.id} offer={altOffer} busy={busy} onRespond={accept=>respondAltOffer(altOffer.id,accept)}/>)}
     {!user?<Link className="button full" to="/login">Se connecter pour vous inscrire</Link>
     :loadingApplication?<div className="calendar-state"><div className="spinner small"/><span>Chargement…</span></div>
     :application?<>
-      <ApplicationStatusPanel application={application} event={event} onPaid={refreshApplication} onWaitlisted={markWaitlisted}/>
+      <ApplicationStatusPanel application={application} event={event} full={bucketFull} onPaid={refreshApplication} onWaitlisted={markWaitlisted}/>
       {waitlistEntry?<div className="waitlist-status"><span className="eyebrow">Liste d’attente</span><p>Position {waitlistEntry.rank??waitlistEntry.position}{waitlistEntry.offeredAt?" — une place vous a été proposée, consultez votre espace personnel":""}</p><button className="button secondary small" disabled={busy} onClick={leaveWaitlist}>Quitter la liste d’attente</button></div>
       :(categoryUnknown?<Notice kind="error">Complétez votre catégorie dans votre profil pour rejoindre la liste d’attente.</Notice>:(bucketFull&&canCancel&&<button className="button secondary full" disabled={busy} onClick={joinWaitlist}>Rejoindre la liste d’attente</button>))}
       {canCancel&&<button className="button danger full" disabled={busy} onClick={cancelApplication}>Annuler mon inscription</button>}
@@ -270,11 +280,12 @@ export function EventDetail() {
     :requiresScreening&&!profileValidated?<Notice kind="info"><span>Première soirée de rencontre ? Validez d’abord votre profil : un court appel avec l’équipe, une seule fois. <Link className="text-link" to="/dashboard?tab=interview">Demander mon entretien</Link> · <Link className="text-link" to="/concept#entretien">Comment ça se passe</Link></span></Notice>
     :categoryUnknown?<Notice kind="error">Complétez votre catégorie (homme/femme) dans votre profil avant de vous inscrire à cet événement.</Notice>
     :requiresScreening&&showQuestionnaire?<QuestionnaireForm requiresScreening={requiresScreening} submitting={busy} onSubmit={apply}/>
-    :<>{bucketFull&&<Notice kind="info">Cet événement est complet pour votre catégorie, mais vous pouvez tout de même vous inscrire : au moment de payer, vous serez placé(e) sur liste d’attente et, si possible, une soirée comparable vous sera proposée.</Notice>}<button className="button full" disabled={busy} onClick={()=>requiresScreening?setShowQuestionnaire(true):apply()}>{requiresScreening?"Candidater":busy?"…":"S’inscrire"}</button></>}
-    <p className="fine">{free?`La confirmation est proposée immédiatement après ${requiresScreening?"le questionnaire":"l’inscription"} ; la place n’est acquise qu’une fois confirmée.`:`Le paiement est proposé immédiatement après ${requiresScreening?"le questionnaire":"l’inscription"} ; la place n’est acquise qu’une fois le paiement confirmé.`}</p>
+    :bucketFull?<><Notice kind="info">Cet événement est complet. Rejoignez la liste d’attente : aucun paiement maintenant, vous serez prévenu(e) dès qu’une place se libère.</Notice><button className="button full" disabled={busy} onClick={joinWaitlist}>{busy?"…":"Rejoindre la liste d’attente"}</button></>
+    :<button className="button full" disabled={busy} onClick={()=>requiresScreening?setShowQuestionnaire(true):apply()}>{requiresScreening?"Candidater":busy?"…":"S’inscrire"}</button>}
+    {!bucketFull&&<p className="fine">{free?`La confirmation est proposée immédiatement après ${requiresScreening?"le questionnaire":"l’inscription"} ; la place n’est acquise qu’une fois confirmée.`:`Le paiement est proposé immédiatement après ${requiresScreening?"le questionnaire":"l’inscription"} ; la place n’est acquise qu’une fois le paiement confirmé.`}</p>}
         <ShareButton event={event}/>
       </aside>
     </div>
-    <div className="mobile-book-bar"><div><strong>{priceText}</strong><span>{availabilityLabel(event.availability)}</span></div><a className="button" href="#reserver">Réserver</a></div>
+    <div className="mobile-book-bar"><div><strong>{priceText}</strong><span>{availabilityLabel(event.availability)}</span></div><a className="button" href="#reserver">{bucketFull&&!application?"Liste d’attente":"Réserver"}</a></div>
   </div></Layout>;
 }
