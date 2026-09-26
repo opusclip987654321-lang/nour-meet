@@ -23,11 +23,12 @@ import { eventCreateData, eventCreateSchema, perksInput } from "../services/even
 app.get("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request) => {
   const token = request.user as TokenUser;
   const restaurant = await ownRestaurant(token);
-  const events = await prisma.event.findMany({ where: restaurant ? { controllerRestaurantId: restaurant.id } : undefined, include: { quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } } }, orderBy: { startsAt: "asc" } });
+  const events = await prisma.event.findMany({ where: restaurant ? { controllerRestaurantId: restaurant.id } : undefined, include: { quotas: true, priceTiers: true, photos: { orderBy: { position: "asc" } }, controllerRestaurant: { select: { id: true, name: true } }, venueRestaurant: { select: { id: true, name: true } }, _count: { select: { reservations: { where: { confirmedAt: { not: null }, cancelledAt: null } } } } }, orderBy: { startsAt: "asc" } });
   // genderPricingEnabled : un tarif homme/femme n'est proposé à la saisie que s'il sera réellement
   // appliqué (drapeau ENABLE_GENDER_PRICING) — jamais un réglage enregistré puis ignoré en silence.
   const genderPricingEnabled = getSetting("ENABLE_GENDER_PRICING");
-  return events.map(e => ({ ...e, genderPricingEnabled, imageUrl: e.imageUrl ?? defaultCategoryImage(e.category) }));
+  // soldCount : places confirmées (payées ou gratuites), pour les tableaux de suivi.
+  return events.map(({ _count, ...e }) => ({ ...e, soldCount: _count.reservations, genderPricingEnabled, imageUrl: e.imageUrl ?? defaultCategoryImage(e.category) }));
 });
 app.post("/admin/events/:id/quotas", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -116,7 +117,10 @@ app.post("/admin/events", { preHandler: roles(UserRole.ADMIN, UserRole.ORGANIZER
     status: token.role === UserRole.ADMIN && input.publish ? EventStatus.PUBLISHED : EventStatus.DRAFT
   }) });
   await audit(currentId(request), "CREATE_EVENT", "Event", event.id);
-  if (event.status === EventStatus.PUBLISHED) await retireDemoEventsIfRealOnesPublished(prisma).catch(err => request.log.error(err, "Retrait des soirées de démonstration échoué"));
+  if (event.status === EventStatus.PUBLISHED) {
+    await retireDemoEventsIfRealOnesPublished(prisma).catch(err => request.log.error(err, "Retrait des soirées de démonstration échoué"));
+    shareEventOnSocials(event, request.log);
+  }
   return event;
 });
 // Modification d'un événement déjà créé. La capacité ne peut jamais descendre sous les places déjà
@@ -248,9 +252,42 @@ app.post("/admin/events/:id/submit-for-review", { preHandler: roles(UserRole.ORG
   await audit(currentId(request), "SUBMIT_EVENT_FOR_REVIEW", "Event", id);
   return updated;
 });
+// Réseaux sociaux à la publication (v2 §14, v3 §8) : en arrière-plan — la réponse n'attend jamais
+// Instagram ou Facebook, et un échec n'annule jamais la publication sur Nūr Meet (nouvel essai possible,
+// jamais de doublon grâce à l'identifiant du post et au verrou).
+function shareEventOnSocials(event: { id: string; category: string; isDemo: boolean }, log: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void }) {
+  if (event.isDemo) return;
+  const instagram = instagramConfig, facebook = facebookConfig;
+  if (instagram) void shareEventOnInstagram(prisma, instagram, event.id, defaultCategoryImage(event.category))
+    .then(outcome => log.info({ eventId: event.id, outcome }, "Publication Instagram de l’événement"))
+    .catch(err => log.warn({ eventId: event.id, err: (err as Error).message }, "Publication Instagram de l’événement échouée"));
+  if (facebook) void shareEventOnFacebook(prisma, facebook, event.id, defaultCategoryImage(event.category))
+    .then(outcome => log.info({ eventId: event.id, outcome }, "Publication Facebook de l’événement"))
+    .catch(err => log.warn({ eventId: event.id, err: (err as Error).message }, "Publication Facebook de l’événement échouée"));
+}
+
+// Événements organisés par Nūr Meet (espace super-admin) : le super-admin publie directement ses propres
+// brouillons — ils n'ont pas à passer par la file de validation, réservée aux soirées des restaurateurs.
+app.post("/admin/events/:id/publish", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
+  const { id } = z.object({ id: z.string() }).parse(request.params);
+  const event = await prisma.event.findUniqueOrThrow({ where: { id } });
+  if (event.controllerRestaurantId) return reply.code(409).send({ error: "Une soirée de restaurateur se publie par la validation, jamais directement." });
+  if (event.status !== EventStatus.DRAFT) return reply.code(409).send({ error: "Seul un brouillon peut être publié." });
+  if (event.startsAt <= new Date()) return reply.code(409).send({ error: "La date de cet événement est déjà passée : modifiez-la avant de publier." });
+  const updated = await prisma.event.update({ where: { id }, data: { status: EventStatus.PUBLISHED, reviewedAt: new Date(), reviewNote: null } });
+  await audit(currentId(request), "APPROVE_EVENT", "Event", id, { own: true });
+  if (!event.isDemo) await retireDemoEventsIfRealOnesPublished(prisma).catch(err => request.log.error(err, "Retrait des soirées de démonstration échoué"));
+  shareEventOnSocials(event, request.log);
+  return updated;
+});
+
+// Validation d'une soirée de restaurateur (v3 §6.5) : un refus n'est jamais définitif ni muet — la soirée
+// repasse « À modifier » (brouillon avec le commentaire du super-admin), le restaurateur la corrige et la
+// renvoie sans tout recréer ; elle ne peut être publiée qu'après une nouvelle validation.
 app.post("/admin/events/:id/review-decision", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const { id } = z.object({ id: z.string() }).parse(request.params);
-  const { accept, note } = z.object({ accept: z.boolean(), note: z.string().max(1000).optional() }).parse(request.body);
+  const { accept, note } = z.object({ accept: z.boolean(), note: z.string().trim().max(1000).optional() }).parse(request.body);
+  if (!accept && (!note || note.length < 10)) return reply.code(400).send({ error: "Expliquez au restaurateur ce qu’il doit modifier (10 caractères au moins)." });
   const event = await prisma.event.findUniqueOrThrow({ where: { id }, include: { controllerRestaurant: { include: { subscription: { include: { plan: true } } } } } });
   if (event.status !== EventStatus.PENDING_REVIEW) return reply.code(409).send({ error: "Cet événement n’est pas en attente de validation" });
   // Publication d'un événement organisé commercialement par un restaurant (jamais pour un événement
@@ -272,24 +309,12 @@ app.post("/admin/events/:id/review-decision", { preHandler: roles(UserRole.ADMIN
     quotaConsumedNow = true;
   }
   const updated = await prisma.event.update({ where: { id }, data: { status: accept ? EventStatus.PUBLISHED : EventStatus.DRAFT, reviewedAt: new Date(), reviewNote: note ?? null, quotaConsumedAt: quotaConsumedNow ? new Date() : undefined } });
-  if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, accept ? "Événement publié" : "Événement renvoyé en brouillon", accept ? `« ${event.title} » est maintenant publié.` : `« ${event.title} » nécessite des modifications${note ? ` : ${note}` : "."}`, links.restaurantEvent(event.id));
+  if (event.controllerRestaurant) await notify(event.controllerRestaurant.ownerId, accept ? "Événement validé et publié" : "Événement à modifier", accept ? `« ${event.title} » est maintenant publié.` : `« ${event.title} » est à modifier avant publication : ${note}. Corrigez-le puis renvoyez-le pour validation.`, links.restaurantEvent(event.id));
   await audit(currentId(request), accept ? "APPROVE_EVENT" : "REJECT_EVENT", "Event", id, { note, quotaConsumedNow });
   // Le retrait des démonstrations ne doit jamais faire échouer une publication déjà enregistrée.
   if (accept && !event.isDemo) await retireDemoEventsIfRealOnesPublished(prisma).catch(err => request.log.error(err, "Retrait des soirées de démonstration échoué"));
-  // v2 §14 : un événement restaurateur réellement publié part sur Instagram, en arrière-plan — la
-  // réponse n'attend jamais Instagram, et un échec n'annule jamais la publication sur Nūr Meet.
-  const instagram = instagramConfig;
-  if (accept && instagram && event.controllerRestaurant && !event.isDemo) {
-    void shareEventOnInstagram(prisma, instagram, event.id, defaultCategoryImage(event.category))
-      .then(outcome => request.log.info({ eventId: event.id, outcome }, "Publication Instagram de l’événement"))
-      .catch(err => request.log.warn({ eventId: event.id, err: (err as Error).message }, "Publication Instagram de l’événement échouée"));
-  }
-  const facebook = facebookConfig;
-  if (accept && facebook && event.controllerRestaurant && !event.isDemo) {
-    void shareEventOnFacebook(prisma, facebook, event.id, defaultCategoryImage(event.category))
-      .then(outcome => request.log.info({ eventId: event.id, outcome }, "Publication Facebook de l’événement"))
-      .catch(err => request.log.warn({ eventId: event.id, err: (err as Error).message }, "Publication Facebook de l’événement échouée"));
-  }
+  // v2 §14, v3 §8 : seulement une fois validé, jamais à la création, en attente ou « À modifier ».
+  if (accept) shareEventOnSocials(event, request.log);
   return updated;
 });
 // Nouvel essai manuel après un échec (jamais une seconde publication : instagramMediaId + verrou).

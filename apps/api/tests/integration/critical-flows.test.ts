@@ -4,7 +4,7 @@
 // couverture exhaustive de tout le cahier des charges : voir le rapport de la Phase 8 pour ce qui
 // reste testé manuellement uniquement.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { addRestaurantPhoto, api, adminToken, ensureServerRunning, makeValidatedParticipant, deleteTestUsers, testPhone, prisma, signStripeWebhook, applyToEvent, payAndConfirm, SCREENING_ANSWERS_FIXTURE, NETWORKING_ANSWERS_FIXTURE } from "./helpers.js";
+import { addRestaurantPhoto, api, adminToken, organizerToken, ensureServerRunning, makeValidatedParticipant, deleteTestUsers, testPhone, prisma, signStripeWebhook, applyToEvent, payAndConfirm, SCREENING_ANSWERS_FIXTURE, NETWORKING_ANSWERS_FIXTURE } from "./helpers.js";
 
 const createdUserIds: string[] = [];
 async function tracked(displayName?: string, quotaCategory?: "HOMME" | "FEMME") {
@@ -1138,4 +1138,45 @@ describe("invitation à un événement par e-mail (v3 §4.3)", () => {
     const image = await fetch(`${process.env.API_URL ?? "http://localhost:4000"}/events/${event.slug}/email-image.jpg`);
     expect(image.headers.get("content-type")).toBe("image/jpeg");
   }, 20_000);
+});
+
+// Espace événements du super-admin (v3) et validation « À modifier » des soirées restaurateur (v3 §6.4, §6.5).
+describe("événements Nūr Meet du super-admin et cycle « À modifier » (v3)", () => {
+  const base = () => ({ category: "Networking", description: "Événement de test pour l’espace super-admin et la validation.", district: "Paris 11e", address: "1 rue de test, 75011 Paris", zone: "Paris intra-muros", capacity: 10, priceCents: 1500 });
+  const when = (days: number) => ({ startsAt: new Date(Date.now() + days * 86_400_000).toISOString(), endsAt: new Date(Date.now() + days * 86_400_000 + 3 * 3_600_000).toISOString() });
+  it("publie directement un événement Nūr Meet, jamais une soirée de restaurateur", async () => {
+    const admin = await adminToken();
+    const published = await api<any>("/admin/events", { method: "POST", body: JSON.stringify({ ...base(), ...when(260), title: "Test Nūr Meet publié", slug: `test-nour-publie-${Date.now()}`, publish: true }) }, admin);
+    expect(published.status).toBe(200);
+    createdEventIds.push(published.body.id);
+    expect(published.body.status).toBe("PUBLISHED");
+    const draft = await api<any>("/admin/events", { method: "POST", body: JSON.stringify({ ...base(), ...when(261), title: "Test Nūr Meet brouillon", slug: `test-nour-brouillon-${Date.now()}`, publish: false }) }, admin);
+    createdEventIds.push(draft.body.id);
+    expect(draft.body.status).toBe("DRAFT");
+    const publish = await api<any>(`/admin/events/${draft.body.id}/publish`, { method: "POST" }, admin);
+    expect(publish.status).toBe(200);
+    expect(publish.body.status).toBe("PUBLISHED");
+    const organizer = await organizerToken();
+    const theirs = await api<any>("/admin/events", { method: "POST", body: JSON.stringify({ ...base(), ...when(262), title: "Test soirée restaurateur", slug: `test-resto-${Date.now()}` }) }, organizer);
+    createdEventIds.push(theirs.body.id);
+    expect((await api(`/admin/events/${theirs.body.id}/publish`, { method: "POST" }, admin)).status).toBe(409);
+  }, 30_000);
+
+  it("refuse avec un commentaire obligatoire, affiche « À modifier » et accepte la resoumission", async () => {
+    const [admin, organizer] = await Promise.all([adminToken(), organizerToken()]);
+    const ev = await api<any>("/admin/events", { method: "POST", body: JSON.stringify({ ...base(), ...when(263), title: "Test à modifier", slug: `test-a-modifier-${Date.now()}` }) }, organizer);
+    createdEventIds.push(ev.body.id);
+    expect((await api(`/admin/events/${ev.body.id}/submit-for-review`, { method: "POST" }, organizer)).status).toBe(200);
+    expect((await api(`/admin/events/${ev.body.id}/review-decision`, { method: "POST", body: JSON.stringify({ accept: false }) }, admin)).status).toBe(400);
+    const refused = await api<any>(`/admin/events/${ev.body.id}/review-decision`, { method: "POST", body: JSON.stringify({ accept: false, note: "Ajoutez une photo de la salle et précisez le menu." }) }, admin);
+    expect(refused.body.status).toBe("DRAFT");
+    const validations = await api<any>("/restaurants/me/validations", {}, organizer);
+    const mine = validations.body.events.find((e: any) => e.id === ev.body.id);
+    expect(mine.reviewNote).toContain("photo de la salle");
+    expect(validations.body.restaurant.status).toBe("APPROVED");
+    // Resoumission sans rien recréer : de nouveau en attente, jamais publiée sans nouvelle validation.
+    const again = await api<any>(`/admin/events/${ev.body.id}/submit-for-review`, { method: "POST" }, organizer);
+    expect(again.body.status).toBe("PENDING_REVIEW");
+    expect(again.body.reviewNote).toBeNull();
+  }, 30_000);
 });

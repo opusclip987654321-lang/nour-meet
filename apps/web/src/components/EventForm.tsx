@@ -20,7 +20,9 @@ export const eventToForm = (ev: any): EventFormState => ({ ...emptyEventForm, ti
 export const eventFormPayload = (form: EventFormState) => ({ ...form, flow: form.flow || undefined, minAge: form.minAge ? Number(form.minAge) : undefined, maxAge: form.maxAge ? Number(form.maxAge) : undefined, minParticipants: form.minParticipants ? Number(form.minParticipants) : undefined, minParticipantsDeadline: form.minParticipantsDeadline ? new Date(form.minParticipantsDeadline).toISOString() : undefined, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString() });
 const slugify = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
-export function EventForm({ form, setForm, showFlow = false, submitting, submitLabel, onSubmit, children }: { form: EventFormState; setForm: (f: EventFormState) => void; showFlow?: boolean; submitting: boolean; submitLabel: string; onSubmit: (e: FormEvent) => void; children?: ReactNode }) {
+// locationField : champ facultatif placé juste avant le quartier et l'adresse (ex. choix d'un lieu
+// partenaire par le super-admin, qui préremplit ces deux champs).
+export function EventForm({ form, setForm, showFlow = false, submitting, submitLabel, onSubmit, children, locationField }: { form: EventFormState; setForm: (f: EventFormState) => void; showFlow?: boolean; submitting: boolean; submitLabel: string; onSubmit: (e: FormEvent) => void; children?: ReactNode; locationField?: ReactNode }) {
   return <form className="panel form-grid" onSubmit={onSubmit}>
       <label>Titre<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value,slug:form.slug?form.slug:slugify(e.target.value)})}/></label>
       <label>Identifiant (slug)<input required pattern="[a-z0-9-]+" value={form.slug} onChange={e=>setForm({...form,slug:e.target.value})}/></label>
@@ -30,6 +32,7 @@ export function EventForm({ form, setForm, showFlow = false, submitting, submitL
       <div className="time-row"><label>Âge minimum (facultatif)<input type="number" min={18} max={99} value={form.minAge} onChange={e=>setForm({...form,minAge:e.target.value})}/></label><label>Âge maximum (facultatif)<input type="number" min={18} max={99} value={form.maxAge} onChange={e=>setForm({...form,maxAge:e.target.value})}/></label></div>
       <label className="wide">Description<textarea required minLength={20} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
       <div className="time-row"><label>Début<input required type="datetime-local" value={form.startsAt} onChange={e=>setForm({...form,startsAt:e.target.value})}/></label><label>Fin<input required type="datetime-local" value={form.endsAt} onChange={e=>setForm({...form,endsAt:e.target.value})}/></label></div>
+      {locationField}
       <label>Quartier / ville<input required value={form.district} onChange={e=>setForm({...form,district:e.target.value})}/></label>
       <label>Adresse<input required value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></label>
       <div className="time-row"><label>Capacité totale<input required type="number" min={5} max={500} value={form.capacity} onChange={e=>setForm({...form,capacity:Number(e.target.value)})}/></label><label>Prix (€, TTC)<EuroInput required cents={form.priceCents} onChange={c=>setForm({...form,priceCents:c})}/></label></div>

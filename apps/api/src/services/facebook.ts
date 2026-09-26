@@ -76,7 +76,7 @@ export type FacebookEventOutcome = "PUBLISHED" | "ALREADY_PUBLISHED" | "NOT_ELIG
 export async function shareEventOnFacebook(prisma: PrismaClient, config: FacebookConfig, eventId: string, defaultImage: string): Promise<FacebookEventOutcome> {
   const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
   if (event.facebookPostId) return "ALREADY_PUBLISHED";
-  if (event.status !== "PUBLISHED" || event.isDemo || !event.controllerRestaurantId || event.startsAt <= new Date()) return "NOT_ELIGIBLE";
+  if (event.status !== "PUBLISHED" || event.isDemo || event.startsAt <= new Date()) return "NOT_ELIGIBLE";
   const claimed = await prisma.event.updateMany({ where: { ...lockWhere(eventId), status: "PUBLISHED", isDemo: false }, data: { facebookPublishingAt: new Date() } });
   if (claimed.count !== 1) return "BUSY";
   let postId: string | undefined;

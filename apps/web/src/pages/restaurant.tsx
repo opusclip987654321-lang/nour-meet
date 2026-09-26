@@ -5,9 +5,9 @@ import { useAuth } from "../auth";
 import { AdminNav } from "./admin/AdminNav";
 import { Layout } from "../components/Layout";
 import { Loading, Notice } from "../components/ui";
-import { imgUrl } from "../lib/format";
+import { dateTime, imgUrl } from "../lib/format";
 import { spacePath } from "../lib/spaces";
-import { SUBSCRIPTION_STATUS_LABEL } from "../lib/labels";
+import { RESTAURANT_VALIDATION, SUBSCRIPTION_STATUS_LABEL, eventValidation } from "../lib/labels";
 import { RestaurantSubscriptionPanel } from "./RestaurantSubscription";
 
 // Onboarding (v2 §5) : pendant l'examen de la demande, le restaurateur peut déjà préparer son premier
@@ -123,6 +123,39 @@ function RestaurantApplication() {
   </form>;
 }
 
+// Onglet « Validations » (v3 §6.4) : où en sont l'établissement et chacune de ses soirées. Une soirée
+// « À modifier » montre le commentaire de l'équipe et se corrige puis se renvoie sans être recréée (§6.5).
+function RestaurantValidations() {
+  const {user}=useAuth();
+  const [data,setData]=useState<{restaurant:any;events:any[]}|null|undefined>(undefined);
+  const [busyId,setBusyId]=useState<string|null>(null),[notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
+  const load=()=>api<{restaurant:any;events:any[]}>("/restaurants/me/validations").then(setData).catch(()=>setData(null));
+  useEffect(()=>{load()},[]);
+  const resubmit=async(id:string)=>{setBusyId(id);setNotice(null);try{await api(`/admin/events/${id}/submit-for-review`,{method:"POST"});setNotice({kind:"success",text:"Soirée renvoyée pour validation."});await load()}catch(err){setNotice({kind:"error",text:(err as Error).message})}finally{setBusyId(null)}};
+  if(data===undefined)return <div className="panel skeleton-panel" aria-hidden="true"/>;
+  if(data===null)return <Notice kind="error">Impossible de charger vos validations pour le moment.</Notice>;
+  const r=RESTAURANT_VALIDATION[data.restaurant.status]??{label:data.restaurant.status,tone:"neutral"};
+  const organizer=user?.role==="ORGANIZER";
+  return <div className="stack">
+    {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    <section className="panel" aria-labelledby="validation-restaurant">
+      <div className="panel-title"><h2 id="validation-restaurant">Mon établissement</h2><span className={`badge ${r.tone}`}>{r.label}</span></div>
+      <p className="fine left">{data.restaurant.status==="PENDING"?"L’équipe Nūr Meet examine votre fiche. Vous pouvez déjà préparer votre premier événement.":data.restaurant.status==="APPROVED"?`« ${data.restaurant.name} » est validé : vos soirées peuvent être soumises à validation.`:data.restaurant.status==="REJECTED"?`Votre demande n’a pas été retenue${data.restaurant.rejectionReason?` : ${data.restaurant.rejectionReason}`:"."}`:"Votre établissement est suspendu : contactez l’équipe Nūr Meet."}</p>
+    </section>
+    <section className="panel" aria-labelledby="validation-events">
+      <div className="panel-title"><h2 id="validation-events">Mes événements</h2><span>{data.events.length} soirée{data.events.length>1?"s":""}</span></div>
+      {data.events.length===0?<div className="empty small"><p>Aucune soirée pour le moment.</p>{organizer?<Link className="button small" to={spacePath("ORGANIZER","newEvent")}>Créer une soirée</Link>:data.restaurant.status==="PENDING"&&<Link className="button small" to="/restaurant/premier-evenement">Créer mon premier événement</Link>}</div>
+      :<ul className="validation-list">{data.events.map(ev=>{const v=eventValidation(ev);return <li key={ev.id} className="validation-item">
+        <div><b>{ev.title}</b><small>{dateTime(ev.startsAt)}{ev.submittedForReviewAt&&ev.status==="PENDING_REVIEW"?` · soumise le ${dateTime(ev.submittedForReviewAt)}`:""}</small></div>
+        <span className={`badge ${v.tone}`}>{v.label}</span>
+        {v.label==="À modifier"&&<p className="validation-note"><b>À corriger :</b> {ev.reviewNote}</p>}
+        {organizer&&ev.status==="DRAFT"&&<div className="validation-actions"><Link className="button small secondary" to={`${spacePath("ORGANIZER","events")}?highlight=${ev.id}`}>Modifier la soirée</Link><button type="button" className="button small" disabled={busyId===ev.id} onClick={()=>resubmit(ev.id)}>{busyId===ev.id?"Envoi…":v.label==="À modifier"?"Renvoyer pour validation":"Soumettre à validation"}</button></div>}
+        {!organizer&&ev.status==="DRAFT"&&data.restaurant.status==="PENDING"&&<div className="validation-actions"><Link className="button small secondary" to="/restaurant/premier-evenement?etape=evenement">Modifier mon événement</Link></div>}
+      </li>})}</ul>}
+    </section>
+  </div>;
+}
+
 // Espace dédié aux comptes restaurateurs (candidature en cours ou déjà approuvée) : plus un onglet
 // du dashboard participant (§5), car un restaurateur n'a plus le droit d'y accéder aux fonctions de
 // participation. Un compte en attente d'approbation garde par ailleurs un accès normal au reste du
@@ -149,9 +182,11 @@ export function RestaurantSpace() {
   const hasTabs=restaurant&&(restaurant.status==="PENDING"||restaurant.status==="APPROVED");
   const content=<>    {hasTabs&&<div className="tabs" role="tablist" aria-label="Sections de l’espace restaurateur">
       <button type="button" role="tab" aria-selected={tab==="establishment"} className={tab==="establishment"?"active":undefined} onClick={()=>setTab("establishment")}>Mon établissement</button>
+      <button type="button" role="tab" aria-selected={tab==="validations"} className={tab==="validations"?"active":undefined} onClick={()=>setTab("validations")}>Validations</button>
       <button type="button" role="tab" aria-selected={tab==="subscription"} className={tab==="subscription"?"active":undefined} onClick={()=>setTab("subscription")}>Abonnement</button>
     </div>}
-    {(!hasTabs||tab!=="subscription")&&<RestaurantApplication/>}
+    {hasTabs&&tab==="validations"&&<RestaurantValidations/>}
+    {(!hasTabs||(tab!=="subscription"&&tab!=="validations"))&&<RestaurantApplication/>}
     {hasTabs&&tab==="subscription"&&<RestaurantSubscriptionPanel onChanged={loadRestaurant}/>}
   </>;
   // Restaurateur approuvé : même barre latérale que le reste de son espace (tableau de bord, soirées…).
