@@ -29,3 +29,4 @@ jamais des photos d'événements Nour Meet réels.
 - `ai-entretien` — appel de validation (bloc « L'entretien de validation »)
 - `ai-echange-code` — échange de codes à table (bloc « Sur place, échangez vos codes »)
 - `ai-apres-soiree` — message reçu le lendemain (bloc « Le lendemain, la conversation continue »)
+- `ai-restaurateur` — restaurateur devant son établissement (page « Restaurateurs », 2026-09-26)
