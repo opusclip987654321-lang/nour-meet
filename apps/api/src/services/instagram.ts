@@ -3,10 +3,11 @@ import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import { sanitizeInstagramCaption } from "./blog-content.js";
 import type { Prisma } from "@prisma/client";
-import { CAROUSEL_MAX, CAROUSEL_MIN, articleCarouselPlan, storedCarousel, type CarouselMiddle, type CarouselPlan, type CarouselScript, type CarouselSlide } from "./instagram-carousel.js";
-import { chartSlide, contrastSlide, coverSlide, ctaSlide, eventVisual, listSlide, pointSlide, quoteSlide, sceneSlide, statementSlide } from "./social-visuals.js";
+import { CAROUSEL_MIN, articleCarouselPlan, storedCarousel, type CarouselScript, type CarouselSlide, type SlidePhoto } from "./instagram-carousel.js";
+import { chartSlide, contrastSlide, coverSlide, ctaSlide, eventVisual, listSlide, pointSlide, quoteSlide, sceneSlide, statSlide, statementSlide } from "./social-visuals.js";
 
 // Publication Instagram via l'API Instagram avec connexion Instagram (compte professionnel) :
 // - l'article du jour, en carrousel de 4 à 8 slides (décision v2 §6, remplace l'image unique) ;
@@ -112,26 +113,43 @@ const siteLabel = (config: Pick<InstagramConfig, "webOrigin">) => new URL(config
 
 type CarouselArticle = { title: string; excerpt: string | null; content: string; category: string | null; imageUrl: string | null; instagramCarousel?: Prisma.JsonValue | null };
 
-async function renderSlide(slide: CarouselSlide, position: string, config: Pick<InstagramConfig, "publicDir" | "webOrigin">) {
+// Détail recadré de la couverture (repli quand l'illustration d'un écran manque) : une zone différente
+// à chaque fois, pour ne jamais montrer deux fois la même image dans le carrousel.
+const DETAIL_ZONES = [[0.1, 0.25], [0.9, 0.1], [0.5, 0.8], [0.2, 0.9]];
+async function coverDetail(cover: Buffer, n: number) {
+  const { width = 0, height = 0 } = await sharp(cover).metadata();
+  const side = Math.round(Math.min(width, height) * 0.58);
+  const [x, y] = DETAIL_ZONES[n % DETAIL_ZONES.length];
+  return sharp(cover).extract({ left: Math.round((width - side) * x), top: Math.round((height - side) * y), width: side, height: side }).toBuffer();
+}
+
+type Config = Pick<InstagramConfig, "publicDir" | "webOrigin">;
+// Photo d'un écran ; illisible, l'écran reste publiable sur son fond de couleur.
+async function screenPhoto(photo: SlidePhoto, cover: Buffer, detailIndex: () => number, config: Config) {
+  if (!photo.image) return null;
+  if (photo.fromCover) return coverDetail(cover, detailIndex()).catch(() => null);
+  return loadImage(photo.image, config).catch(() => null);
+}
+
+function renderSlide(slide: CarouselSlide, photo: Buffer | null, position: string) {
   switch (slide.kind) {
-    case "contrast": return contrastSlide(slide.myth, slide.reality, position);
-    case "statement": return statementSlide(slide.text, slide.highlight, position);
-    case "list": return listSlide(slide.title, slide.items, position);
-    case "quote": return quoteSlide(slide.text, position);
-    // Image propre à la slide ; illisible ou absente, la slide reste publiable sans image.
-    case "scene": return sceneSlide(slide.image ? await loadImage(slide.image, config).catch(() => null) : null, slide.title, slide.text, position);
+    case "contrast": return contrastSlide(photo, slide.myth, slide.reality, position);
+    case "statement": return statementSlide(photo, slide.text, slide.highlight, position);
+    case "list": return listSlide(photo, slide.title, slide.items, position);
+    case "quote": return quoteSlide(photo, slide.text, position);
+    case "scene": return sceneSlide(photo, slide.title, slide.text, position);
+    case "stat": return statSlide(photo, slide.value, slide.text, slide.source, position);
+    case "chart": return chartSlide(slide.chart, position);
   }
 }
 
-// Carrousel réécrit : un graphique sourcé de l'article garde sa place, en deuxième position.
-async function renderScript(script: CarouselScript, plan: CarouselPlan, cover: Buffer, config: Pick<InstagramConfig, "publicDir" | "webOrigin">) {
-  const chart = plan.middle.find((m): m is Extract<CarouselMiddle, { kind: "chart" }> => m.kind === "chart");
-  const middle: (CarouselSlide | Extract<CarouselMiddle, { kind: "chart" }>)[] = [...script.slides];
-  if (chart && middle.length < CAROUSEL_MAX - 2) middle.splice(1, 0, chart);
-  const total = middle.length + 2;
-  const slides = [await coverSlide(cover, script.hook, plan.label, `1/${total}`, script.subtitle || undefined)];
-  for (const [i, m] of middle.entries()) slides.push(m.kind === "chart" ? await chartSlide(m.chart, `${i + 2}/${total}`) : await renderSlide(m, `${i + 2}/${total}`, config));
-  slides.push(await ctaSlide(script.ctaHeadline, script.ctaDetail, siteLabel(config), `${total}/${total}`));
+async function renderScript(script: CarouselScript, label: string, cover: Buffer, config: Config) {
+  const total = script.slides.length + 2;
+  let details = 0;
+  const detailIndex = () => details++;
+  const slides = [await coverSlide(cover, script.hook, label, `1/${total}`, script.subtitle || undefined)];
+  for (const [i, slide] of script.slides.entries()) slides.push(await renderSlide(slide, await screenPhoto(slide, cover, detailIndex, config), `${i + 2}/${total}`));
+  slides.push(await ctaSlide(script.cta.headline, script.cta.detail, siteLabel(config), `${total}/${total}`, await screenPhoto(script.cta, cover, detailIndex, config)));
   return slides;
 }
 
@@ -142,7 +160,7 @@ export async function renderArticleCarousel(article: CarouselArticle, config: Pi
   const script = storedCarousel(article.instagramCarousel);
   // Un carrousel réécrit qui ne se rend pas (donnée enregistrée inattendue) ne bloque jamais la
   // publication : l'extraction de l'article prend le relais.
-  const rewritten = script ? await renderScript(script, plan, cover, config).catch(() => null) : null;
+  const rewritten = script ? await renderScript(script, plan.label, cover, config).catch(() => null) : null;
   if (rewritten) return rewritten;
   const total = plan.middle.length + 2;
   if (total < CAROUSEL_MIN) throw new Error("Article trop court pour un carrousel de 4 slides au moins");
