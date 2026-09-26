@@ -45,6 +45,8 @@ export interface CarouselDraftSlide {
 export interface CarouselDraft { hook: string; subtitle: string; slides: CarouselDraftSlide[]; ctaHeadline: string; ctaDetail: string; ctaImagePrompt: string; caption: string }
 export interface ArticleGenerationContext {
   today: string;
+  // Consigne visuelle imposée pour l'illustration de couverture (image-variety.ts).
+  coverBrief?: string;
   categories: string[];
   recentTitles: string[];
   upcomingEvents: { title: string; slug: string; category: string; startsAt: Date; district: string }[];
@@ -56,7 +58,8 @@ export interface AIProvider {
   // URLs réellement renvoyées par la recherche web : seules sources que l'article publié pourra citer.
   generateArticle?(context: ArticleGenerationContext): Promise<{ article: GeneratedArticle; searchedUrls: string[] }>;
   reviewCoverImage?(image: Buffer, context: { title: string; imagePrompt: string }): Promise<ImageReview>;
-  writeCarousel?(article: { title: string; excerpt: string | null; content: string; category: string }): Promise<CarouselDraft>;
+  // briefs : consignes visuelles imposées, une par slide dans l'ordre, la dernière pour l'appel à l'action.
+  writeCarousel?(article: { title: string; excerpt: string | null; content: string; category: string }, briefs: string[]): Promise<CarouselDraft>;
 }
 
 // Génération locale, sans appel externe ni coût : produit un brouillon structuré à partir du sujet
@@ -93,7 +96,9 @@ export class LocalAIProvider implements AIProvider {
 const MODEL = "claude-opus-5";
 
 // Charte des illustrations générées, commune à la couverture et aux slides du carrousel.
-const ILLUSTRATION_CHARTER = "une scène photographique réaliste, naturelle et chaleureuse qui illustre le sujet. Personnes : adultes français d'origine majoritairement maghrébine et subsaharienne, femmes avec ou sans foulard, dans un décor urbain français reconnaissable (café, restaurant, terrasse ou appartement parisien). Privilégie les scènes, les mains, les silhouettes et les personnes de trois quarts ou de dos plutôt que les gros plans de visages. Interdits : alcool et toute boisson qui pourrait y ressembler (cocktail, grand verre avec glaçons et paille, verre à pied, bouteille) — si des boissons apparaissent, uniquement du thé chaud dans de petits verres ou du café ; symboles ou lieux religieux, calligraphie, texte, logos, filigranes. Composition centrée (l'image sera recadrée en carré pour Instagram).";
+// Le décor n'est plus limité aux cafés et terrasses : chaque image reçoit une consigne visuelle imposée
+// (image-variety.ts), pour ne pas publier toujours la même scène.
+const ILLUSTRATION_CHARTER = "une scène photographique réaliste, naturelle et chaleureuse qui illustre le sujet. Personnes : adultes français d'origine majoritairement maghrébine et subsaharienne, hommes et femmes (avec ou sans foulard), d'âges et de styles variés, dans un décor urbain français reconnaissable. Respecte exactement la consigne visuelle imposée (décor, cadrage, lumière, personnes) quand elle est donnée. Privilégie les scènes, les mains, les silhouettes et les personnes de trois quarts ou de dos plutôt que les gros plans de visages. Les boissons ne sont pas nécessaires : n'en montre que si la scène l'exige. Interdits : alcool et toute boisson qui pourrait y ressembler (cocktail, grand verre avec glaçons et paille, verre à pied, bouteille) — si des boissons apparaissent, uniquement du thé chaud dans de petits verres ou du café ; symboles ou lieux religieux, calligraphie, texte, logos, filigranes. Composition centrée (l'image sera recadrée en carré pour Instagram).";
 // Légende courte et accrocheuse (refonte du 2026-09-26), à la place de « titre + chapô + hashtags génériques ».
 const CAPTION_RULES = "400 caractères au plus hors hashtags. Une première ligne qui accroche (une phrase courte, pas le titre recopié), une ou deux phrases au plus qui donnent envie de lire, « Article complet : lien en bio », puis 3 à 5 hashtags précis liés au sujet, en minuscules. Pas d'URL, un emoji au plus, jamais le mot « musulman ».";
 
@@ -178,7 +183,7 @@ ${context.recentTitles.map(t => `- ${t}`).join("\n") || "(aucun article publié 
 Soirées à venir sur Nūr Meet (pour un lien interne seulement si c'est pertinent) :
 ${events}
 
-Fais les recherches web nécessaires, rédige l'article, puis appelle submit_article.`;
+${context.coverBrief ? `Consigne visuelle imposée pour l'illustration de couverture (imagePrompt), à reprendre telle quelle : ${context.coverBrief}\n\n` : ""}Fais les recherches web nécessaires, rédige l'article, puis appelle submit_article.`;
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: userPrompt }];
     const searchedUrls = new Set<string>();
     for (let turn = 0; turn < 6; turn++) {
@@ -238,14 +243,16 @@ Fais les recherches web nécessaires, rédige l'article, puis appelle submit_art
 
   // Carrousel Instagram réécrit (refonte du 2026-09-26) : une version courte et percutante de l'article,
   // sans aucun fait ni chiffre ajouté. Pas de recherche web : l'article publié est la seule source.
-  async writeCarousel(article: { title: string; excerpt: string | null; content: string; category: string }): Promise<CarouselDraft> {
+  async writeCarousel(article: { title: string; excerpt: string | null; content: string; category: string }, briefs: string[]): Promise<CarouselDraft> {
+    const slideBriefs = briefs.slice(0, -1).map((b, i) => `- slide ${i + 1} : ${b}`).join("\n");
+    const visual = briefs.length ? `\n\nConsignes visuelles imposées, une par image, pour que chaque photo soit différente des autres (décor, cadrage, lumière, personnes) — reprends-les dans chaque imagePrompt en les adaptant au sujet de la slide :\n${slideBriefs}\n- ctaImagePrompt : ${briefs[briefs.length - 1]}` : "";
     const response = await this.client.messages.create({
       model: MODEL,
       max_tokens: 8000,
       system: CAROUSEL_PROMPT,
       tools: [carouselTool],
       tool_choice: { type: "tool", name: "submit_carousel" },
-      messages: [{ role: "user", content: `Article du journal Nūr Meet (${article.category}).\n\nTitre : ${article.title}\n\nChapô : ${article.excerpt ?? "(aucun)"}\n\n${article.content}` }]
+      messages: [{ role: "user", content: `Article du journal Nūr Meet (${article.category}).\n\nTitre : ${article.title}\n\nChapô : ${article.excerpt ?? "(aucun)"}\n\n${article.content}${visual}` }]
     });
     if (response.stop_reason === "refusal") throw new Error("Carrousel refusé par le modèle");
     const submitted = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
@@ -270,8 +277,8 @@ Structure :
   - statement : un recadrage en une ou deux phrases courtes (130 caractères au plus) dans text ; highlight = un mot ou groupe de mots de text à mettre en couleur (ou "").
   - scene : un moment fort de l'article raconté comme une scène vécue. title = 60 caractères au plus ; text = 140 caractères au plus.
   Pour les champs sans objet dans un format, renvoie "" (ou [] pour items).
-- imagePrompt, pour CHAQUE slide (une partie seulement sera illustrée, une image tous les deux écrans) : description en anglais d'une photo qui illustre précisément CETTE slide et son émotion (pas l'article en général). Une vraie scène de vie, lumière chaude et cinématographique, couleurs vives, faible profondeur de champ, l'émotion portée par les gestes, les postures, les regards échangés et la lumière. ${ILLUSTRATION_CHARTER}
-- ctaHeadline : 40 caractères au plus, qui invite à passer à l'action en lien avec le sujet ; ctaDetail : 110 caractères au plus sur les soirées Nūr Meet, sans promesse chiffrée ; ctaImagePrompt : description en anglais d'une photo chaleureuse de soirée en petit comité dans un restaurant parisien, selon la même charte.
+- imagePrompt, pour CHAQUE slide (une partie seulement sera illustrée, une image tous les deux écrans) : description en anglais d'une photo qui illustre précisément CETTE slide et son émotion (pas l'article en général), jamais la même scène que celle d'une autre slide. Une vraie scène de vie, lumière chaude et cinématographique, couleurs vives, faible profondeur de champ, l'émotion portée par les gestes, les postures, les regards échangés et la lumière. ${ILLUSTRATION_CHARTER}
+- ctaHeadline : 40 caractères au plus, qui invite à passer à l'action en lien avec le sujet ; ctaDetail : 110 caractères au plus sur les soirées Nūr Meet, sans promesse chiffrée ; ctaImagePrompt : description en anglais d'une photo chaleureuse de rencontre en petit comité, selon la même charte.
 - caption : légende Instagram, ${CAPTION_RULES}
 
 Ne nomme jamais une religion ou une origine, pas de markdown, pas d'emoji dans les slides.`;

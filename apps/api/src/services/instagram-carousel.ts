@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { AIProvider, CarouselDraft, CarouselDraftSlide } from "../ai-provider.js";
 import { sanitizeInstagramCaption } from "./blog-content.js";
+import { varietySeed, visualBriefs } from "./image-variety.js";
 import type { ChartData } from "./social-visuals.js";
 
 // Contenu du carrousel Instagram d'un article (décision v2 §6) : 4 à 8 slides, peu de texte, tout
@@ -211,7 +212,9 @@ export async function prepareArticleCarousel(prisma: PrismaClient, deps: Prepare
   const existing = storedCarousel(article.instagramCarousel);
   if (existing || !deps.aiProvider.writeCarousel) return existing;
   try {
-    const script = parseCarouselScript(await deps.aiProvider.writeCarousel(article), article);
+    // Consignes visuelles n°1 à 7 du jour de publication (la n°0 est celle de la couverture).
+    const briefs = visualBriefs(varietySeed(article.publishedAt ?? new Date()), 1, CAROUSEL_MAX - 1);
+    const script = parseCarouselScript(await deps.aiProvider.writeCarousel(article, briefs), article);
     for (const [i, slot] of photoSlots(script).entries()) {
       const illustration = slot.imagePrompt && deps.illustrate && i < MAX_SLIDE_IMAGES ? await deps.illustrate({ title: article.title, imagePrompt: slot.imagePrompt }).catch(() => null) : null;
       Object.assign(slot, illustration ? { image: illustration.image, altText: illustration.altText } : { image: article.imageUrl, altText: null, fromCover: true });

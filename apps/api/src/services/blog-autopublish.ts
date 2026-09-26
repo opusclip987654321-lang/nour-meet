@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient, UserRole } from "@prisma/client";
 import type { AIProvider } from "../ai-provider.js";
 import { defaultImagePrompt, type Illustration } from "./article-image.js";
+import { varietySeed, visualBrief } from "./image-variety.js";
 import { BLOG_CATEGORIES, MAX_AI_ATTEMPTS_PER_DAY, parisDay, sanitizeGeneratedArticle, sanitizeInstagramCaption, slugifyTitle } from "./blog-content.js";
 
 // Publication automatique quotidienne du blog (corrections web 2026-09-24, §3) — remplace la
@@ -33,7 +34,7 @@ export async function publishDailyArticle(deps: Deps, now: Date = new Date()): P
           prisma.article.findMany({ where: { status: "PUBLISHED" }, orderBy: { publishedAt: "desc" }, take: 30, select: { title: true } }),
           prisma.event.findMany({ where: { status: "PUBLISHED", isDemo: false, startsAt: { gt: now } }, orderBy: { startsAt: "asc" }, take: 8, select: { title: true, slug: true, category: true, startsAt: true, district: true } })
         ]);
-        const { article, searchedUrls } = await aiProvider.generateArticle({ today: now.toLocaleDateString("fr-FR", { dateStyle: "full", timeZone: "Europe/Paris" }), categories: BLOG_CATEGORIES, recentTitles: recent.map(r => r.title), upcomingEvents: upcoming });
+        const { article, searchedUrls } = await aiProvider.generateArticle({ today: now.toLocaleDateString("fr-FR", { dateStyle: "full", timeZone: "Europe/Paris" }), coverBrief: visualBrief(varietySeed(now), 0), categories: BLOG_CATEGORIES, recentTitles: recent.map(r => r.title), upcomingEvents: upcoming });
         const clean = sanitizeGeneratedArticle(article, searchedUrls);
         const { sourcesCount, ...data } = clean;
         const illustration = deps.illustrate ? await deps.illustrate({ title: clean.title, imagePrompt: article.imagePrompt ?? "" }).catch(() => null) : null;
@@ -58,7 +59,7 @@ export async function publishDailyArticle(deps: Deps, now: Date = new Date()): P
       const next = await prisma.articleQueueEntry.findFirst({ orderBy: { position: "asc" } });
       if (!next) { deps.log.info({ day }, "Aucun article à publier aujourd’hui (IA indisponible, réserve vide)"); return "NOTHING_TO_PUBLISH"; }
       // Illustration IA aussi pour un article de la réserve : la photothèque n'est qu'un dernier recours.
-      const illustration = deps.illustrate ? await deps.illustrate({ title: next.title, imagePrompt: defaultImagePrompt(next) }).catch(() => null) : null;
+      const illustration = deps.illustrate ? await deps.illustrate({ title: next.title, imagePrompt: defaultImagePrompt(next, visualBrief(varietySeed(now), 0)) }).catch(() => null) : null;
       try {
         created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
           // Légende de secours, courte : remplacée par celle du carrousel réécrit quand Claude est disponible.
