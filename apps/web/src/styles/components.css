@@ -443,6 +443,11 @@ label > textarea {
   color: var(--danger);
 }
 
+.badge.info {
+  background: var(--info-bg);
+  color: var(--ink);
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
@@ -1114,4 +1119,241 @@ img.avatar {
 
 .dev-test-cards p {
   margin: 0;
+}
+
+/* ---------- Suivi des validations (v3 §6.4) ---------- */
+.validation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-3);
+}
+
+.validation-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--s-2) var(--s-4);
+  align-items: center;
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.validation-item > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.validation-item small {
+  color: var(--ink-3);
+}
+
+.validation-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: var(--s-3);
+  border-radius: var(--r-sm);
+  background: var(--warning-bg);
+  color: var(--warning-ink);
+  font-size: var(--fs-sm);
+}
+
+.validation-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+/* ---------- Tableaux d'administration (components/DataTable.tsx) ---------- */
+.data-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.data-table th {
+  padding: var(--s-3) var(--s-4);
+  background: var(--surface-2);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: var(--s-3) var(--s-4);
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.data-table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.data-table tr.clickable {
+  cursor: pointer;
+}
+
+.data-table tr.clickable:hover td,
+.data-table tr.selected td {
+  background: var(--canvas);
+}
+
+.data-table-empty {
+  padding: var(--s-6) var(--s-4) !important;
+  color: var(--ink-3);
+  text-align: center !important;
+}
+
+.data-table .skeleton-line {
+  display: block;
+  height: 14px;
+  border-radius: var(--r-sm);
+}
+
+/* Cellule principale : titre en gras et détail en dessous. */
+.cell-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cell-main small {
+  color: var(--ink-3);
+}
+
+.cell-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2);
+}
+
+.table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3);
+  margin: var(--s-4) 0;
+}
+
+.table-toolbar .search-field {
+  flex: 1 1 260px;
+}
+
+.table-toolbar select {
+  flex: 0 1 220px;
+  width: auto;
+}
+
+.filter-tabs .tab-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: var(--s-2);
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+}
+
+.filter-tabs > .active .tab-count {
+  background: var(--saffron-soft);
+  color: var(--saffron-ink);
+}
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.page-head h1 {
+  margin: 0;
+}
+
+/* Mobile : chaque ligne devient une carte, chaque cellule garde son intitulé de colonne. */
+@media (max-width: 760px) {
+  .data-table-wrap {
+    border: 0;
+    background: transparent;
+  }
+
+  .data-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .data-table,
+  .data-table tbody,
+  .data-table tr,
+  .data-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .data-table tr {
+    margin-bottom: var(--s-3);
+    padding: var(--s-2) 0;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+  }
+
+  .data-table td {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: var(--s-3);
+    padding: var(--s-2) var(--s-4);
+    border-top: 0;
+    text-align: left !important;
+  }
+
+  .data-table td::before {
+    content: attr(data-label);
+    color: var(--ink-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+  }
+
+  .data-table td.primary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .data-table td > .badge,
+  .data-table td > .cell-actions {
+    justify-self: start;
+  }
+
+  .data-table td.primary::before,
+  .data-table td.data-table-empty::before {
+    content: none;
+  }
+
+  .cell-actions {
+    justify-content: flex-start;
+  }
 }

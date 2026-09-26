@@ -27,6 +27,15 @@ app.get("/restaurants/me", { preHandler: auth }, async (request, reply) => {
   const usage = await prisma.restaurantMonthlyUsage.findUnique({ where: { restaurantId_yearMonth: { restaurantId: restaurant.id, yearMonth: currentYearMonth() } } });
   return { ...ownRestaurantView(restaurant), currentMonthEventsPublished: usage?.eventsPublished ?? 0 };
 });
+// Onglet « Validations » (v3 §6.4) : l'état réel de l'établissement et de chacune de ses soirées, dans les
+// termes du restaurateur. Aucune donnée interne (notes de l'administration, commission).
+app.get("/restaurants/me/validations", { preHandler: auth }, async (request, reply) => {
+  const restaurant = await prisma.restaurant.findUnique({ where: { ownerId: currentId(request) }, select: { id: true, name: true, status: true, rejectionReason: true, submittedAt: true, verifiedAt: true } });
+  if (!restaurant) return reply.code(404).send({ error: "Aucune demande restaurateur" });
+  const events = await prisma.event.findMany({ where: { controllerRestaurantId: restaurant.id }, select: { id: true, slug: true, title: true, category: true, startsAt: true, status: true, reviewNote: true, reviewedAt: true, submittedForReviewAt: true }, orderBy: { startsAt: "asc" } });
+  return { restaurant, events };
+});
+
 // §19/§20 : formulaire explicitement cité comme devant être protégé contre un abus automatisé,
 // au même titre que l'authentification et la génération IA.
 // Plafond relâché uniquement en mode SMS simulé (développement, tests d'intégration), comme pour l'OTP.

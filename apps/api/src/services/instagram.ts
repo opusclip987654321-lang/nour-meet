@@ -212,7 +212,7 @@ export type EventShareOutcome = "PUBLISHED" | "ALREADY_PUBLISHED" | "NOT_ELIGIBL
 export async function shareEventOnInstagram(prisma: PrismaClient, config: InstagramConfig, eventId: string, defaultImage: string): Promise<EventShareOutcome> {
   const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
   if (event.instagramMediaId) return "ALREADY_PUBLISHED";
-  if (event.status !== "PUBLISHED" || event.isDemo || !event.controllerRestaurantId || event.startsAt <= new Date()) return "NOT_ELIGIBLE";
+  if (event.status !== "PUBLISHED" || event.isDemo || event.startsAt <= new Date()) return "NOT_ELIGIBLE";
   const claimed = await prisma.event.updateMany({ where: { ...lockWhere(eventId), status: "PUBLISHED", isDemo: false }, data: { instagramPublishingAt: new Date() } });
   if (claimed.count !== 1) return "BUSY";
   let mediaId: string | undefined;

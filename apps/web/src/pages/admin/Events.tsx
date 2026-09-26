@@ -1,4 +1,4 @@
-import { Inbox, X } from "lucide-react";
+import { ExternalLink, Inbox, Search, X } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../api";
@@ -6,7 +6,8 @@ import { useAuth } from "../../auth";
 import { Layout } from "../../components/Layout";
 import { CategoryBadge, Loading, Notice } from "../../components/ui";
 import { dateTime, imgUrl } from "../../lib/format";
-import { EVENT_STATUS_LABEL, QUOTA_CATEGORY_LABEL } from "../../lib/labels";
+import { QUOTA_CATEGORY_LABEL, eventValidation } from "../../lib/labels";
+import { DataTable, FilterTabs, type Column } from "../../components/DataTable";
 import { spacePath } from "../../lib/spaces";
 import { AdminNav } from "./AdminNav";
 import { EuroInput, EventForm, emptyEventForm, eventFormPayload, type EventFormState } from "../../components/EventForm";
@@ -19,30 +20,47 @@ const [form,setForm]=useState<EventFormState>(emptyEventForm);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [restaurantInfo,setRestaurantInfo]=useState<any>(null);
   useEffect(()=>{if(user?.role==="ORGANIZER")api<any>("/restaurants/me").then(setRestaurantInfo).catch(()=>{})},[user?.role]);
+  // Espace super-admin (v3) : un événement Nūr Meet se tient chez un restaurant partenaire ou dans un
+  // autre lieu, et se publie immédiatement ou reste en brouillon.
+  const isAdmin=user?.role==="ADMIN";
+  const [venues,setVenues]=useState<any[]>([]);
+  const [venueId,setVenueId]=useState("");
+  const [publishNow,setPublishNow]=useState(true);
+  useEffect(()=>{if(isAdmin)api<any[]>("/admin/restaurants?status=APPROVED").then(setVenues).catch(()=>{})},[isAdmin]);
+  const pickVenue=(id:string)=>{setVenueId(id);const v=venues.find(r=>r.id===id);if(v)setForm({...form,district:v.district??form.district,address:v.address??form.address})};
   const submit=async(e:FormEvent)=>{
     e.preventDefault();setSubmitting(true);setNotice(null);
     try{
-      await api("/admin/events",{method:"POST",body:JSON.stringify(eventFormPayload(form))});
-      setNotice({kind:"success",text:user?.role==="ORGANIZER"?"Brouillon créé. Ajoutez vos photos puis soumettez-le à validation.":"Événement créé."});
-      setTimeout(()=>navigate(spacePath(user?.role,"events")),1200);
+      const created=await api<any>("/admin/events",{method:"POST",body:JSON.stringify({...eventFormPayload(form),...(isAdmin?{publish:publishNow,venueRestaurantId:venueId||undefined}:{})})});
+      setNotice({kind:"success",text:user?.role==="ORGANIZER"?"Brouillon créé. Ajoutez vos photos puis soumettez-le à validation.":created.status==="PUBLISHED"?"Événement publié. Ajoutez maintenant sa photo principale.":"Brouillon enregistré. Vous pourrez le publier depuis « Événements »."});
+      setTimeout(()=>navigate(isAdmin?`/admin/events?manage=${created.id}`:spacePath(user?.role,"events")),1200);
     }catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setSubmitting(false)}
   };
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Créer une soirée</h1><p className="fine left">{user?.role==="ORGANIZER"?"Votre soirée démarre en brouillon : ajoutez ensuite ses photos puis soumettez-la à validation (au moins une photo de votre établissement est obligatoire).":"Vous publiez directement vos propres événements."}</p>
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>{isAdmin?"Créer un événement Nūr Meet":"Créer une soirée"}</h1><p className="fine left">{user?.role==="ORGANIZER"?"Votre soirée démarre en brouillon : ajoutez ensuite ses photos puis soumettez-la à validation (au moins une photo de votre établissement est obligatoire).":"Événement organisé par Nūr Meet : vous le publiez directement, sans passer par la validation réservée aux restaurateurs."}</p>
     {user?.role==="ORGANIZER"&&restaurantInfo&&!(restaurantInfo.photos?.length>0)&&<Notice kind="error">Ajoutez d’abord au moins une photo de votre établissement : sans elle, la soirée ne pourra pas être soumise à validation. <Link className="text-link" to="/restaurant">Ajouter une photo</Link></Notice>}
     {user?.role==="ORGANIZER"&&restaurantInfo&&!["ACTIVE","TRIALING"].includes(restaurantInfo.subscription?.status)&&<Notice kind="info">Aucun abonnement actif : vous pouvez préparer et soumettre votre soirée, mais elle ne sera publiée qu’avec une formule active. <Link className="text-link" to="/restaurant?tab=subscription">Choisir une formule</Link></Notice>}
     {user?.role==="ORGANIZER"&&restaurantInfo?.subscription&&<Notice kind="info">Abonnement « {restaurantInfo.subscription.plan.name} » ({(restaurantInfo.subscription.plan.monthlyPriceCents/100).toFixed(0)} €/mois) — {restaurantInfo.currentMonthEventsPublished}{restaurantInfo.subscription.plan.monthlyEventQuota==null?" événements publiés ce mois-ci (illimité)":`/${restaurantInfo.subscription.plan.monthlyEventQuota} événements publiés ce mois-ci`}. Un brouillon ne consomme le quota qu’à sa première publication.</Notice>}
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
-    <EventForm form={form} setForm={setForm} showFlow={user?.role==="ADMIN"} submitting={submitting} submitLabel="Créer la soirée" onSubmit={submit}/>
+    <EventForm form={form} setForm={setForm} showFlow={isAdmin} submitting={submitting} submitLabel={isAdmin?(publishNow?"Créer et publier":"Enregistrer en brouillon"):"Créer la soirée"} onSubmit={submit}
+      locationField={isAdmin?<label className="wide">Lieu<select value={venueId} onChange={e=>pickVenue(e.target.value)}><option value="">Autre lieu (quartier et adresse saisis ci-dessous)</option>{venues.map(v=><option key={v.id} value={v.id}>{v.name}{v.district?` · ${v.district}`:""}</option>)}</select><span className="fine left">Un restaurant partenaire préremplit le quartier et l’adresse.</span></label>:undefined}>
+      {isAdmin?<>
+        <div className="wide perks-checks"><label><input type="checkbox" checked={publishNow} onChange={e=>setPublishNow(e.target.checked)}/> Publier immédiatement (sinon, l’événement reste en brouillon)</label></div>
+        <p className="fine left wide">Les quotas hommes/femmes, les tarifs différenciés et les photos se règlent ensuite, depuis la fiche de gestion de l’événement.</p>
+      </>:undefined}
+    </EventForm>
   </div></section></Layout>;
 }
 
 export function AdminEventPhotos() {
   const {user}=useAuth();
-  const [searchParams]=useSearchParams();
+  const [searchParams,setSearchParams]=useSearchParams();
   const highlightId=searchParams.get("highlight");
-  const [events,setEvents]=useState<any[]>([]);
+  // Super-admin : vue d'ensemble en tableau ; « Gérer » (ou un lien de notification) ouvre la fiche de
+  // gestion d'une seule soirée. Le restaurateur garde la liste de ses propres soirées.
+  const manageId=user?.role==="ADMIN"?searchParams.get("manage")??highlightId:null;
+  const [events,setEvents]=useState<any[]|null>(null);
   const [uploadingFor,setUploadingFor]=useState<string|null>(null);
   const [actingOn,setActingOn]=useState<string|null>(null);
   const [rejectNoteFor,setRejectNoteFor]=useState<string|null>(null);
@@ -58,12 +76,13 @@ export function AdminEventPhotos() {
   const [historyItems,setHistoryItems]=useState<any[]>([]);
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const load=()=>api<any[]>("/admin/events").then(setEvents);
+  const allEvents=events??[];
   useEffect(()=>{load()},[]);
   // C14 (ordre correctif 2026-09-20) : une notification "soirée approuvée/à valider/..." doit ouvrir
   // CETTE soirée, pas seulement la liste — /admin/events?highlight=<id> défile jusqu'à sa carte et
   // la met en évidence brièvement plutôt que de forcer le restaurateur à la rechercher lui-même.
   useEffect(()=>{
-    if(!highlightId||events.length===0)return;
+    if(!highlightId||!events||events.length===0)return;
     const el=document.getElementById(`event-${highlightId}`);
     if(el){el.scrollIntoView({behavior:"smooth",block:"center"});el.classList.add("highlighted");setTimeout(()=>el.classList.remove("highlighted"),3000)}
   },[highlightId,events]);
@@ -126,9 +145,15 @@ export function AdminEventPhotos() {
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setActingOn(null)}
   };
+  const publishOwn=async(eventId:string)=>{
+    setActingOn(eventId);setNotice(null);
+    try{await api(`/admin/events/${eventId}/publish`,{method:"POST"});setNotice({kind:"success",text:"Événement publié."});await load()}
+    catch(err){setNotice({kind:"error",text:(err as Error).message})}
+    finally{setActingOn(null)}
+  };
   const reviewDecision=async(eventId:string, accept:boolean, note?:string)=>{
     setActingOn(eventId);setNotice(null);
-    try{await api(`/admin/events/${eventId}/review-decision`,{method:"POST",body:JSON.stringify({accept,note})});setNotice({kind:"success",text:accept?"Événement publié.":"Événement renvoyé en brouillon."});setRejectNoteFor(null);setRejectNote("");await load()}
+    try{await api(`/admin/events/${eventId}/review-decision`,{method:"POST",body:JSON.stringify({accept,note})});setNotice({kind:"success",text:accept?"Événement validé et publié.":"Événement renvoyé « À modifier » avec votre commentaire."});setRejectNoteFor(null);setRejectNote("");await load()}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setActingOn(null)}
   };
@@ -170,18 +195,22 @@ export function AdminEventPhotos() {
     setHistoryFor(eventId);
     try{setHistoryItems(await api<any[]>(`/admin/events/${eventId}/history`))}catch{setHistoryItems([])}
   };
-  const HISTORY_LABEL:Record<string,string>={CREATE_EVENT:"Création",SUBMIT_EVENT_FOR_REVIEW:"Soumis à validation",APPROVE_EVENT:"Publié",REJECT_EVENT:"Renvoyé en brouillon",UPDATE_EVENT:"Modifié",SET_EVENT_PRICING:"Tarifs modifiés",SET_EVENT_QUOTAS:"Quotas modifiés",ADD_EVENT_PHOTO:"Photo ajoutée",CANCEL_EVENT:"Annulé",APPROVE_DATE_CHANGE:"Changement de date approuvé",REJECT_DATE_CHANGE:"Changement de date refusé"};
+  const HISTORY_LABEL:Record<string,string>={CREATE_EVENT:"Création",SUBMIT_EVENT_FOR_REVIEW:"Soumis à validation",APPROVE_EVENT:"Publié",REJECT_EVENT:"Renvoyé « À modifier »",UPDATE_EVENT:"Modifié",SET_EVENT_PRICING:"Tarifs modifiés",SET_EVENT_QUOTAS:"Quotas modifiés",ADD_EVENT_PHOTO:"Photo ajoutée",CANCEL_EVENT:"Annulé",APPROVE_DATE_CHANGE:"Changement de date approuvé",REJECT_DATE_CHANGE:"Changement de date refusé"};
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Mes événements</h1><p className="fine left">Formats acceptés : JPEG, PNG, WEBP · 5 Mo maximum. Sans photo personnalisée, l’illustration de la catégorie est utilisée.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
-    <div className="event-photo-grid">{events.map(ev=><div key={ev.id} id={`event-${ev.id}`} className="panel event-photo-card"><img src={imgUrl(ev.imageUrl)} alt={ev.title}/><div><b>{ev.title}</b><div className="admin-event-meta"><CategoryBadge category={ev.category} className="inline"/><small>{EVENT_STATUS_LABEL[ev.status]??ev.status}</small></div>
+  if(user?.role==="ADMIN"&&!manageId)return <Layout><section className="admin-page"><AdminNav/><div className="admin-main">{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}<AdminEventsOverview events={events} actingOn={actingOn} onManage={id=>setSearchParams({manage:id})} onPublish={publishOwn}/></div></section></Layout>;
+  const shown=manageId?allEvents.filter(ev=>ev.id===manageId):allEvents;
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main">{manageId?<><Link className="text-link back-link" to="/admin/events">← Tous les événements</Link><h1>Gérer la soirée</h1></>:<h1>Mes soirées</h1>}<p className="fine left">Formats acceptés : JPEG, PNG, WEBP · 5 Mo maximum. Sans photo personnalisée, l’illustration de la catégorie est utilisée.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    <div className="event-photo-grid">{events===null?<div className="panel skeleton-panel" aria-hidden="true"/>:shown.length===0?<div className="empty"><Inbox size={24} aria-hidden="true"/><p>{manageId?"Cette soirée est introuvable.":"Aucune soirée pour le moment."}</p></div>:shown.map(ev=><div key={ev.id} id={`event-${ev.id}`} className="panel event-photo-card"><img src={imgUrl(ev.imageUrl)} alt={ev.title}/><div><b>{ev.title}</b><div className="admin-event-meta"><CategoryBadge category={ev.category} className="inline"/><span className={`badge ${eventValidation(ev).tone}`}>{eventValidation(ev).label}</span>{ev.controllerRestaurant?<small>{ev.controllerRestaurant.name}</small>:<small>Nūr Meet</small>}</div>
+      {eventValidation(ev).label==="À modifier"&&<p className="validation-note"><b>À corriger :</b> {ev.reviewNote}</p>}
       <label className="button small secondary">{uploadingFor===ev.id?"Envoi…":"Changer la photo principale"}<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploadingFor===ev.id} onChange={e=>{const f=e.target.files?.[0];if(f)upload(ev.id,f);e.target.value=""}}/></label>
 
       <div className="gallery-editor"><small>GALERIE ({ev.photos?.length??0}/5)</small><div className="gallery-thumbs">{(ev.photos??[]).map((p:any)=><div key={p.id} className="gallery-thumb"><img src={imgUrl(p.url)} alt=""/><button type="button" onClick={()=>removeGalleryPhoto(ev.id,p.id)} aria-label="Supprimer la photo"><X size={16} aria-hidden="true"/></button></div>)}</div><label className="button small secondary" style={{opacity:(ev.photos?.length??0)>=5?0.5:1}}>{uploadingFor===ev.id?"Envoi…":"Ajouter une photo"}<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={uploadingFor===ev.id||(ev.photos?.length??0)>=5} onChange={e=>{const f=e.target.files?.[0];if(f)uploadGalleryPhoto(ev.id,f);e.target.value=""}}/></label></div>
 
-      {user?.role==="ORGANIZER"&&ev.status==="DRAFT"&&<button className="button small" disabled={actingOn===ev.id} onClick={()=>submitForReview(ev.id)}>{actingOn===ev.id?"Envoi…":"Soumettre à validation"}</button>}
+      {user?.role==="ORGANIZER"&&ev.status==="DRAFT"&&<button className="button small" disabled={actingOn===ev.id} onClick={()=>submitForReview(ev.id)}>{actingOn===ev.id?"Envoi…":eventValidation(ev).label==="À modifier"?"Renvoyer pour validation":"Soumettre à validation"}</button>}
+      {user?.role==="ADMIN"&&!ev.controllerRestaurantId&&ev.status==="DRAFT"&&<button className="button small" disabled={actingOn===ev.id} onClick={()=>publishOwn(ev.id)}>{actingOn===ev.id?"Publication…":"Publier"}</button>}
       {user?.role==="ADMIN"&&ev.status==="PENDING_REVIEW"&&<div className="review-actions">
-        <button className="button small" disabled={actingOn===ev.id} onClick={()=>reviewDecision(ev.id,true)}>Publier</button>
-        {rejectNoteFor===ev.id?<div className="reject-note"><input value={rejectNote} onChange={e=>setRejectNote(e.target.value)} placeholder="Motif (optionnel)"/><button className="button small danger" disabled={actingOn===ev.id} onClick={()=>reviewDecision(ev.id,false,rejectNote)}>Confirmer le refus</button></div>:<button className="button small danger" onClick={()=>setRejectNoteFor(ev.id)}>Renvoyer en brouillon</button>}
+        <button className="button small" disabled={actingOn===ev.id} onClick={()=>reviewDecision(ev.id,true)}>Valider et publier</button>
+        {rejectNoteFor===ev.id?<form className="reject-note" onSubmit={e=>{e.preventDefault();reviewDecision(ev.id,false,rejectNote)}}><label>Ce que le restaurateur doit modifier<textarea required minLength={10} value={rejectNote} onChange={e=>setRejectNote(e.target.value)} placeholder="Ex. : ajoutez une photo de la salle, précisez ce qui est inclus dans le prix…"/></label><div className="decision-buttons"><button className="button small danger" disabled={actingOn===ev.id}>Renvoyer « À modifier »</button><button type="button" className="button small secondary" onClick={()=>{setRejectNoteFor(null);setRejectNote("")}}>Annuler</button></div></form>:<button className="button small secondary" onClick={()=>setRejectNoteFor(ev.id)}>Demander des modifications</button>}
       </div>}
 
 
@@ -258,4 +287,56 @@ export function AdminAttendees() {
     <div className="filters"><select value={eventId} onChange={e=>setEventId(e.target.value)}>{events.map(ev=><option key={ev.id} value={ev.id}>{ev.title}</option>)}</select></div>
     {loading?<Loading/>:reservations.length===0?<div className="empty"><Inbox size={24} aria-hidden="true"/><h2>Aucun participant pour le moment</h2></div>:<div className="panel table"><div className="table-row head"><span>Participant</span><span>Catégorie</span><span>Paiement</span><span>Billet</span></div>{reservations.map(r=><div key={r.id} className="table-row"><span><b>{r.user.displayName}</b>{r.user.phone&&<small>{r.user.phone}</small>}</span><span>{r.quotaCategory?QUOTA_CATEGORY_LABEL[r.quotaCategory]??r.quotaCategory:"—"}</span><span>{r.payment?STATUS_LABEL[r.payment.status]??r.payment.status:"—"}{isAdmin&&r.payment?.status==="SUCCEEDED"&&(requestingFor===r.payment.id?<div className="reject-note"><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motif (obligatoire à 24 h ou moins)"/><button className="button small danger" disabled={busy===r.payment.id} onClick={()=>refund(r.payment.id)}>{busy===r.payment.id?"Remboursement…":"Confirmer le remboursement"}</button></div>:<button type="button" className="button small secondary" onClick={()=>setRequestingFor(r.payment.id)}>Rembourser</button>)}{isAdmin&&r.payment?.refundRequestedAt&&r.payment.status==="SUCCEEDED"&&<small className="fine">Demande historique : {r.payment.refundRequestReason}</small>}</span><span>{r.ticket?.status==="USED"?"Utilisé":r.ticket?.status==="VALID"?"Valide":r.cancelledAt?"Annulé":"En attente"}</span></div>)}</div>}
   </div></section></Layout>;
+}
+
+
+// Date compacte pour les tableaux : « mer. 30 sept. · 19h30 ».
+const tableDate = (value: string) => { const d = new Date(value); return `${new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", month: "short" }).format(d)} · ${new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(d).replace(":", "h")}`; };
+type EventView = "review" | "upcoming" | "drafts" | "past";
+const isPast = (ev: any) => ["CANCELLED", "COMPLETED"].includes(ev.status) || new Date(ev.endsAt) < new Date();
+const EVENT_VIEWS: { value: EventView; label: string; match: (ev: any) => boolean }[] = [
+  { value: "review", label: "À valider", match: ev => ev.status === "PENDING_REVIEW" },
+  { value: "upcoming", label: "À venir", match: ev => ["PUBLISHED", "FULL"].includes(ev.status) && !isPast(ev) },
+  { value: "drafts", label: "Brouillons", match: ev => ev.status === "DRAFT" && !isPast(ev) },
+  { value: "past", label: "Passés et annulés", match: isPast }
+];
+
+// Espace événements du super-admin (v3) : ses propres événements Nūr Meet et ceux des restaurateurs, dans
+// un tableau filtrable ; la file « À valider » s'ouvre d'office quand des soirées attendent une décision.
+function AdminEventsOverview({ events, actingOn, onManage, onPublish }: { events: any[] | null; actingOn: string | null; onManage: (id: string) => void; onPublish: (id: string) => void }) {
+  const toReview = (events ?? []).filter(EVENT_VIEWS[0].match).length;
+  const [view, setView] = useState<EventView | null>(null);
+  const [organizer, setOrganizer] = useState<"all" | "nour" | "restaurants">("all");
+  const [q, setQ] = useState("");
+  const current: EventView = view ?? (toReview > 0 ? "review" : "upcoming");
+  const byOrganizer = (events ?? []).filter(ev => organizer === "all" || (organizer === "nour" ? !ev.controllerRestaurantId : !!ev.controllerRestaurantId));
+  const query = q.trim().toLowerCase();
+  const rows = events === null ? null : byOrganizer
+    .filter(EVENT_VIEWS.find(v => v.value === current)!.match)
+    .filter(ev => !query || [ev.title, ev.district, ev.controllerRestaurant?.name, ev.venueRestaurant?.name].some(t => t?.toLowerCase().includes(query)))
+    .sort((a, b) => current === "past" ? +new Date(b.startsAt) - +new Date(a.startsAt) : +new Date(a.startsAt) - +new Date(b.startsAt));
+  const columns: Column<any>[] = [
+    { key: "date", header: "Date", render: ev => <span className="cell-main"><b>{tableDate(ev.startsAt)}</b></span> },
+    { key: "title", header: "Événement", primary: true, render: ev => <span className="cell-main"><b>{ev.title}</b><small><CategoryBadge category={ev.category} className="inline"/></small></span> },
+    { key: "organizer", header: "Organisateur", render: ev => ev.controllerRestaurant?.name ?? "Nūr Meet" },
+    { key: "venue", header: "Lieu", render: ev => ev.venueRestaurant ? `${ev.venueRestaurant.name} · ${ev.district}` : ev.district },
+    { key: "seats", header: "Places vendues", numeric: true, render: ev => `${ev.soldCount ?? 0} / ${ev.capacity}` },
+    { key: "status", header: "Statut", render: ev => { const v = eventValidation(ev.status === "PUBLISHED" && (ev.soldCount ?? 0) >= ev.capacity ? { ...ev, status: "FULL" } : ev); return <span className={`badge ${v.tone}`}>{v.label}</span>; } },
+    { key: "actions", header: "Actions", render: ev => <span className="cell-actions" onClick={e => e.stopPropagation()}>
+      {!ev.controllerRestaurantId && ev.status === "DRAFT" && !isPast(ev) && <button type="button" className="button small" disabled={actingOn === ev.id} onClick={() => onPublish(ev.id)}>{actingOn === ev.id ? "…" : "Publier"}</button>}
+      <button type="button" className="button small secondary" onClick={() => onManage(ev.id)}>{ev.status === "PENDING_REVIEW" ? "Examiner" : "Gérer"}</button>
+      {["PUBLISHED", "FULL", "COMPLETED"].includes(ev.status) && <a className="icon-button" href={`/events/${ev.slug}`} target="_blank" rel="noreferrer" aria-label={`Voir la fiche publique de « ${ev.title} »`} title="Voir la fiche publique"><ExternalLink size={18} aria-hidden="true"/></a>}
+    </span> }
+  ];
+  return <>
+    <div className="page-head"><div><h1>Événements</h1><p className="fine left">Vos événements Nūr Meet et les soirées proposées par les restaurateurs.</p></div><Link className="button" to="/admin/events/new">Créer un événement Nūr Meet</Link></div>
+    <FilterTabs label="Filtrer les événements" value={current} onChange={setView} options={EVENT_VIEWS.map(v => ({ value: v.value, label: v.label, count: events === null ? undefined : byOrganizer.filter(v.match).length }))}/>
+    <div className="table-toolbar">
+      <label className="search-field"><span className="visually-hidden">Rechercher un événement</span><Search size={18} aria-hidden="true"/><input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Rechercher : titre, lieu, restaurant…"/></label>
+      <label className="visually-hidden" htmlFor="organizer-filter">Organisateur</label>
+      <select id="organizer-filter" value={organizer} onChange={e => setOrganizer(e.target.value as typeof organizer)}><option value="all">Tous les organisateurs</option><option value="nour">Nūr Meet</option><option value="restaurants">Restaurateurs</option></select>
+    </div>
+    <DataTable caption="Événements" rows={rows} columns={columns} rowKey={ev => ev.id} onRowClick={ev => onManage(ev.id)}
+      empty={current === "review" ? "Aucune soirée n’attend votre validation." : query ? `Aucun événement ne correspond à « ${q} ».` : "Aucun événement dans cette vue."}/>
+  </>;
 }
