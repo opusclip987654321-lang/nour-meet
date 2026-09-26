@@ -52,22 +52,41 @@ export async function saveIllustration(source: Buffer, config: Pick<Illustration
   return { imageUrl: `${config.publicPrefix}${base}.webp`, instagramImageUrl: `${config.publicPrefix}${base}-instagram.jpg` };
 }
 
-export async function illustrateArticle(config: IllustrationConfig, reviewer: AIProvider, article: { title: string; imagePrompt: string }, log: { warn: (o: unknown, m?: string) => void }): Promise<Illustration | null> {
-  if (!reviewer.reviewCoverImage || !article.imagePrompt.trim()) return null;
+// Boucle commune génération → contrôle par Claude → nouvel essai avec les raisons du refus. Renvoie
+// l'image brute approuvée, jamais une image non contrôlée.
+async function reviewedImage(config: IllustrationConfig, reviewer: AIProvider, subject: { title: string; imagePrompt: string }, attempts: number, log: { warn: (o: unknown, m?: string) => void }) {
+  if (!reviewer.reviewCoverImage || !subject.imagePrompt.trim()) return null;
   let previousIssues: string[] = [];
-  for (let attempt = 1; attempt <= MAX_ILLUSTRATION_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const prompt = previousIssues.length ? `${article.imagePrompt} A previous version was rejected for these reasons, make sure none of them occurs: ${previousIssues.join(" ; ")}.` : article.imagePrompt;
+      const prompt = previousIssues.length ? `${subject.imagePrompt} A previous version was rejected for these reasons, make sure none of them occurs: ${previousIssues.join(" ; ")}.` : subject.imagePrompt;
       const raw = await generateImage(config, prompt);
       const forReview = await sharp(raw).resize({ width: 1024, withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
-      const review = await reviewer.reviewCoverImage(forReview, article);
+      const review = await reviewer.reviewCoverImage(forReview, subject);
       if (!review.approved) { previousIssues = review.issues.slice(0, 5); log.warn({ attempt, issues: review.issues }, "Illustration IA refusée par le contrôle visuel"); continue; }
-      return { ...(await saveIllustration(raw, config)), altText: review.altText };
+      return { raw, altText: review.altText };
     } catch (err) {
       log.warn({ attempt, err: (err as Error).message }, "Génération de l'illustration IA échouée");
     }
   }
   return null;
+}
+
+export async function illustrateArticle(config: IllustrationConfig, reviewer: AIProvider, article: { title: string; imagePrompt: string }, log: { warn: (o: unknown, m?: string) => void }): Promise<Illustration | null> {
+  const approved = await reviewedImage(config, reviewer, article, MAX_ILLUSTRATION_ATTEMPTS, log);
+  return approved ? { ...(await saveIllustration(approved.raw, config)), altText: approved.altText } : null;
+}
+
+// Illustration d'une slide du carrousel (refonte du 2026-09-26) : mêmes garde-fous et même contrôle que
+// la couverture, mais 3 essais au plus — une slide sans image reste lisible (fond bleu nuit), le coût
+// d'un article reste donc borné. Seule la déclinaison carrée Instagram est enregistrée.
+export const MAX_SLIDE_IMAGE_ATTEMPTS = 3;
+export async function illustrateSlide(config: IllustrationConfig, reviewer: AIProvider, slide: { title: string; imagePrompt: string }, log: { warn: (o: unknown, m?: string) => void }): Promise<{ image: string; altText: string } | null> {
+  const approved = await reviewedImage(config, reviewer, slide, MAX_SLIDE_IMAGE_ATTEMPTS, log);
+  if (!approved) return null;
+  const name = `${randomUUID()}-slide.jpg`;
+  await writeFile(path.join(config.uploadsDir, name), await sharp(approved.raw).resize(1080, 1080, { fit: "cover", position: "attention" }).jpeg({ quality: 86, mozjpeg: true }).toBuffer());
+  return { image: `${config.publicPrefix}${name}`, altText: approved.altText };
 }
 
 // Description d'illustration pour un article sans consigne rédigée par Claude (article de la réserve).

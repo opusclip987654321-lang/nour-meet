@@ -4,8 +4,9 @@ import { randomUUID } from "node:crypto";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sanitizeInstagramCaption } from "./blog-content.js";
-import { CAROUSEL_MIN, articleCarouselPlan } from "./instagram-carousel.js";
-import { chartSlide, coverSlide, ctaSlide, eventVisual, pointSlide } from "./social-visuals.js";
+import type { Prisma } from "@prisma/client";
+import { CAROUSEL_MAX, CAROUSEL_MIN, articleCarouselPlan, storedCarousel, type CarouselMiddle, type CarouselPlan, type CarouselScript, type CarouselSlide } from "./instagram-carousel.js";
+import { chartSlide, contrastSlide, coverSlide, ctaSlide, eventVisual, listSlide, pointSlide, quoteSlide, sceneSlide, statementSlide } from "./social-visuals.js";
 
 // Publication Instagram via l'API Instagram avec connexion Instagram (compte professionnel) :
 // - l'article du jour, en carrousel de 4 à 8 slides (décision v2 §6, remplace l'image unique) ;
@@ -109,12 +110,43 @@ async function publishImages(config: InstagramConfig, token: string, jpegs: Buff
 
 const siteLabel = (config: Pick<InstagramConfig, "webOrigin">) => new URL(config.webOrigin).host.replace(/^www\./, "");
 
+type CarouselArticle = { title: string; excerpt: string | null; content: string; category: string | null; imageUrl: string | null; instagramCarousel?: Prisma.JsonValue | null };
+
+async function renderSlide(slide: CarouselSlide, position: string, config: Pick<InstagramConfig, "publicDir" | "webOrigin">) {
+  switch (slide.kind) {
+    case "contrast": return contrastSlide(slide.myth, slide.reality, position);
+    case "statement": return statementSlide(slide.text, slide.highlight, position);
+    case "list": return listSlide(slide.title, slide.items, position);
+    case "quote": return quoteSlide(slide.text, position);
+    // Image propre à la slide ; illisible ou absente, la slide reste publiable sans image.
+    case "scene": return sceneSlide(slide.image ? await loadImage(slide.image, config).catch(() => null) : null, slide.title, slide.text, position);
+  }
+}
+
+// Carrousel réécrit : un graphique sourcé de l'article garde sa place, en deuxième position.
+async function renderScript(script: CarouselScript, plan: CarouselPlan, cover: Buffer, config: Pick<InstagramConfig, "publicDir" | "webOrigin">) {
+  const chart = plan.middle.find((m): m is Extract<CarouselMiddle, { kind: "chart" }> => m.kind === "chart");
+  const middle: (CarouselSlide | Extract<CarouselMiddle, { kind: "chart" }>)[] = [...script.slides];
+  if (chart && middle.length < CAROUSEL_MAX - 2) middle.splice(1, 0, chart);
+  const total = middle.length + 2;
+  const slides = [await coverSlide(cover, script.hook, plan.label, `1/${total}`, script.subtitle || undefined)];
+  for (const [i, m] of middle.entries()) slides.push(m.kind === "chart" ? await chartSlide(m.chart, `${i + 2}/${total}`) : await renderSlide(m, `${i + 2}/${total}`, config));
+  slides.push(await ctaSlide(script.ctaHeadline, script.ctaDetail, siteLabel(config), `${total}/${total}`));
+  return slides;
+}
+
 /** Slides JPEG du carrousel d'un article (exporté pour les tests et l'aperçu). */
-export async function renderArticleCarousel(article: { title: string; excerpt: string | null; content: string; category: string | null; imageUrl: string | null }, config: Pick<InstagramConfig, "publicDir" | "webOrigin">) {
+export async function renderArticleCarousel(article: CarouselArticle, config: Pick<InstagramConfig, "publicDir" | "webOrigin">) {
+  const cover = await loadImage(article.imageUrl, config);
   const plan = articleCarouselPlan(article);
+  const script = storedCarousel(article.instagramCarousel);
+  // Un carrousel réécrit qui ne se rend pas (donnée enregistrée inattendue) ne bloque jamais la
+  // publication : l'extraction de l'article prend le relais.
+  const rewritten = script ? await renderScript(script, plan, cover, config).catch(() => null) : null;
+  if (rewritten) return rewritten;
   const total = plan.middle.length + 2;
   if (total < CAROUSEL_MIN) throw new Error("Article trop court pour un carrousel de 4 slides au moins");
-  const slides = [await coverSlide(await loadImage(article.imageUrl, config), plan.title, plan.label, `1/${total}`)];
+  const slides = [await coverSlide(cover, plan.title, plan.label, `1/${total}`)];
   let pointIndex = 0;
   for (const [i, m] of plan.middle.entries()) {
     const position = `${i + 2}/${total}`;

@@ -3,7 +3,8 @@ import Stripe from "stripe";
 import { aiProvider, app, ownsBackgroundJobs, prisma, stripe } from "./context.js";
 import { logArticleTransition } from "./services/articles.js";
 import { audit } from "./services/audit.js";
-import { illustrateArticle } from "./services/article-image.js";
+import { illustrateArticle, illustrateSlide } from "./services/article-image.js";
+import { prepareArticleCarousel } from "./services/instagram-carousel.js";
 import { publishDailyArticle } from "./services/blog-autopublish.js";
 import { facebookConfig, illustrationConfig, instagramConfig } from "./services/social-config.js";
 import { shareArticleOnFacebook } from "./services/facebook.js";
@@ -186,7 +187,7 @@ if (ownsBackgroundJobs) setInterval(() => { checkCancellationSpike().catch(err =
 const runDailyArticle = async () => {
   if (process.env.NODE_ENV !== "production" || getSetting("AI_BLOG_GENERATION_MODE") !== "AUTO_PUBLISH_DAILY") return;
   const illustration = illustrationConfig, instagram = instagramConfig, facebook = facebookConfig;
-  const outcome = await publishDailyArticle({ prisma, aiProvider, notify, log: app.log, illustrate: illustration ? article => illustrateArticle(illustration, aiProvider, article, app.log) : undefined, shareOnInstagram: instagram ? articleId => shareArticleOnInstagram(prisma, instagram, articleId) : undefined, shareOnFacebook: facebook ? articleId => shareArticleOnFacebook(prisma, facebook, articleId) : undefined });
+  const outcome = await publishDailyArticle({ prisma, aiProvider, notify, log: app.log, illustrate: illustration ? article => illustrateArticle(illustration, aiProvider, article, app.log) : undefined, prepareCarousel: articleId => prepareArticleCarousel(prisma, { aiProvider, log: app.log, illustrate: illustration ? slide => illustrateSlide(illustration, aiProvider, slide, app.log) : undefined }, articleId), shareOnInstagram: instagram ? articleId => shareArticleOnInstagram(prisma, instagram, articleId) : undefined, shareOnFacebook: facebook ? articleId => shareArticleOnFacebook(prisma, facebook, articleId) : undefined });
   if (outcome === "PUBLISHED_AI" || outcome === "PUBLISHED_QUEUE") app.log.info({ outcome }, "Article du jour publié");
 };
 // Jeton Instagram (60 jours) renouvelé chaque semaine, indépendamment de la publication du jour.

@@ -1,4 +1,4 @@
-import { UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -7,6 +7,7 @@ import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, aiProvider, app, articleUploadsDi
 import { assertNoForbiddenWord, logArticleTransition } from "../services/articles.js";
 import { sanitizeInstagramCaption } from "../services/blog-content.js";
 import { shareArticleOnInstagram } from "../services/instagram.js";
+import { prepareArticleCarousel } from "../services/instagram-carousel.js";
 import { facebookConfig, instagramConfig } from "../services/social-config.js";
 import { shareArticleOnFacebook } from "../services/facebook.js";
 import { audit } from "../services/audit.js";
@@ -29,7 +30,7 @@ app.get("/articles/:slug", async (request, reply) => {
   const article = await prisma.article.findFirst({ where: { slug, status: "PUBLISHED" }, include: { author: true } });
   if (!article) return reply.code(404).send({ error: "Article introuvable" });
   // Jamais les informations internes (consigne IA, suivi Instagram et Facebook, auteur complet) sur la route publique.
-  const { aiPrompt: _aiPrompt, instagramCaption: _caption, instagramMediaId: _media, instagramError: _error, instagramPublishedAt: _publishedAt, instagramPublishingAt: _igLock, facebookPostId: _fbPost, facebookPublishedAt: _fbAt, facebookPublishingAt: _fbLock, facebookError: _fbError, author, ...visible } = article;
+  const { aiPrompt: _aiPrompt, instagramCaption: _caption, instagramMediaId: _media, instagramError: _error, instagramPublishedAt: _publishedAt, instagramPublishingAt: _igLock, instagramCarousel: _carousel, facebookPostId: _fbPost, facebookPublishedAt: _fbAt, facebookPublishingAt: _fbLock, facebookError: _fbError, author, ...visible } = article;
   return { ...visible, author: author ? { displayName: author.displayName } : null };
 });
 
@@ -57,7 +58,10 @@ app.patch("/admin/articles/:id", { preHandler: roles(UserRole.ADMIN) }, async (r
   const { id } = z.object({ id: z.string() }).parse(request.params);
   const input = z.object({ ...Object.fromEntries(Object.entries(articleWritableFields).map(([k, v]) => [k, (v as z.ZodTypeAny).optional()])) }).parse(request.body);
   assertNoForbiddenWord(input.title, input.excerpt, input.content, input.metaTitle, input.metaDescription);
-  const updated = await prisma.article.update({ where: { id }, data: input });
+  // Texte modifié : le carrousel réécrit (et sa vérification des chiffres) portait sur l'ancienne version,
+  // il sera réécrit au prochain partage.
+  const textChanged = input.title !== undefined || input.excerpt !== undefined || input.content !== undefined;
+  const updated = await prisma.article.update({ where: { id }, data: { ...input, ...(textChanged ? { instagramCarousel: Prisma.DbNull } : {}) } });
   await audit(currentId(request), "UPDATE_ARTICLE", "Article", id);
   return updated;
 });
@@ -160,13 +164,16 @@ app.post("/admin/articles/:id/instagram", { preHandler: roles(UserRole.ADMIN), c
   if (!instagramConfig) return reply.code(503).send({ error: "Instagram n’est pas configuré sur ce serveur." });
   const article = await prisma.article.findUniqueOrThrow({ where: { id } });
   if (article.status !== "PUBLISHED") return reply.code(409).send({ error: "Seul un article publié peut être partagé sur Instagram." });
-  if (caption) {
-    const clean = sanitizeInstagramCaption(caption);
-    if (!clean) return reply.code(400).send({ error: "Légende refusée (vide ou contraire à la charte éditoriale)." });
-    await prisma.article.update({ where: { id }, data: { instagramCaption: clean } });
-  } else if (!article.instagramCaption) {
-    await prisma.article.update({ where: { id }, data: { instagramCaption: sanitizeInstagramCaption(`${article.title}\n\n${article.excerpt ?? ""}\n\nArticle complet : lien en bio\n\n#nurmeet #paris #rencontres`) } });
-  }
+  const clean = caption ? sanitizeInstagramCaption(caption) : null;
+  if (caption && !clean) return reply.code(400).send({ error: "Légende refusée (vide ou contraire à la charte éditoriale)." });
+  // Carrousel réécrit s'il manque (article écrit à la main, échec de la tâche du jour) : texte seul,
+  // sans nouvelles illustrations, pour ne pas faire attendre l'administrateur plusieurs minutes. Il
+  // enregistre alors sa légende courte ; celle saisie ici reste prioritaire.
+  // Pas de réécriture pendant un envoi en cours (double clic) : le verrou le refusera de toute façon.
+  if (!article.instagramMediaId && !article.instagramPublishingAt) await prepareArticleCarousel(prisma, { aiProvider, log: request.log }, id);
+  const stored = (await prisma.article.findUniqueOrThrow({ where: { id } })).instagramCaption;
+  const finalCaption = clean ?? stored ?? sanitizeInstagramCaption(`${article.title}\n\nArticle complet : lien en bio\n\n#nurmeet #rencontres`);
+  await prisma.article.update({ where: { id }, data: { instagramCaption: finalCaption } });
   try {
     const result = await shareArticleOnInstagram(prisma, instagramConfig, id);
     await audit(currentId(request), "SHARE_ARTICLE_INSTAGRAM", "Article", id, { result });

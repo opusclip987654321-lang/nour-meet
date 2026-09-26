@@ -10,7 +10,9 @@ import { BLOG_CATEGORIES, MAX_AI_ATTEMPTS_PER_DAY, parisDay, sanitizeGeneratedAr
 // Dépendances injectées (base, fournisseur IA, notifications) pour être testable sans serveur.
 // illustrate, shareOnInstagram et shareOnFacebook sont facultatifs : absents (pas de clé OpenAI, Instagram
 // ou Facebook), l'article garde sa photo de la photothèque et n'est pas publié sur ces réseaux. Leurs erreurs ne bloquent jamais le blog.
-type Deps = { illustrate?: (article: { title: string; imagePrompt: string }) => Promise<Illustration | null>; shareOnInstagram?: (articleId: string) => Promise<unknown>; shareOnFacebook?: (articleId: string) => Promise<unknown>; prisma: PrismaClient; aiProvider: AIProvider; notify: (userId: string, title: string, body: string, link?: string) => Promise<unknown>; log: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void } };
+// prepareCarousel (refonte du 2026-09-26) réécrit le carrousel et ses illustrations une seule fois, avant
+// Instagram et Facebook qui le reprennent tel quel ; en cas d'échec, ils extraient le carrousel de l'article.
+type Deps = { illustrate?: (article: { title: string; imagePrompt: string }) => Promise<Illustration | null>; prepareCarousel?: (articleId: string) => Promise<unknown>; shareOnInstagram?: (articleId: string) => Promise<unknown>; shareOnFacebook?: (articleId: string) => Promise<unknown>; prisma: PrismaClient; aiProvider: AIProvider; notify: (userId: string, title: string, body: string, link?: string) => Promise<unknown>; log: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void } };
 export type DailyArticleOutcome = "ALREADY_PUBLISHED" | "PUBLISHED_AI" | "PUBLISHED_QUEUE" | "NOTHING_TO_PUBLISH" | "BUSY";
 
 let running = false;
@@ -59,7 +61,8 @@ export async function publishDailyArticle(deps: Deps, now: Date = new Date()): P
       const illustration = deps.illustrate ? await deps.illustrate({ title: next.title, imagePrompt: defaultImagePrompt(next) }).catch(() => null) : null;
       try {
         created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          const caption = sanitizeInstagramCaption(`${next.title}\n\n${next.excerpt}\n\nArticle complet : lien en bio\n\n#nurmeet #paris #rencontres #vieSociale`);
+          // Légende de secours, courte : remplacée par celle du carrousel réécrit quand Claude est disponible.
+          const caption = sanitizeInstagramCaption(`${next.title}\n\nArticle complet : lien en bio\n\n#nurmeet #rencontres`);
           const article = await tx.article.create({ data: { title: next.title, slug: next.slug, excerpt: next.excerpt, content: next.content, category: next.category, keywords: next.keywords, metaTitle: next.metaTitle, metaDescription: next.metaDescription, imageUrl: illustration?.imageUrl ?? next.imageUrl, imageAiGenerated: !!illustration, status: "PUBLISHED", publishedAt: now, autoPublishDay: day, instagramCaption: caption } });
           await tx.articleQueueEntry.delete({ where: { id: next.id } });
           return article;
@@ -74,6 +77,9 @@ export async function publishDailyArticle(deps: Deps, now: Date = new Date()): P
     await prisma.auditLog.create({ data: { action: "DAILY_ARTICLE_PUBLISHED", entity: "Article", entityId: created!.id, metadata: { day, outcome } } });
     const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
     await Promise.all(admins.map(a => deps.notify(a.id, "Article du jour publié", `« ${created!.title} » est en ligne. Vous pouvez le consulter ou le supprimer depuis le blog.`, `/admin/blog/${created!.id}`)));
+    if (deps.prepareCarousel && (deps.shareOnInstagram || deps.shareOnFacebook)) {
+      await deps.prepareCarousel(created!.id).catch(err => deps.log.warn({ err: (err as Error).message }, "Préparation du carrousel échouée"));
+    }
     if (deps.shareOnInstagram) {
       try { await deps.shareOnInstagram(created!.id); }
       catch (err) {
