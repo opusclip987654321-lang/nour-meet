@@ -5,6 +5,7 @@ import { Layout } from "../../components/Layout";
 import { Notice } from "../../components/ui";
 import { money } from "../../lib/format";
 import { AdminNav, Stat } from "./AdminNav";
+import { DataTable } from "../../components/DataTable";
 
 export function AdminFinance() {
   const {user}=useAuth();
@@ -25,23 +26,34 @@ export function AdminFinance() {
   };
 
   return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Finances</h1><p className="fine left">Aucun virement n’est jamais déclenché automatiquement par la plateforme : « Marquer comme reversé » n’est qu’un registre, à cocher après un virement fait vous-même.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
-    {summary&&<div className="stat-grid">
-      {summary.nourOwnRevenueCents!=null&&<Stat label="CA propre Nūr (événements en direct)" value={money(summary.nourOwnRevenueCents)}/>}
-      {summary.subscriptionMonthlyRevenueCents!=null&&<Stat label="Abonnements restaurateurs (mensuel)" value={`${money(summary.subscriptionMonthlyRevenueCents)} · ${summary.activeSubscriptionsCount} actifs`}/>}
-      <Stat label="Volume brut billets restaurateurs" value={money(summary.grossTicketVolumeCents)}/>
-      <Stat label="Commission Nūr (héritée 30/70)" value={money(summary.commissionCents)}/>
-      <Stat label="Dû au(x) restaurant(s) (modèle 30/70)" value={money(summary.restaurantDueCents)}/>
-      <Stat label="Déjà reversé (modèle 30/70)" value={money(summary.paidOutCents)}/>
-      <Stat label="Remboursé (modèle 30/70)" value={money(summary.refundedCents)}/>
-      <Stat label="Frais Stripe (modèle 30/70)" value={money(summary.feesCents)}/>
-      {summary.stripeBalance&&<Stat label="Solde Stripe (test) disponible / en attente" value={`${money(summary.stripeBalance.availableCents)} / ${money(summary.stripeBalance.pendingCents)}`}/>}
-      {summary.disputesCount!=null&&<Stat label="Litiges Stripe en cours" value={summary.disputesCount>0?`${summary.disputesCount} · ${money(summary.disputesAmountCents)}`:"Aucun"}/>}
-    </div>}
-    {!summary&&<div className="stat-grid" aria-busy="true">{[0,1,2,3,4,5].map(i=><div key={i} className="stat skeleton" style={{height:92}}/>)}</div>}
-    {summary&&!summary.commissionLedgerEnabled&&<p className="fine left">Le registre commission 30/70 est désactivé depuis le passage à l’abonnement mensuel : « Commission », « Dû » et « Déjà reversé » ne couvrent que les ventes historiques sous l’ancien modèle, pas les événements récents sous abonnement. Le volume brut reste, lui, toujours à jour.</p>}
-    {entries===null?<div className="stack" aria-busy="true">{[0,1,2].map(i=><div key={i} className="skeleton" style={{height:64}}/>)}</div>:entries.length===0?<div className="empty"><h2>Aucune vente pour le moment</h2></div>:<div className="panel table">
-      <div className="table-row head"><span>Événement</span><span>Brut</span><span>Commission</span><span>Dû restaurant</span><span>Statut</span></div>
-      {entries.map(e=><div key={e.id} className="table-row"><span><b>{e.event.title}</b>{user?.role==="ADMIN"&&<small>{e.restaurant.name}</small>}</span><span>{money(e.grossAmountCents)}</span><span>{money(e.commissionAmountCents)} ({e.commissionRate}%)</span><span>{money(e.restaurantDueCents)}{e.refundedAmountCents>0&&<small className="fine"> · remboursé</small>}</span><span>{e.paidOutAt?<small className="fine">Reversé le {new Date(e.paidOutAt).toLocaleDateString("fr-FR")}</small>:user?.role==="ADMIN"?<button className="button small" disabled={busy===e.id} onClick={()=>markPaid(e.id)}>Marquer comme reversé</button>:<small className="fine">{e.readyToPayOut?"Prêt à reverser":"En attente"}</small>}</span></div>)}
-    </div>}
+    {!summary?<div className="stat-grid" aria-busy="true">{[0,1,2,3].map(i=><div key={i} className="stat skeleton-panel" style={{minHeight:104}}/>)}</div>:<>
+      <h2 className="section-heading">Revenus actuels</h2>
+      <div className="stat-grid kpi-row">
+        {summary.nourOwnRevenueCents!=null&&<Stat label="Chiffre d’affaires des événements Nūr Meet" value={money(summary.nourOwnRevenueCents)}/>}
+        {summary.subscriptionMonthlyRevenueCents!=null&&<Stat label={`Abonnements restaurateurs · ${summary.activeSubscriptionsCount} actif${summary.activeSubscriptionsCount>1?"s":""}`} value={`${money(summary.subscriptionMonthlyRevenueCents)} / mois`}/>}
+        <Stat label="Billets vendus par les restaurateurs (brut)" value={money(summary.grossTicketVolumeCents)}/>
+        {summary.disputesCount!=null&&<Stat label="Litiges Stripe en cours" value={summary.disputesCount>0?`${summary.disputesCount} · ${money(summary.disputesAmountCents)}`:"Aucun"}/>}
+        {summary.stripeBalance&&<Stat label="Solde Stripe disponible / en attente" value={`${money(summary.stripeBalance.availableCents)} / ${money(summary.stripeBalance.pendingCents)}`}/>}
+      </div>
+      {/* Ancien modèle à commission : conservé pour l'historique (données comptables jamais supprimées). */}
+      <details className="panel legacy-ledger" open={(entries?.length??0)>0&&summary.commissionLedgerEnabled}>
+        <summary><h2>Ancien modèle à commission 30/70</h2><span className="fine">{summary.commissionLedgerEnabled?"Actif":"Historique — remplacé par l’abonnement mensuel"}</span></summary>
+        <div className="stat-grid kpi-row">
+          <Stat label="Commission Nūr Meet" value={money(summary.commissionCents)}/>
+          <Stat label="Dû aux restaurants" value={money(summary.restaurantDueCents)}/>
+          <Stat label="Déjà reversé" value={money(summary.paidOutCents)}/>
+          <Stat label="Remboursé" value={money(summary.refundedCents)}/>
+          <Stat label="Frais Stripe" value={money(summary.feesCents)}/>
+        </div>
+        {!summary.commissionLedgerEnabled&&<p className="fine left">Ces montants ne couvrent que les ventes réalisées sous l’ancien modèle, pas les événements récents sous abonnement.</p>}
+        <DataTable caption="Registre des ventes (modèle 30/70)" rows={entries} rowKey={e=>e.id} empty="Aucune vente sous l’ancien modèle 30/70." columns={[
+          {key:"event",header:"Événement",primary:true,render:e=><span className="cell-main"><b>{e.event.title}</b>{user?.role==="ADMIN"&&<small>{e.restaurant.name}</small>}</span>},
+          {key:"gross",header:"Brut",numeric:true,render:e=>money(e.grossAmountCents)},
+          {key:"commission",header:"Commission",numeric:true,render:e=>`${money(e.commissionAmountCents)} (${e.commissionRate} %)`},
+          {key:"due",header:"Dû au restaurant",numeric:true,render:e=><>{money(e.restaurantDueCents)}{e.refundedAmountCents>0&&<small className="fine"> · remboursé</small>}</>},
+          {key:"status",header:"Statut",render:e=>e.paidOutAt?<span className="badge success">Reversé le {new Date(e.paidOutAt).toLocaleDateString("fr-FR")}</span>:user?.role==="ADMIN"?<button className="button small" disabled={busy===e.id} onClick={()=>markPaid(e.id)}>Marquer comme reversé</button>:<span className="badge neutral">{e.readyToPayOut?"Prêt à reverser":"En attente"}</span>}
+        ]}/>
+      </details>
+    </>}
   </div></section></Layout>;
 }

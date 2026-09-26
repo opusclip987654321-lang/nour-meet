@@ -1183,10 +1183,25 @@
 }
 
 .admin-filters {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--s-2);
-  margin: 0;
+  margin: 0 0 var(--s-4);
+}
+
+/* Listes déroulantes assez larges pour lire leur valeur ; champs d'âge étroits. */
+.admin-filters > select {
+  flex: 1 1 220px;
+  width: auto;
+}
+
+.admin-filters > input {
+  flex: 1 1 140px;
+  width: auto;
+}
+
+.admin-filters > input[type="number"] {
+  flex: 0 1 120px;
 }
 
 .filters-toggle {
@@ -2383,4 +2398,307 @@
 
 .block-list small {
   color: var(--ink-3);
+}
+
+/* ---------- Vue générale : à traiter, indicateurs (v3) ---------- */
+.todo-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: var(--s-2);
+}
+
+.todo-panel a {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--s-2);
+  align-items: center;
+  min-height: 52px;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.todo-panel a.pending {
+  border-color: var(--warning);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.todo-panel a:hover {
+  background: var(--canvas);
+}
+
+.kpi-row {
+  margin: var(--s-4) 0;
+}
+
+.metric-list {
+  margin: 0;
+  display: grid;
+}
+
+.metric-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  border-top: 1px solid var(--line);
+}
+
+.metric-list > div:first-child {
+  border-top: 0;
+}
+
+.metric-list dt {
+  color: var(--ink-2);
+  min-width: 0;
+}
+
+.metric-list dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-5);
+}
+
+.admin-page .panel.quick {
+  margin-top: var(--s-4);
+}
+
+/* ---------- Statistiques (v3) ---------- */
+.stats-toolbar {
+  display: grid;
+  gap: var(--s-3);
+  margin: var(--s-2) 0 var(--s-5);
+}
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  padding: var(--s-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  justify-self: start;
+  max-width: 100%;
+}
+
+.segmented button {
+  min-height: 40px;
+  padding: 0 var(--s-4);
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink-2);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button.active {
+  background: var(--night);
+  color: var(--on-night);
+}
+
+.stats-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.stats-range label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-weight: 600;
+}
+
+.stats-range input,
+.stats-range select {
+  width: auto;
+}
+
+.stats-exports {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-left: auto;
+}
+
+.stats-exports .button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.stat-delta {
+  display: block;
+  margin-top: var(--s-1);
+  font-family: var(--font-body);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.stat-delta.up {
+  color: var(--success);
+}
+
+.stat-delta.down {
+  color: var(--danger);
+}
+
+.stats-funnels {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--s-4);
+  margin-bottom: var(--s-4);
+}
+
+.funnel ol {
+  list-style: none;
+  margin: 0 0 var(--s-2);
+  padding: 0;
+  display: grid;
+  gap: var(--s-3);
+}
+
+.funnel li {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr) 4.5rem 3.5rem;
+  gap: var(--s-3);
+  align-items: center;
+}
+
+.funnel-label {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.funnel-track {
+  height: 14px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.funnel-bar {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--brand-ink);
+}
+
+.funnel-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.funnel-rate {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-main > .panel + .panel,
+.admin-main > .panel-title {
+  margin-top: var(--s-5);
+}
+
+@media (max-width: 900px) {
+  .segmented {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    justify-self: stretch;
+  }
+
+  .segmented button {
+    flex: 0 0 auto;
+  }
+
+  .stats-funnels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .funnel li {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .funnel-track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .stats-exports {
+    margin-left: 0;
+  }
+}
+
+/* ---------- Restaurateurs (v3) ---------- */
+.restaurant-detail {
+  margin-top: var(--s-4);
+}
+
+.plans-details {
+  margin-top: var(--s-6);
+}
+
+.plans-details summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-3);
+  cursor: pointer;
+}
+
+.plans-details summary h2 {
+  margin: 0;
+  font-size: var(--fs-h3);
+}
+
+.plans-details[open] summary {
+  margin-bottom: var(--s-4);
+}
+
+.table-toolbar .event-select {
+  flex: 1 1 380px;
+  width: auto;
+}
+
+.refund-panel {
+  margin-top: var(--s-4);
+  display: grid;
+  gap: var(--s-3);
+}
+
+.section-heading {
+  margin: var(--s-5) 0 var(--s-2);
+  font-size: var(--fs-h3);
+}
+
+.legacy-ledger {
+  margin-top: var(--s-5);
+}
+
+.legacy-ledger summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-3);
+  cursor: pointer;
+}
+
+.legacy-ledger summary h2 {
+  margin: 0;
+  font-size: var(--fs-h3);
 }

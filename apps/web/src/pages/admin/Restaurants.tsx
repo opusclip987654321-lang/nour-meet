@@ -4,7 +4,9 @@ import { SUBSCRIPTION_STATUS_LABEL } from "../../lib/labels";
 import { Layout } from "../../components/Layout";
 import { Notice } from "../../components/ui";
 import { imgUrl, money } from "../../lib/format";
-import { RESTAURANT_STATUS_LABEL } from "../../lib/labels";
+import { RESTAURANT_STATUS_LABEL, RESTAURANT_VALIDATION } from "../../lib/labels";
+import { DataTable, FilterTabs, type Column } from "../../components/DataTable";
+import { Search } from "lucide-react";
 import { AdminNav } from "./AdminNav";
 import { SubscriptionSummary, type SubscriptionOverview } from "../RestaurantSubscription";
 
@@ -13,7 +15,9 @@ export function AdminRestaurants() {
   // avant l'arrivée des données.
   const [items,setItems]=useState<any[]|null>(null);
   const [plans,setPlans]=useState<any[]|null>(null);
-  const [filter,setFilter]=useState("PENDING");
+  const [filter,setFilter]=useState<"PENDING"|"APPROVED"|"REJECTED"|"SUSPENDED">("PENDING");
+  const [q,setQ]=useState("");
+  const [selected,setSelected]=useState<string|null>(null);
   const [actingOn,setActingOn]=useState<string|null>(null);
   const [reasonFor,setReasonFor]=useState<string|null>(null);
   const [reason,setReason]=useState("");
@@ -32,7 +36,8 @@ export function AdminRestaurants() {
   const [notice,setNotice]=useState<{kind:"error"|"success";text:string}|null>(null);
   const [planEdits,setPlanEdits]=useState<Record<string,{monthlyPriceCents:string;monthlyEventQuota:string}>>({});
   const [newPlan,setNewPlan]=useState({name:"",monthlyPriceCents:"",monthlyEventQuota:""});
-  const load=useCallback(()=>api<any[]>(`/admin/restaurants?status=${filter}`).then(setItems),[filter]);
+  // Tous les établissements d'un coup : les onglets affichent leur compteur sans nouvel appel.
+  const load=useCallback(()=>api<any[]>("/admin/restaurants").then(setItems),[]);
   const loadPlans=useCallback(()=>api<any[]>("/admin/plans").then(v=>{setPlans(v);setPlanEdits(Object.fromEntries(v.map(p=>[p.id,{monthlyPriceCents:String(p.monthlyPriceCents/100),monthlyEventQuota:p.monthlyEventQuota==null?"":String(p.monthlyEventQuota)}])))}),[]);
   useEffect(()=>{load();loadPlans().catch(()=>{})},[load,loadPlans]);
   const savePlan=async(id:string)=>{
@@ -63,26 +68,10 @@ export function AdminRestaurants() {
     finally{setActingOn(null)}
   };
 
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Demandes restaurateurs</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
-    <div className="panel" style={{marginBottom:20}}>
-      <div className="panel-title"><h2>Formules d’abonnement</h2><span>Prix HT · quota vide = illimité · le prix annuel se fixe séparément (2 mois offerts)</span></div>
-      <div className="stack">{plans===null&&[0,1].map(i=><div key={i} className="skeleton" style={{height:76}}/>)}{(plans??[]).map(p=><div key={p.id} className="time-row" style={{alignItems:"center"}}>
-        <span>{p.name}{!p.active&&" (désactivée)"}</span>
-        <label>€/mois<input type="number" min={0} step="1" value={planEdits[p.id]?.monthlyPriceCents??""} onChange={e=>setPlanEdits({...planEdits,[p.id]:{...planEdits[p.id],monthlyPriceCents:e.target.value}})}/></label>
-        <label>Quota mensuel (vide=illimité)<input type="number" min={1} placeholder="illimité" value={planEdits[p.id]?.monthlyEventQuota??""} onChange={e=>setPlanEdits({...planEdits,[p.id]:{...planEdits[p.id],monthlyEventQuota:e.target.value}})}/></label>
-        <small className="fine">Annuel : {p.annualPriceCents!=null?`${(p.annualPriceCents/100).toFixed(0)} €/an`:"non proposé"}</small>
-        <button type="button" className="button small" onClick={()=>savePlan(p.id)}>Enregistrer</button>
-        <button type="button" className="button small secondary" onClick={()=>togglePlanActive(p)}>{p.active?"Désactiver":"Réactiver"}</button>
-      </div>)}</div>
-      <form className="time-row" onSubmit={createPlan} style={{marginTop:14,alignItems:"center"}}>
-        <input placeholder="Nom de la nouvelle formule" value={newPlan.name} onChange={e=>setNewPlan({...newPlan,name:e.target.value})} required/>
-        <input type="number" min={0} placeholder="€/mois" value={newPlan.monthlyPriceCents} onChange={e=>setNewPlan({...newPlan,monthlyPriceCents:e.target.value})} required/>
-        <input type="number" min={1} placeholder="Quota (vide=illimité)" value={newPlan.monthlyEventQuota} onChange={e=>setNewPlan({...newPlan,monthlyEventQuota:e.target.value})}/>
-        <button className="button small">Créer la formule</button>
-      </form>
-    </div>
-    <div className="filters"><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="PENDING">En attente</option><option value="APPROVED">Approuvés</option><option value="REJECTED">Refusés</option><option value="SUSPENDED">Suspendus</option></select></div>
-    {items===null?<div className="stack" aria-busy="true">{[0,1,2].map(i=><div key={i} className="skeleton" style={{height:64}}/>)}</div>:items.length===0?<div className="empty"><h2>Aucune demande</h2></div>:<div className="stack">{items.map(r=><article key={r.id} className="panel restaurant-request">
+  const counts=(status:string)=>(items??[]).filter(r=>r.status===status).length;
+  const query=q.trim().toLowerCase();
+  const rows=items===null?null:items.filter(r=>r.status===filter).filter(r=>!query||[r.name,r.owner?.displayName,r.district,r.siret].some((t:string|undefined)=>t?.toLowerCase().includes(query)));
+  const detail=(r:any)=><article className="panel restaurant-request">
       <div>
         <h3>{r.name}</h3>
         <p>{r.owner.displayName} · {(r.phone||r.owner.phone)?<a href={`tel:${r.phone||r.owner.phone}`}>{r.phone||r.owner.phone}</a>:(r.owner.email??"coordonnées non renseignées")}{r.owner.email?<> · <a href={`mailto:${r.owner.email}`}>Contacter par e-mail</a></>:null}</p>
@@ -102,6 +91,41 @@ export function AdminRestaurants() {
       {r.status==="PENDING"&&<div className="decision-buttons">
       {!(r.photos?.length>0)&&<p className="fine left">Aucune photo de l’établissement : l’approbation reste impossible tant que le restaurateur n’en a pas ajouté au moins une.</p>}<button className="button" disabled={actingOn===r.id||!(r.photos?.length>0)} onClick={()=>decide(r.id,true)}>Accepter</button>
       {reasonFor===r.id?<div className="reject-note"><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motif (optionnel)"/><button className="button danger" disabled={actingOn===r.id} onClick={()=>decide(r.id,false,reason)}>Confirmer le refus</button></div>:<button className="button danger" onClick={()=>setReasonFor(r.id)}>Refuser</button>}
-    </div>}</article>)}</div>}
+    </div>}</article>;
+  const columns:Column<any>[]=[
+    {key:"name",header:"Établissement",primary:true,render:r=><span className="cell-main"><b>{r.name}</b><small>{r.district??"—"}</small></span>},
+    {key:"owner",header:"Contact",render:r=><span className="cell-main"><span>{r.owner.displayName}</span><small>{r.phone||r.owner.phone||r.owner.email||"—"}</small></span>},
+    {key:"subscription",header:"Abonnement",render:r=>r.subscription?`${r.subscription.plan.name} · ${SUBSCRIPTION_STATUS_LABEL[r.subscription.status]??r.subscription.status}`:"Aucun"},
+    {key:"photos",header:"Photos",numeric:true,render:r=>r.photos?.length??0},
+    {key:"date",header:"Demande reçue",render:r=>r.submittedAt?new Intl.DateTimeFormat("fr-FR",{day:"numeric",month:"short",year:"numeric"}).format(new Date(r.submittedAt)):"—"},
+    {key:"status",header:"Statut",render:r=>{const v=RESTAURANT_VALIDATION[r.status];return <span className={`badge ${v?.tone??"neutral"}`}>{RESTAURANT_STATUS_LABEL[r.status]??r.status}</span>}},
+    {key:"actions",header:"Actions",render:r=><span className="cell-actions"><button type="button" className="button small secondary" aria-expanded={selected===r.id} onClick={e=>{e.stopPropagation();setSelected(selected===r.id?null:r.id)}}>{selected===r.id?"Fermer":r.status==="PENDING"?"Examiner":"Détails"}</button></span>}
+  ];
+  const current=(items??[]).find(r=>r.id===selected&&r.status===filter);
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Restaurateurs</h1>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    <FilterTabs label="Filtrer les restaurateurs" value={filter} onChange={v=>{setFilter(v);setSelected(null)}} options={[{value:"PENDING",label:"À examiner",count:items===null?undefined:counts("PENDING")},{value:"APPROVED",label:"Validés",count:items===null?undefined:counts("APPROVED")},{value:"REJECTED",label:"Refusés",count:items===null?undefined:counts("REJECTED")},{value:"SUSPENDED",label:"Suspendus",count:items===null?undefined:counts("SUSPENDED")}]}/>
+    <div className="table-toolbar"><label className="search-field"><span className="visually-hidden">Rechercher un restaurateur</span><Search size={18} aria-hidden="true"/><input type="search" value={q} onChange={e=>setQ(e.target.value)} placeholder="Rechercher : nom, responsable, quartier, SIRET…"/></label></div>
+    <DataTable caption="Restaurateurs" rows={rows} columns={columns} rowKey={r=>r.id} selectedKey={selected} onRowClick={r=>setSelected(selected===r.id?null:r.id)} empty={filter==="PENDING"?"Aucune demande à examiner.":"Aucun établissement dans cette liste."}/>
+    {current&&<div className="restaurant-detail">{detail(current)}</div>}
+    <details className="panel plans-details">
+      <summary><h2>Formules d’abonnement</h2><span className="fine">Prix HT · quota vide = illimité</span></summary>
+    <div>
+      <p className="fine left">Le prix annuel se fixe séparément (2 mois offerts).</p>
+      <div className="stack">{plans===null&&[0,1].map(i=><div key={i} className="skeleton" style={{height:76}}/>)}{(plans??[]).map(p=><div key={p.id} className="time-row" style={{alignItems:"center"}}>
+        <span>{p.name}{!p.active&&" (désactivée)"}</span>
+        <label>€/mois<input type="number" min={0} step="1" value={planEdits[p.id]?.monthlyPriceCents??""} onChange={e=>setPlanEdits({...planEdits,[p.id]:{...planEdits[p.id],monthlyPriceCents:e.target.value}})}/></label>
+        <label>Quota mensuel (vide=illimité)<input type="number" min={1} placeholder="illimité" value={planEdits[p.id]?.monthlyEventQuota??""} onChange={e=>setPlanEdits({...planEdits,[p.id]:{...planEdits[p.id],monthlyEventQuota:e.target.value}})}/></label>
+        <small className="fine">Annuel : {p.annualPriceCents!=null?`${(p.annualPriceCents/100).toFixed(0)} €/an`:"non proposé"}</small>
+        <button type="button" className="button small" onClick={()=>savePlan(p.id)}>Enregistrer</button>
+        <button type="button" className="button small secondary" onClick={()=>togglePlanActive(p)}>{p.active?"Désactiver":"Réactiver"}</button>
+      </div>)}</div>
+      <form className="time-row" onSubmit={createPlan} style={{marginTop:14,alignItems:"center"}}>
+        <input placeholder="Nom de la nouvelle formule" value={newPlan.name} onChange={e=>setNewPlan({...newPlan,name:e.target.value})} required/>
+        <input type="number" min={0} placeholder="€/mois" value={newPlan.monthlyPriceCents} onChange={e=>setNewPlan({...newPlan,monthlyPriceCents:e.target.value})} required/>
+        <input type="number" min={1} placeholder="Quota (vide=illimité)" value={newPlan.monthlyEventQuota} onChange={e=>setNewPlan({...newPlan,monthlyEventQuota:e.target.value})}/>
+        <button className="button small">Créer la formule</button>
+      </form>
+    </div>
+    </details>
   </div></section></Layout>;
 }

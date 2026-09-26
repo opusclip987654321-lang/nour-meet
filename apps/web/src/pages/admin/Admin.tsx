@@ -5,7 +5,6 @@ import { Link } from "react-router-dom";
 import { api } from "../../api";
 import { useAuth } from "../../auth";
 import { Layout } from "../../components/Layout";
-import { Loading } from "../../components/ui";
 import { money } from "../../lib/format";
 import { EVENT_STATUS_LABEL } from "../../lib/labels";
 import { spacePath } from "../../lib/spaces";
@@ -46,26 +45,50 @@ export function Admin() {
     <input aria-label="Âge maximum" type="number" min={0} value={filters.maxAge} onChange={e=>setFilters({...filters,maxAge:e.target.value})} placeholder="Âge max"/>
     {JSON.stringify(filters)!==JSON.stringify(emptyDashboardFilters)&&<button type="button" className="button small secondary" onClick={()=>setFilters(emptyDashboardFilters)}>Réinitialiser</button>}
   </div>
-  {!stats?<Loading/>:<><div className="stat-grid">
-    <Stat label={`Candidatures (${periodDays} jours)`} value={stats.applications}/>
-    {stats.acceptanceRate!=null&&<Stat label="Taux d’acceptation (entretien)" value={`${stats.acceptanceRate}%`}/>}
-    <Stat label="Événements à venir" value={stats.upcomingEvents}/>
-    <Stat label="Événements au total" value={stats.events}/>
-    <Stat label="Places restantes" value={stats.remainingSpots}/>
-    <Stat label={`Billets vendus (${periodDays} jours)`} value={stats.ticketsSold}/>
-    <Stat label="Sur liste d’attente" value={stats.waitlisted}/>
-    <Stat label={user?.role==="ADMIN"?`Encaissements billets (${periodDays} jours)`:`Ventes de billets (${periodDays} jours)`} value={money(stats.revenueCents)}/>
-    {stats.openReports!=null&&<Stat label="Signalements ouverts" value={stats.openReports}/>}
-    {stats.pendingInterviews!=null&&<Stat label="Entretiens en attente" value={stats.pendingInterviews}/>}
-    {stats.upcomingInterviews!=null&&<Stat label="Entretiens à venir" value={stats.upcomingInterviews}/>}
-    {stats.pendingRestaurantApplications!=null&&<Stat label="Demandes restaurateurs" value={stats.pendingRestaurantApplications}/>}
-    {stats.pendingPayments!=null&&<Stat label="Paiements commencés, non finalisés" value={stats.pendingPayments}/>}
-    {stats.failedPayments!=null&&<Stat label="Paiements échoués" value={stats.failedPayments}/>}
-    {stats.shareClicks!=null&&<Stat label="Clics de partage" value={stats.shareClicks}/>}
-    {stats.shareAttributedApplications!=null&&<Stat label="Inscriptions attribuées" value={stats.shareAttributedApplications}/>}
-    {stats.shareAttributedPurchases!=null&&<Stat label="Ventes attribuées" value={stats.shareAttributedPurchases}/>}
-    {stats.subscriptionsByStatus?.map((s:any)=><Stat key={s.status} label={`Abonnements ${SUBSCRIPTION_STATUS_LABEL[s.status]??s.status}`} value={s.count}/>)}
-  </div><div className="admin-grid"><ActivityChart data={stats.activity??[]} periodDays={periodDays}/><div className="panel quick"><h2>Actions rapides</h2>{user?.role==="ADMIN"&&<Link to="/admin/applications">Traiter les entretiens <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to={spacePath(user?.role,"attendees")}>Voir les participants <ArrowRight size={18} aria-hidden="true"/></Link><Link to={spacePath(user?.role,"scanner")}>Scanner un billet <ArrowRight size={18} aria-hidden="true"/></Link>{user?.role==="ADMIN"&&<Link to="/admin/restaurants">Demandes restaurateurs <ArrowRight size={18} aria-hidden="true"/></Link>}{user?.role==="ADMIN"&&<Link to="/admin/finance">Voir les finances <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to="/events">Voir les événements <ArrowRight size={18} aria-hidden="true"/></Link></div></div></>}</div></section></Layout>;
+  {!stats?<div className="stat-grid" aria-busy="true">{[0,1,2,3,4].map(i=><div key={i} className="stat skeleton-panel" style={{minHeight:104}}/>)}</div>:<>
+    {user?.role==="ADMIN"&&<TodoPanel items={[
+      {label:"Entretiens en attente",count:stats.pendingInterviews??0,to:"/admin/applications"},
+      {label:"Soirées à valider",count:events.filter(e=>e.status==="PENDING_REVIEW").length,to:"/admin/events"},
+      {label:"Demandes restaurateurs",count:stats.pendingRestaurantApplications??0,to:"/admin/restaurants"},
+      {label:"Signalements ouverts",count:stats.openReports??0,to:"/admin/moderation"},
+      {label:"Paiements échoués",count:stats.failedPayments??0,to:"/admin/finance"}
+    ]}/>}
+    {/* Les cinq chiffres qui résument la période ; le reste en liste compacte, sous le graphique. */}
+    <div className="stat-grid kpi-row">
+      <Stat label={`Candidatures · ${periodDays} j`} value={stats.applications}/>
+      <Stat label={`Billets vendus · ${periodDays} j`} value={stats.ticketsSold}/>
+      <Stat label={user?.role==="ADMIN"?`Encaissements · ${periodDays} j`:`Ventes · ${periodDays} j`} value={money(stats.revenueCents)}/>
+      {stats.acceptanceRate!=null?<Stat label="Taux d’acceptation" value={`${stats.acceptanceRate} %`}/>:<Stat label="Sur liste d’attente" value={stats.waitlisted}/>}
+      <Stat label="Places restantes" value={stats.remainingSpots}/>
+    </div>
+    <div className="admin-grid"><ActivityChart data={stats.activity??[]} periodDays={periodDays}/>
+      <div className="panel">
+        <div className="panel-title"><h2>Autres indicateurs</h2></div>
+        <dl className="metric-list">
+          <div><dt>Événements à venir</dt><dd>{stats.upcomingEvents}</dd></div>
+          <div><dt>Événements au total</dt><dd>{stats.events}</dd></div>
+          {stats.acceptanceRate!=null&&<div><dt>Sur liste d’attente</dt><dd>{stats.waitlisted}</dd></div>}
+          {stats.upcomingInterviews!=null&&<div><dt>Entretiens à venir</dt><dd>{stats.upcomingInterviews}</dd></div>}
+          {stats.pendingPayments!=null&&<div><dt>Paiements commencés, non finalisés</dt><dd>{stats.pendingPayments}</dd></div>}
+          {stats.shareClicks!=null&&<div><dt>Clics sur les liens partagés</dt><dd>{stats.shareClicks}</dd></div>}
+          {stats.shareAttributedApplications!=null&&<div><dt>Inscriptions grâce à un partage</dt><dd>{stats.shareAttributedApplications}</dd></div>}
+          {stats.shareAttributedPurchases!=null&&<div><dt>Ventes grâce à un partage</dt><dd>{stats.shareAttributedPurchases}</dd></div>}
+          {stats.subscriptionsByStatus?.map((x:any)=><div key={x.status}><dt>Abonnements · {SUBSCRIPTION_STATUS_LABEL[x.status]??x.status}</dt><dd>{x.count}</dd></div>)}
+        </dl>
+      </div>
+    </div>
+    <div className="panel quick"><h2>Raccourcis</h2><div className="quick-links"><Link to={spacePath(user?.role,"attendees")}>Voir les participants <ArrowRight size={18} aria-hidden="true"/></Link><Link to={spacePath(user?.role,"scanner")}>Scanner un billet <ArrowRight size={18} aria-hidden="true"/></Link>{user?.role==="ADMIN"&&<Link to="/admin/events/new">Créer un événement <ArrowRight size={18} aria-hidden="true"/></Link>}{user?.role==="ADMIN"&&<Link to="/admin/stats">Statistiques détaillées <ArrowRight size={18} aria-hidden="true"/></Link>}<Link to="/events">Voir le site <ArrowRight size={18} aria-hidden="true"/></Link></div></div>
+  </>}</div></section></Layout>;
+}
+
+// « À traiter » (v3 : tableaux d'administration plus lisibles) : ce qui attend une action de l'équipe,
+// en tête de page, chaque ligne menant à l'écran où la traiter ; un compteur non nul ressort.
+function TodoPanel({ items }: { items: { label: string; count: number; to: string }[] }) {
+  const total = items.reduce((n, i) => n + i.count, 0);
+  return <section className="panel todo-panel" aria-labelledby="todo-title">
+    <div className="panel-title"><h2 id="todo-title">À traiter</h2><span>{total === 0 ? "Tout est à jour" : `${total} élément${total > 1 ? "s" : ""}`}</span></div>
+    <ul>{items.map(i => <li key={i.label}><Link to={i.to} className={i.count > 0 ? "pending" : undefined}><span>{i.label}</span><span className={`badge ${i.count > 0 ? "warning" : "neutral"}`}>{i.count}</span><ArrowRight size={16} aria-hidden="true"/></Link></li>)}</ul>
+  </section>;
 }
 
 // Activité réelle (inscriptions aux événements par jour) sur la période filtrée — une seule série :
