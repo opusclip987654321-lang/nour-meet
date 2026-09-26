@@ -18,7 +18,9 @@ export const initials = (name?: string | null) => {
 };
 export const Avatar = ({ name, photoUrl, size, className, verified }: { name?: string | null; photoUrl?: string | null; size?: "large"; className?: string; verified?: boolean }) => {
   const cls = `avatar${size ? ` ${size}` : ""}${className ? ` ${className}` : ""}`;
-  const img = photoUrl ? <img className={cls} src={imgUrl(photoUrl)} alt="" /> : <div className={cls}>{initials(name)}</div>;
+  // Initiales dans un <span> à classe dédiée : les règles de mise en page des conteneurs (« .bloc > div »,
+  // « .carte span »…) ne peuvent plus écraser leur centrage (v3 §1.1).
+  const img = photoUrl ? <img className={cls} src={imgUrl(photoUrl)} alt="" /> : <span className={`${cls} avatar-initials`}>{initials(name)}</span>;
   if (!verified) return img;
   return <div className="avatar-wrap">{img}<span className="verified-badge" title="Profil vérifié"><BadgeCheck size={13} aria-hidden="true"/>Vérifié</span></div>;
 };

@@ -1,15 +1,14 @@
-import { ExternalLink, MessageCircle, QrCode, ScanLine, Send, Smartphone } from "lucide-react";
+import { ArrowRight, MessageCircle, QrCode, ScanLine, Send, Smartphone } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { Picture } from "../components/brand";
 
-// Mise en relation sur le site (décision v2 §3, 2026-09-25) : la messagerie est réservée à
-// l'application mobile. Le site ne propose plus ni recherche de code, ni demandes, ni conversations :
-// il explique le fonctionnement et affiche le code personnel (QR code compris), toujours utile pendant
+// Messagerie sur le site (décision v2 §3, puis v3 §2) : page uniquement explicative. Les échanges réels
+// (demandes, conversations) se font dans l'application mobile ; le site présente le parcours — échange
+// de QR code en soirée, puis messagerie dans l'application — et affiche le code personnel, utile pendant
 // une soirée. Les API de contacts et de conversations restent en place pour l'application.
-// L'application n'est pas encore publiée : aucun lien vers une fiche Nūr Meet inexistante, seulement
-// la page générale de l'App Store, avec un libellé qui ne laisse pas croire à une disponibilité.
-const APP_STORE_URL = "https://www.apple.com/fr/app-store/";
-
+// L'application n'est pas encore publiée et aucun lien vers sa fiche n'existe : pas de bouton de
+// téléchargement, seulement l'information qu'elle arrive.
 function MyCode() {
   const [qr, setQr] = useState<{ code: string; qrDataUrl: string } | null>(null);
   useEffect(() => { api<{ code: string; qrDataUrl: string }>("/me/share-qr").then(setQr).catch(() => {}); }, []);
@@ -25,28 +24,38 @@ function MyCode() {
   </section>;
 }
 
-const STEPS = [
+// Parcours en deux temps : ce qui se passe à la soirée, puis ce qui se passe dans l'application.
+const AT_EVENT = [
   { icon: QrCode, title: "Échangez vos codes", text: "Pendant la soirée, montrez votre QR code ou dictez votre code." },
-  { icon: ScanLine, title: "Retrouvez la personne", text: "Dans l’application, scannez son QR code ou saisissez son code." },
+  { icon: ScanLine, title: "Retrouvez la personne", text: "Dans l’application, scannez son QR code ou saisissez son code." }
+];
+const IN_APP = [
   { icon: Send, title: "Envoyez une demande", text: "Elle reçoit votre demande et choisit de l’accepter ou non." },
   { icon: MessageCircle, title: "Discutez", text: "Une fois la demande acceptée, la conversation s’ouvre dans l’application." }
 ];
 
+const Steps = ({ steps, start }: { steps: typeof AT_EVENT; start: number }) =>
+  <ol className="contacts-app-steps">{steps.map((s, i) => <li key={s.title}><span className="mini-step-num" aria-hidden="true">{start + i}</span><s.icon size={20} aria-hidden="true"/><div><b>{s.title}</b><span>{s.text}</span></div></li>)}</ol>;
+
 export function ContactsPanel() {
   return <div className="stack">
     <section className="panel contacts-app" aria-labelledby="contacts-app-title">
-      <div className="contacts-app-head">
-        <Smartphone size={28} aria-hidden="true"/>
-        <div>
-          <h2 id="contacts-app-title">Les contacts et la messagerie se passent dans l’application</h2>
-          <p>Demandes de contact, réponses et conversations sont réunies dans l’application mobile Nūr Meet, pour échanger simplement après une soirée.</p>
+      <div className="messaging-hero">
+        <Picture name="ai-echange-code" className="messaging-photo" sizes="(max-width: 760px) 92vw, 360px"/>
+        <div className="contacts-app-head">
+          <Smartphone size={28} aria-hidden="true"/>
+          <div>
+            <h2 id="contacts-app-title">Les contacts et la messagerie se passent dans l’application</h2>
+            <p>Pendant la soirée, vous échangez vos QR codes. Ensuite, demandes de contact, réponses et conversations sont réunies dans l’application mobile Nūr Meet, sans jamais donner votre numéro.</p>
+          </div>
         </div>
       </div>
-      <ol className="contacts-app-steps">{STEPS.map((s, i) => <li key={s.title}><span className="mini-step-num" aria-hidden="true">{i + 1}</span><s.icon size={20} aria-hidden="true"/><div><b>{s.title}</b><span>{s.text}</span></div></li>)}</ol>
-      <div className="contacts-app-store">
-        <p><b>L’application Nūr Meet arrive bientôt sur l’App Store.</b> Elle n’est pas encore téléchargeable.</p>
-        <a className="button secondary" href={APP_STORE_URL} target="_blank" rel="noreferrer">Découvrir l’App Store<ExternalLink size={16} aria-hidden="true"/></a>
+      <div className="messaging-journey">
+        <div className="journey-stage"><h3><QrCode size={18} aria-hidden="true"/>Pendant la soirée</h3><Steps steps={AT_EVENT} start={1}/></div>
+        <ArrowRight className="journey-arrow" size={22} aria-hidden="true"/>
+        <div className="journey-stage"><h3><Smartphone size={18} aria-hidden="true"/>Dans l’application</h3><Steps steps={IN_APP} start={3}/></div>
       </div>
+      <p className="contacts-app-store"><b>L’application Nūr Meet arrive bientôt sur l’App Store.</b> Elle n’est pas encore téléchargeable.</p>
     </section>
     <MyCode/>
   </div>;

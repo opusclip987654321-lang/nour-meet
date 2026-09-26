@@ -269,7 +269,7 @@
   border-bottom: 1px solid var(--line);
 }
 
-.profile-photo-editor > div {
+.profile-photo-editor > .profile-photo-actions {
   display: grid;
   gap: var(--s-2);
   justify-items: start;
@@ -1849,9 +1849,50 @@
 }
 
 /* Étapes courtes rappelées au moment d'agir (demande d'entretien, code personnel) — 2026-09-25 */
+/* Demande d'entretien (v3 §7.1, §7.3) : formulaire principal, bloc visuel à côté ; le bouton garde
+   l'espacement normal de l'interface au lieu de toucher le bord du cadre. */
+.interview-request {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--s-5);
+  align-items: start;
+}
+
+.interview-form {
+  display: grid;
+  gap: var(--s-4);
+  padding-bottom: var(--s-2);
+}
+
+.interview-form textarea {
+  min-height: 160px;
+}
+
+.interview-form .button {
+  justify-self: start;
+}
+
+.interview-visual {
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  min-width: 0;
+}
+
+.interview-photo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+}
+
 .interview-steps {
   list-style: none;
-  margin: 0 0 var(--s-4);
+  margin: 0;
   padding: 0;
   display: grid;
   gap: var(--s-2);
@@ -1859,9 +1900,32 @@
   font-size: var(--fs-sm);
 }
 
-.interview-steps b {
+.interview-steps li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--s-2);
+  align-items: start;
+}
+
+.interview-steps svg {
   color: var(--saffron-ink);
-  margin-right: var(--s-1);
+  margin-top: 2px;
+}
+
+.interview-cancelled {
+  grid-column: 1 / -1;
+  border: 1px solid var(--danger);
+}
+
+.interview-cancelled b {
+  display: block;
+  margin-bottom: var(--s-1);
+}
+
+@media (max-width: 900px) {
+  .interview-request {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* Abonnement : factures et squelettes (décision du 2026-09-25) */
@@ -2017,12 +2081,56 @@
   color: var(--ink-2);
 }
 
+/* Photo de l'échange de QR code mise en avant, à côté de l'explication (v3 §2). */
+.messaging-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: var(--s-5);
+  align-items: center;
+}
+
+.messaging-photo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  border-radius: var(--r-md);
+}
+
+/* Parcours en deux temps : en soirée, puis dans l'application. */
+.messaging-journey {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: var(--s-3);
+  align-items: center;
+}
+
+.journey-stage {
+  display: grid;
+  gap: var(--s-3);
+  min-width: 0;
+}
+
+.journey-stage h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0;
+  font-size: var(--fs-md);
+}
+
+.journey-stage h3 svg,
+.journey-arrow {
+  color: var(--saffron-ink);
+}
+
 .contacts-app-steps {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--s-3);
 }
 
@@ -2061,9 +2169,8 @@
   background: var(--surface-2);
 }
 
-.contacts-app-store p {
+.contacts-app-store {
   margin: 0;
-  flex: 1 1 280px;
   color: var(--ink-2);
 }
 
@@ -2072,9 +2179,15 @@
   height: 152px;
 }
 
-@media (max-width: 640px) {
-  .contacts-app-steps {
+@media (max-width: 760px) {
+  .messaging-hero,
+  .messaging-journey {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .journey-arrow {
+    justify-self: center;
+    transform: rotate(90deg);
   }
 }
 

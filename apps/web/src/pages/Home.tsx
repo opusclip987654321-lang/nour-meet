@@ -8,7 +8,7 @@ import { ContactExplainer, InterviewExplainer } from "../components/explainers";
 import { Layout } from "../components/Layout";
 import { ShareSiteButton } from "../components/ShareSite";
 import { useAuth } from "../auth";
-import { EventCard, availabilityLabel, initials } from "../components/ui";
+import { Avatar, EventCard, availabilityLabel } from "../components/ui";
 import { imgUrl, money } from "../lib/format";
 import { SITE_NAME, SITE_URL, absoluteUrl, useSeo } from "../lib/seo";
 
@@ -22,7 +22,7 @@ function TestimonialsSection({ eventType }: { eventType?: string }) {
     <div className="section-title"><h2 id="temoignages">Ils sont venus, ils racontent</h2></div>
     <div className="testimonial-grid">{items.map(t=><figure key={t.id} className="testimonial-card">
       <blockquote>« {t.text} »</blockquote>
-      <figcaption className="testimonial-head"><span className="testimonial-avatar" aria-hidden="true">{initials(t.displayName)}</span><div><b>{t.displayName}</b><span>{t.eventType}{t.rating?` · ${t.rating}/5`:""}</span></div></figcaption>
+      <figcaption className="testimonial-head"><Avatar name={t.displayName} className="testimonial-avatar"/><div><b>{t.displayName}</b><span>{t.eventType}{t.rating?` · ${t.rating}/5`:""}</span></div></figcaption>
     </figure>)}</div>
   </section>;
 }

@@ -195,9 +195,11 @@ html {
   }
 }
 
-/* Le contenu principal occupe au moins la hauteur de l'écran : pendant le chargement des données,
-   le pied de page reste hors de l'écran au lieu d'être visible puis poussé vers le bas à l'arrivée
-   du contenu (principale source de CLS mesurée sur les pages connectées). */
-main {
+/* Pied de page collé au bas de la fenêtre (v3 §3) : #root est une colonne flex et main prend la place
+   restante, donc une page courte ne défile pas vers un pied de page flottant au milieu de l'écran.
+   Seulement pendant un chargement (indicateur ou squelette présent), le contenu occupe toute la
+   hauteur de l'écran : le pied de page reste alors hors de l'écran au lieu d'être visible puis poussé
+   vers le bas à l'arrivée des données (principale source de CLS mesurée sur les pages connectées). */
+main:has(.spinner, .skeleton, [aria-busy="true"]) {
   min-height: calc(100dvh - var(--header-h));
 }

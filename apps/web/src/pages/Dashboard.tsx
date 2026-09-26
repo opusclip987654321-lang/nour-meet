@@ -1,4 +1,4 @@
-import { Camera, CheckCircle2, ChevronRight, Hourglass, Inbox } from "lucide-react";
+import { AlertTriangle, CalendarClock, Camera, CheckCircle2, ChevronRight, Hourglass, Inbox, PenLine, PhoneCall } from "lucide-react";
 import { MINIMUM_AGE, isAdult, normalizeInterests } from "@nour/shared";
 import { FormEvent, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
@@ -10,6 +10,7 @@ import { InterestPicker } from "../components/InterestPicker";
 import { Toast, type ToastMessage } from "../components/Toast";
 import { PhoneVerification } from "../components/PhoneVerification";
 import { Layout } from "../components/Layout";
+import { Picture } from "../components/brand";
 import { Avatar, CategoryBadge, Notice } from "../components/ui";
 import { dateTime, imgUrl, longDate, money } from "../lib/format";
 import { APPLICATION_STATUS_LABEL } from "../lib/labels";
@@ -49,7 +50,7 @@ function ProfileEditor({onSaved}:{onSaved:()=>void}) {
     finally{setPhotoBusy(false)}
   };
   return <form className="panel form-grid" onSubmit={save}><div className="panel-title"><h2>Mon profil</h2><span>Informations privées</span></div><Toast toast={toast} onDone={clearToast}/>
-    <div className="wide profile-photo-editor"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><div>
+    <div className="wide profile-photo-editor"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><div className="profile-photo-actions">
       {!user?.profile?.photoUrl&&<p className="photo-cta-hint">Une photo rassure les personnes que vous rencontrez. Facultatif.</p>}
       <label className={`button${user?.profile?.photoUrl?" small secondary":""}`}><Camera size={18} aria-hidden="true"/>{photoBusy?"Envoi…":user?.profile?.photoUrl?"Changer la photo":"Ajouter une photo"}<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={photoBusy} onChange={e=>{const f=e.target.files?.[0];if(f)uploadPhoto(f);e.target.value=""}}/></label>
       {user?.profile?.photoUrl&&<button type="button" className="link-button" disabled={photoBusy} onClick={removePhoto}>Retirer</button>}
@@ -100,9 +101,12 @@ function PrivacyPanel() {
   </div>;
 }
 
-function GlobalInterviewPanel() {
+// onStatus : l'état de l'entretien remonte à la carte de profil, pour qu'une annulation ou une demande
+// s'y reflète immédiatement (v3 §7.2 : jamais « Entretien en cours » pour un entretien annulé).
+function GlobalInterviewPanel({ onStatus }: { onStatus: (status: string | null) => void }) {
   const {user}=useAuth();
   const [status,setStatus]=useState<any>(undefined);
+  useEffect(()=>{if(status!==undefined)onStatus(status?.status??null)},[status,onStatus]);
   const [motivation,setMotivation]=useState("");
   const [schedulingId,setSchedulingId]=useState<string|null>(null);
   const [moving,setMoving]=useState(false);
@@ -134,13 +138,33 @@ function GlobalInterviewPanel() {
   // « Annuler ma demande d'entretien » : libère le créneau et permet de refaire une demande plus tard.
   const cancel=async()=>{
     setBusy(true);setNotice(null);
-    try{await api(`/me/applications/${status.id}/cancel`,{method:"POST"});setMoving(false);setNotice({kind:"success",text:"Votre demande d’entretien est annulée. Vous pourrez en refaire une quand vous le souhaitez."});await load()}
+    try{await api(`/me/applications/${status.id}/cancel`,{method:"POST"});setMoving(false);setNotice({kind:"success",text:"Votre demande d’annulation a bien été prise en compte."});await load()}
     catch(err){setNotice({kind:"error",text:(err as Error).message})}
     finally{setBusy(false)}
   };
 
-  // Les trois étapes restent visibles au moment de la demande : c'est là que l'entretien inquiète.
-  const requestForm=<form onSubmit={request}><ol className="interview-steps"><li><b>1.</b> Quelques mots sur vous, ci-dessous</li><li><b>2.</b> Vous choisissez un créneau, tous les jours de 10h à 22h</li><li><b>3.</b> Un membre de l’équipe vous appelle : 15 minutes, un échange bienveillant</li></ol><label>Votre motivation<textarea required minLength={30} value={motivation} onChange={e=>setMotivation(e.target.value)} placeholder="Ce que vous recherchez, en quelques lignes…"/></label><button className="button" disabled={busy}>{busy?"Envoi…":"Demander mon entretien"}</button></form>;
+  // Demande d'entretien (v3 §7.3) : le formulaire reste l'élément principal ; à côté, un bloc visuel
+  // inspiré de l'accueil (photo de l'appel, trois étapes) accompagne le parcours sans le repousser sous
+  // la ligne de flottaison — sur mobile, le formulaire passe en premier. Les étapes restent visibles au
+  // moment de la demande : c'est là que l'entretien inquiète.
+  const requestForm=<div className="interview-request wide">
+    <form onSubmit={request} className="interview-form">
+      <label>Votre motivation<textarea required minLength={30} value={motivation} onChange={e=>setMotivation(e.target.value)} placeholder="Ce que vous recherchez, en quelques lignes…"/></label>
+      <button className="button" disabled={busy}>{busy?"Envoi…":"Demander mon entretien"}</button>
+    </form>
+    <aside className="interview-visual" aria-label="Comment se passe l’entretien">
+      <Picture name="ai-entretien" className="interview-photo" sizes="(max-width: 900px) 92vw, 320px"/>
+      <ol className="interview-steps">
+        <li><PenLine size={18} aria-hidden="true"/><span>Quelques mots sur vous, ci-contre</span></li>
+        <li><CalendarClock size={18} aria-hidden="true"/><span>Vous choisissez un créneau, tous les jours de 10h à 22h</span></li>
+        <li><PhoneCall size={18} aria-hidden="true"/><span>Un membre de l’équipe vous appelle : 15 minutes, un échange bienveillant</span></li>
+      </ol>
+    </aside>
+  </div>;
+  // Entretien annulé (v3 §7.2) : la confirmation de l'annulation reste verte (la demande a été exécutée),
+  // mais un avertissement rouge rappelle qu'aucun entretien n'est plus programmé — l'état annulé ne doit
+  // jamais pouvoir passer pour un entretien confirmé. Affiché tant que la demande est annulée.
+  const cancelledWarning=<div className="notice error interview-cancelled" role="alert"><AlertTriangle size={20} aria-hidden="true"/><div><b>Votre entretien a été annulé.</b><p>Vous n’avez plus d’entretien programmé. Pour poursuivre la validation de votre profil, faites une nouvelle demande et réservez un créneau.</p></div></div>;
   const cancelButton=<button type="button" className="button secondary small" disabled={busy||!!schedulingId} onClick={cancel}>{busy?"Annulation…":"Annuler ma demande d’entretien"}</button>;
 
   if(status===undefined) return <div className="panel skeleton-panel" aria-hidden="true"/>;
@@ -153,7 +177,8 @@ function GlobalInterviewPanel() {
     {notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
     {user?.profile?.validatedAt?<Notice kind="success">Votre profil est validé : vous pouvez vous inscrire directement aux événements.</Notice>
     :!user?.phoneVerified?<PhoneVerification compact/>
-    :!status||status.status==null||status.status==="CANCELLED"?requestForm
+    :!status||status.status==null?requestForm
+    :status.status==="CANCELLED"?<>{cancelledWarning}{requestForm}</>
     :status.status==="REFUSED"?(
       status.retryAvailableAt && new Date(status.retryAvailableAt)>new Date()
         ? <><Notice kind="error">Votre profil n’a pas été validé.</Notice><p className="fine">Vous pourrez redemander un entretien à partir du {longDate(status.retryAvailableAt)}.</p></>
@@ -258,7 +283,7 @@ export function Dashboard() {
   const [interviewStatus,setInterviewStatus]=useState<string|null>(null);
   useEffect(()=>{if(!validated)api<any>("/me/global-interview").then(s=>setInterviewStatus(s?.status??null)).catch(()=>{})},[validated]);
   useEffect(()=>{if(loaded&&!validated&&!searchParams.get("tab")&&!apps.some(a=>a.eventId))setTab("interview")},[loaded,validated,apps,searchParams]);
-  const profileLabel=validated?"Profil validé":interviewStatus==="REFUSED"?"Profil non retenu":interviewStatus==="PENDING_CALL"||interviewStatus==="CALL_SCHEDULED"?"Entretien en cours":"Profil à compléter";
+  const profileLabel=validated?"Profil validé":interviewStatus==="REFUSED"?"Profil non retenu":interviewStatus==="PENDING_CALL"||interviewStatus==="CALL_SCHEDULED"?"Entretien en cours":interviewStatus==="CANCELLED"?"Entretien annulé":"Profil à compléter";
   // §4.3 (corrections web 2026-09-24) : une notification mène à l'inscription ou au billet précis
   // (?application=… ou ?reservation=…) — la carte correspondante est amenée à l'écran et mise en évidence.
   const focusId=searchParams.get("application")??searchParams.get("reservation");
@@ -294,9 +319,9 @@ export function Dashboard() {
   };
   const eventApps=apps.filter(a=>a.eventId);
   const ticketsLabel=tickets.length===1?"Mon billet":"Mes billets";
-  const tabs=[["interview","Entretien"],["reservations","Réservations"],["tickets",ticketsLabel],["contacts","Contacts"],["profile","Profil"],["report","Signaler"]];
-  const titles:Record<string,string>={interview:"Entretien de validation",reservations:"Mes événements",tickets:ticketsLabel,contacts:"Mes contacts",profile:"Mon profil",report:"Signaler un problème"};
-  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{profileLabel}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} aria-current={tab===id?"page":undefined} onClick={()=>setTab(id)} key={id}>{label}{id==="interview"&&user?.profile?.validatedAt&&<CheckCircle2 size={16} aria-label="validé" className="tab-done"/>}<ChevronRight size={16} aria-hidden="true"/></button>)}</aside><div className="dashboard-content"><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><Inbox size={24} aria-hidden="true"/><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=><ReservationCard key={a.id} application={a} offers={pendingOffers.filter(o=>o.originalEventId===a.eventId)} focused={focusId===a.id} focusRef={focusRef} busyId={busyId} onPay={amountCents=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents})} onCancel={()=>cancelApplication(a.id)} onRespondOffer={respondOffer}/>)}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.length===0&&<div className="empty small"><Inbox size={24} aria-hidden="true"/><p>Aucun billet pour le moment : il apparaît ici dès que votre place est confirmée.</p></div>}{tickets.map(t=>{const focused=focusId===t.reservationId;return <article className={`ticket${focused?" focused":""}`} key={t.id} tabIndex={focused?-1:undefined} ref={focused?el=>{focusRef.current=el}:undefined}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{(t.reservation.event.venueRestaurant??t.reservation.event.controllerRestaurant)&&<p>{(t.reservation.event.venueRestaurant??t.reservation.event.controllerRestaurant).name}</p>}<p>{t.reservation.event.address?`${t.reservation.event.address} · ${t.reservation.event.district}`:t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>})}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/>{user?.phoneVerified?<div className="panel"><div className="panel-title"><h2>Numéro de téléphone</h2><span className="badge success">Vérifié</span></div><p className="fine left">{user.phone} — utilisé uniquement pour vos réservations, jamais visible des autres participants ni des restaurants.</p></div>:<PhoneVerification/>}<PrivacyPanel/></div>}{tab==="contacts"&&<ContactsPanel/>}{tab==="report"&&<ReportPanel/>}</div></section>
+  const tabs=[["interview","Entretien"],["reservations","Réservations"],["tickets",ticketsLabel],["contacts","Messagerie"],["profile","Profil"],["report","Signaler"]];
+  const titles:Record<string,string>={interview:"Entretien de validation",reservations:"Mes événements",tickets:ticketsLabel,contacts:"Messagerie",profile:"Mon profil",report:"Signaler un problème"};
+  return <Layout><section className="dashboard-shell"><aside><div className="profile-card"><Avatar name={user?.displayName} photoUrl={user?.profile?.photoUrl} size="large" verified={!!user?.profile?.validatedAt}/><h3>{user?.displayName}</h3><span>{profileLabel}</span></div>{tabs.map(([id,label])=><button className={tab===id?"active":""} aria-current={tab===id?"page":undefined} onClick={()=>setTab(id)} key={id}>{label}{id==="interview"&&user?.profile?.validatedAt&&<CheckCircle2 size={16} aria-label="validé" className="tab-done"/>}<ChevronRight size={16} aria-hidden="true"/></button>)}</aside><div className="dashboard-content"><h1>{titles[tab]}</h1>{message&&<Notice kind={message.kind}>{message.text}</Notice>}{tab==="interview"&&<GlobalInterviewPanel onStatus={setInterviewStatus}/>}{tab==="reservations"&&<div className="stack">{eventApps.length===0?<div className="empty small"><Inbox size={24} aria-hidden="true"/><p>Aucune inscription pour le moment.</p></div>:eventApps.map(a=><ReservationCard key={a.id} application={a} offers={pendingOffers.filter(o=>o.originalEventId===a.eventId)} focused={focusId===a.id} focusRef={focusRef} busyId={busyId} onPay={amountCents=>setPayingFor({applicationId:a.id,eventId:a.event.id,amountCents})} onCancel={()=>cancelApplication(a.id)} onRespondOffer={respondOffer}/>)}</div>}{tab==="tickets"&&<div className="ticket-grid">{tickets.length===0&&<div className="empty small"><Inbox size={24} aria-hidden="true"/><p>Aucun billet pour le moment : il apparaît ici dès que votre place est confirmée.</p></div>}{tickets.map(t=>{const focused=focusId===t.reservationId;return <article className={`ticket${focused?" focused":""}`} key={t.id} tabIndex={focused?-1:undefined} ref={focused?el=>{focusRef.current=el}:undefined}><div><div className="admin-event-meta"><CategoryBadge category={t.reservation.event.category} className="inline"/></div><span className="eyebrow">{dateTime(t.reservation.event.startsAt)}</span><h2>{t.reservation.event.title}</h2>{(t.reservation.event.venueRestaurant??t.reservation.event.controllerRestaurant)&&<p>{(t.reservation.event.venueRestaurant??t.reservation.event.controllerRestaurant).name}</p>}<p>{t.reservation.event.address?`${t.reservation.event.address} · ${t.reservation.event.district}`:t.reservation.event.district}</p></div><img src={t.qrDataUrl} alt={`QR code du billet ${t.code}`}/><b>{t.code}</b></article>})}</div>}{tab==="profile"&&<div className="stack"><ProfileEditor onSaved={refresh}/>{user?.phoneVerified?<div className="panel"><div className="panel-title"><h2>Numéro de téléphone</h2><span className="badge success">Vérifié</span></div><p className="fine left">{user.phone} — utilisé uniquement pour vos réservations, jamais visible des autres participants ni des restaurants.</p></div>:<PhoneVerification/>}<PrivacyPanel/></div>}{tab==="contacts"&&<ContactsPanel/>}{tab==="report"&&<ReportPanel/>}</div></section>
   {payingFor&&<Suspense fallback={null}><PaymentModal applicationId={payingFor.applicationId} eventId={payingFor.eventId} amountCents={payingFor.amountCents} onClose={()=>setPayingFor(null)} onConfirmed={()=>{setPayingFor(null);load()}} onWaitlisted={()=>{setPayingFor(null);load()}}/></Suspense>}
   </Layout>;
 }
