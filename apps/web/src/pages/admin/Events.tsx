@@ -4,12 +4,12 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../../api";
 import { useAuth } from "../../auth";
 import { Layout } from "../../components/Layout";
-import { CategoryBadge, Loading, Notice } from "../../components/ui";
+import { CategoryBadge, Notice } from "../../components/ui";
 import { dateTime, imgUrl } from "../../lib/format";
 import { QUOTA_CATEGORY_LABEL, eventValidation } from "../../lib/labels";
 import { DataTable, FilterTabs, type Column } from "../../components/DataTable";
 import { spacePath } from "../../lib/spaces";
-import { AdminNav } from "./AdminNav";
+import { AdminNav, Stat } from "./AdminNav";
 import { EuroInput, EventForm, emptyEventForm, eventFormPayload, type EventFormState } from "../../components/EventForm";
 
 export function AdminCreateEvent() {
@@ -283,9 +283,32 @@ export function AdminAttendees() {
   };
 
   const STATUS_LABEL:Record<string,string>={PENDING:"En attente",SUCCEEDED:"Payé",FAILED:"Échoué",REFUNDED:"Remboursé"};
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Participants</h1><p className="fine">Informations nécessaires à l’organisation de votre événement uniquement.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
-    <div className="filters"><select value={eventId} onChange={e=>setEventId(e.target.value)}>{events.map(ev=><option key={ev.id} value={ev.id}>{ev.title}</option>)}</select></div>
-    {loading?<Loading/>:reservations.length===0?<div className="empty"><Inbox size={24} aria-hidden="true"/><h2>Aucun participant pour le moment</h2></div>:<div className="panel table"><div className="table-row head"><span>Participant</span><span>Catégorie</span><span>Paiement</span><span>Billet</span></div>{reservations.map(r=><div key={r.id} className="table-row"><span><b>{r.user.displayName}</b>{r.user.phone&&<small>{r.user.phone}</small>}</span><span>{r.quotaCategory?QUOTA_CATEGORY_LABEL[r.quotaCategory]??r.quotaCategory:"—"}</span><span>{r.payment?STATUS_LABEL[r.payment.status]??r.payment.status:"—"}{isAdmin&&r.payment?.status==="SUCCEEDED"&&(requestingFor===r.payment.id?<div className="reject-note"><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Motif (obligatoire à 24 h ou moins)"/><button className="button small danger" disabled={busy===r.payment.id} onClick={()=>refund(r.payment.id)}>{busy===r.payment.id?"Remboursement…":"Confirmer le remboursement"}</button></div>:<button type="button" className="button small secondary" onClick={()=>setRequestingFor(r.payment.id)}>Rembourser</button>)}{isAdmin&&r.payment?.refundRequestedAt&&r.payment.status==="SUCCEEDED"&&<small className="fine">Demande historique : {r.payment.refundRequestReason}</small>}</span><span>{r.ticket?.status==="USED"?"Utilisé":r.ticket?.status==="VALID"?"Valide":r.cancelledAt?"Annulé":"En attente"}</span></div>)}</div>}
+  const PAYMENT_TONE:Record<string,string>={PENDING:"neutral",SUCCEEDED:"success",FAILED:"danger",REFUNDED:"warning"};
+  const [q,setQ]=useState("");
+  const ticketState=(r:any)=>r.ticket?.status==="USED"?{label:"Présent",tone:"success"}:r.ticket?.status==="VALID"?{label:"Billet valide",tone:"info"}:r.cancelledAt?{label:"Annulé",tone:"danger"}:{label:"En attente",tone:"neutral"};
+  // Événements à venir d'abord (du plus proche au plus lointain), puis les passés.
+  const sortedEvents=[...events].sort((x,y)=>{const px=new Date(x.endsAt)<new Date(),py=new Date(y.endsAt)<new Date();return px===py?(px?+new Date(y.startsAt)-+new Date(x.startsAt):+new Date(x.startsAt)-+new Date(y.startsAt)):px?1:-1});
+  const query=q.trim().toLowerCase();
+  const rows=loading?null:reservations.filter(r=>!query||[r.user.displayName,r.user.phone].some((t:string|undefined)=>t?.toLowerCase().includes(query)));
+  const paid=reservations.filter(r=>r.payment?.status==="SUCCEEDED"||r.confirmedAt).length;
+  const present=reservations.filter(r=>r.ticket?.status==="USED").length;
+  const refunding=reservations.find(r=>r.payment?.id===requestingFor);
+  const columns:Column<any>[]=[
+    {key:"name",header:"Participant",primary:true,render:r=><span className="cell-main"><b>{r.user.displayName}</b>{r.user.phone&&<small>{r.user.phone}</small>}</span>},
+    {key:"category",header:"Catégorie",render:r=>r.quotaCategory?QUOTA_CATEGORY_LABEL[r.quotaCategory]??r.quotaCategory:"—"},
+    {key:"payment",header:"Paiement",render:r=>r.payment?<span className={`badge ${PAYMENT_TONE[r.payment.status]??"neutral"}`}>{STATUS_LABEL[r.payment.status]??r.payment.status}</span>:<span className="badge neutral">Gratuit ou sans paiement</span>},
+    {key:"ticket",header:"Billet",render:r=>{const t=ticketState(r);return <span className={`badge ${t.tone}`}>{t.label}</span>}},
+    ...(isAdmin?[{key:"actions",header:"Actions",render:(r:any)=><span className="cell-actions">{r.payment?.status==="SUCCEEDED"&&<button type="button" className="button small secondary" onClick={()=>{setRequestingFor(r.payment.id);setReason("")}}>Rembourser</button>}{r.payment?.refundRequestedAt&&r.payment.status==="SUCCEEDED"&&<small className="fine">Demande : {r.payment.refundRequestReason}</small>}</span>}]:[])
+  ];
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Participants</h1><p className="fine left">Informations nécessaires à l’organisation de l’événement uniquement.</p>{notice&&<Notice kind={notice.kind}>{notice.text}</Notice>}
+    <div className="table-toolbar">
+      <label className="visually-hidden" htmlFor="attendees-event">Événement</label>
+      <select id="attendees-event" className="event-select" value={eventId} onChange={e=>{setEventId(e.target.value);setRequestingFor(null)}}>{sortedEvents.map(ev=><option key={ev.id} value={ev.id}>{tableDate(ev.startsAt)} — {ev.title}</option>)}</select>
+      <label className="search-field"><span className="visually-hidden">Rechercher un participant</span><Search size={18} aria-hidden="true"/><input type="search" value={q} onChange={e=>setQ(e.target.value)} placeholder="Rechercher : nom, téléphone…"/></label>
+    </div>
+    <div className="stat-grid kpi-row"><Stat label="Inscrits" value={loading?"…":reservations.length}/><Stat label="Places confirmées" value={loading?"…":paid}/><Stat label="Présents (billet scanné)" value={loading?"…":present}/></div>
+    <DataTable caption="Participants de l’événement" rows={rows} columns={columns} rowKey={r=>r.id} empty={query?`Aucun participant ne correspond à « ${q} ».`:"Aucun participant pour le moment."}/>
+    {isAdmin&&refunding&&<div className="panel refund-panel"><div className="panel-title"><h2>Rembourser {refunding.user.displayName}</h2></div><label>Motif (obligatoire à 24 h ou moins de l’événement)<input value={reason} onChange={e=>setReason(e.target.value)}/></label><div className="decision-buttons"><button className="button small danger" disabled={busy===refunding.payment.id} onClick={()=>refund(refunding.payment.id)}>{busy===refunding.payment.id?"Remboursement…":"Confirmer le remboursement"}</button><button type="button" className="button small secondary" onClick={()=>setRequestingFor(null)}>Annuler</button></div></div>}
   </div></section></Layout>;
 }
 

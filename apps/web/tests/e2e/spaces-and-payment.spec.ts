@@ -38,8 +38,10 @@ test("administration : pages principales intactes, abonnement d'un restaurateur 
   await page.goto("/admin/settings");
   await expect(page.getByText("SUBSCRIPTION_EXPIRY_REMINDER_DAYS_BEFORE")).toBeVisible();
   await page.goto("/admin/restaurants");
-  await page.locator(".filters select").first().selectOption("APPROVED");
-  const card = page.locator(".panel", { hasText: "Maison Amana" }).first();
+  // Tableau des restaurateurs (v3) : onglet « Validés », puis la fiche détaillée de l'établissement.
+  await page.getByRole("tab", { name: /Validés/ }).click();
+  await page.getByRole("row", { name: /Maison Amana/ }).getByRole("button", { name: "Détails" }).click();
+  const card = page.locator(".restaurant-detail");
   await card.getByRole("button", { name: "consulter" }).click();
   await expect(page.getByText("Consultation seule : le restaurateur gère son abonnement depuis son espace.")).toBeVisible();
   // Aucune commande de modification dans l'encart d'abonnement (ni liste de formules, ni bouton).

@@ -244,12 +244,61 @@ export async function ctaSlide(headline: string, detail: string, site: string, p
   return photo ? toJpeg(photoBase(photo), [{ input: gradientVeil(0.78, 0.3), top: 0, left: 0 }, ...layers]) : toJpeg(solid(BRAND.night), layers);
 }
 
-/** Visuel d'un événement publié (§14) : photo, catégorie, titre, date, quartier et appel à l'action. */
-export async function eventVisual(background: Buffer, e: { category: string; title: string; when: string; district: string; cta: string }) {
+// Visuel d'un événement publié (§14, puis v3 §8) : trois modèles cohérents avec la marque, selon le type
+// d'événement — speed dating (photo plein cadre, voile bleu nuit), networking (photo en haut, bandeau bleu
+// nuit), autre activité (photo encadrée sur fond safran). Photo principale si disponible, nom, date, lieu,
+// type et appel à l'action vers le site.
+export type EventVisualKind = "DATING" | "NETWORKING" | "OTHER";
+export const eventVisualKind = (category: string): EventVisualKind => category === "Speed dating" ? "DATING" : category === "Networking" ? "NETWORKING" : "OTHER";
+type EventVisualData = { category: string; title: string; when: string; district: string; cta: string };
+
+async function categoryPill(label: string, fill: string, ink: string, top: number, left: number): Promise<Layer[]> {
+  const text = await textBlock(label.toUpperCase(), { font: "text", size: 28, weight: 700, color: ink, width: 600, maxHeight: 50, letterSpacing: 1 });
+  return [
+    { input: svg(`<rect x="${left}" y="${top}" width="${text.width + 48}" height="${text.height + 24}" rx="${Math.round((text.height + 24) / 2)}" fill="${fill}"/>`), top: 0, left: 0 },
+    { input: text.input, top: top + 12, left: left + 24 }
+  ];
+}
+
+export async function eventVisual(background: Buffer, e: EventVisualData) {
+  const kind = eventVisualKind(e.category);
+  if (kind === "NETWORKING") {
+    // Photo sur les 55 % du haut, bandeau bleu nuit en bas : la lecture d'une invitation professionnelle.
+    const PHOTO_H = 600;
+    const title = await textBlock(e.title, { font: "display", size: 64, weight: 800, color: BRAND.onNight, width: SIZE - 2 * MARGIN, maxHeight: 200, minSize: 38 });
+    const meta = await textBlock(`${e.when} · ${e.district}`, { font: "text", size: 34, weight: 600, color: BRAND.onNight2, width: SIZE - 2 * MARGIN, maxHeight: 100, minSize: 24 });
+    const cta = await textBlock(e.cta, { font: "display", size: 34, weight: 700, color: BRAND.saffron, width: SIZE - 2 * MARGIN, maxHeight: 50 });
+    const titleTop = PHOTO_H + 56;
+    return toJpeg(solid(BRAND.night), [
+      { input: await sharp(background).resize(SIZE, PHOTO_H, { fit: "cover", position: "attention" }).toBuffer(), top: 0, left: 0 },
+      ...await categoryPill(e.category, BRAND.night, BRAND.onNight, MARGIN, MARGIN),
+      { input: title.input, top: titleTop, left: MARGIN },
+      { input: meta.input, top: titleTop + title.height + 16, left: MARGIN },
+      { input: cta.input, top: SIZE - MARGIN - cta.height - 50, left: MARGIN },
+      ...await footer(BRAND.onNight2)
+    ]);
+  }
+  if (kind === "OTHER") {
+    // Photo encadrée sur fond safran : une sortie, une activité, un moment différent.
+    const INSET = 56, PHOTO_H = 560;
+    const photo = await sharp(background).resize(SIZE - 2 * INSET, PHOTO_H, { fit: "cover", position: "attention" })
+      .composite([{ input: Buffer.from(`<svg width="${SIZE - 2 * INSET}" height="${PHOTO_H}"><rect width="100%" height="100%" rx="28" fill="#fff"/></svg>`), blend: "dest-in" }]).png().toBuffer();
+    const title = await textBlock(e.title, { font: "display", size: 62, weight: 800, color: BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: 190, minSize: 38 });
+    const meta = await textBlock(`${e.when} · ${e.district}`, { font: "text", size: 32, weight: 600, color: BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: 90, minSize: 24 });
+    const cta = await textBlock(e.cta, { font: "display", size: 32, weight: 700, color: BRAND.saffronInk, width: SIZE - 2 * MARGIN, maxHeight: 50 });
+    const titleTop = INSET + PHOTO_H + 36;
+    return toJpeg(solid(BRAND.saffron), [
+      { input: photo, top: INSET, left: INSET },
+      ...await categoryPill(e.category, BRAND.onSaffron, "#ffffff", INSET + 28, INSET + 28),
+      { input: title.input, top: titleTop, left: MARGIN },
+      { input: meta.input, top: titleTop + title.height + 12, left: MARGIN },
+      { input: cta.input, top: SIZE - MARGIN - cta.height - 50, left: MARGIN },
+      ...await footer(BRAND.saffronInk)
+    ]);
+  }
+  // Speed dating : photo plein cadre, voile bleu nuit, pastille safran.
   const base = sharp(background).resize(SIZE, SIZE, { fit: "cover", position: "attention" });
   const shade = svg(`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0.2" stop-color="${BRAND.night3}" stop-opacity="0.15"/><stop offset="1" stop-color="${BRAND.night3}" stop-opacity="0.94"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/>`);
-  const category = await textBlock(e.category.toUpperCase(), { font: "text", size: 30, weight: 700, color: BRAND.ink, width: 600, maxHeight: 50 });
-  const pill = svg(`<rect x="${MARGIN}" y="${MARGIN}" width="${category.width + 48}" height="${category.height + 24}" rx="${Math.round((category.height + 24) / 2)}" fill="${BRAND.saffron}"/>`);
   const title = await textBlock(e.title, { font: "display", size: 80, weight: 800, color: BRAND.onNight, width: SIZE - 2 * MARGIN, maxHeight: 340, minSize: 44 });
   const meta = await textBlock(`${e.when}\n${e.district}`, { font: "text", size: 40, weight: 600, color: BRAND.onNight2, width: SIZE - 2 * MARGIN, maxHeight: 140, minSize: 28 });
   const cta = await textBlock(e.cta, { font: "display", size: 38, weight: 700, color: BRAND.saffron, width: SIZE - 2 * MARGIN, maxHeight: 60 });
@@ -258,8 +307,7 @@ export async function eventVisual(background: Buffer, e: { category: string; tit
   const titleTop = metaTop - 28 - title.height;
   return toJpeg(base, [
     { input: shade, top: 0, left: 0 },
-    { input: pill, top: 0, left: 0 },
-    { input: category.input, top: MARGIN + 12, left: MARGIN + 24 },
+    ...await categoryPill(e.category, BRAND.saffron, BRAND.onSaffron, MARGIN, MARGIN),
     { input: title.input, top: titleTop, left: MARGIN },
     { input: meta.input, top: metaTop, left: MARGIN },
     { input: cta.input, top: ctaTop, left: MARGIN },

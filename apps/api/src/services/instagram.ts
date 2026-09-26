@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { sanitizeInstagramCaption } from "./blog-content.js";
 import type { Prisma } from "@prisma/client";
 import { CAROUSEL_MIN, articleCarouselPlan, storedCarousel, type CarouselScript, type CarouselSlide, type SlidePhoto } from "./instagram-carousel.js";
-import { chartSlide, contrastSlide, coverSlide, ctaSlide, eventVisual, listSlide, pointSlide, quoteSlide, sceneSlide, statSlide, statementSlide } from "./social-visuals.js";
+import { chartSlide, contrastSlide, coverSlide, ctaSlide, eventVisual, eventVisualKind, listSlide, pointSlide, quoteSlide, sceneSlide, statSlide, statementSlide } from "./social-visuals.js";
 
 // Publication Instagram via l'API Instagram avec connexion Instagram (compte professionnel) :
 // - l'article du jour, en carrousel de 4 à 8 slides (décision v2 §6, remplace l'image unique) ;
@@ -218,7 +218,9 @@ export async function shareEventOnInstagram(prisma: PrismaClient, config: Instag
   let mediaId: string | undefined;
   try {
     const visual = await renderEventVisual(event, config, defaultImage);
-    const caption = sanitizeInstagramCaption(`${event.title}\n\n${parisDateTime(event.startsAt)} · ${event.district}\n${event.category}\n\nPlaces limitées : réservez via le lien en bio (${siteLabel(config)}).\n\n#nurmeet #paris #rencontres`)
+    // Hashtags selon le type d'événement (v3 §8), comme le modèle de visuel.
+    const tags = { DATING: "#nurmeet #paris #rencontres #speeddating", NETWORKING: "#nurmeet #paris #networking #entrepreneurs", OTHER: "#nurmeet #paris #sortiesparis" }[eventVisualKind(event.category)];
+    const caption = sanitizeInstagramCaption(`${event.title}\n\n${parisDateTime(event.startsAt)} · ${event.district}\n${event.category}\n\nPlaces limitées : réservez via le lien en bio (${siteLabel(config)}).\n\n${tags}`)
       ?? `Nouvelle soirée Nūr Meet · ${parisDateTime(event.startsAt)} · ${event.district}\n\nRéservez via le lien en bio.`;
     mediaId = await publishImages(config, await instagramToken(prisma, config), [visual], caption);
     await prisma.event.update({ where: { id: eventId }, data: { instagramMediaId: mediaId, instagramPublishedAt: new Date(), instagramError: null, instagramPublishingAt: null } });

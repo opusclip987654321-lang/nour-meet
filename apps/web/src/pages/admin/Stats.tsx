@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_URL, api, getToken } from "../../api";
 import { Layout } from "../../components/Layout";
-import { Loading, Notice } from "../../components/ui";
+import { Notice } from "../../components/ui";
 import { money } from "../../lib/format";
+import { SUBSCRIPTION_STATUS_LABEL } from "../../lib/labels";
+import { Download } from "lucide-react";
 import { AdminNav, Stat } from "./AdminNav";
 
 // §6 (cahier des charges 2026-09) : tableau exclusivement super-admin — la route serveur elle-même
@@ -22,11 +24,33 @@ function StatDelta({current,previous,invert}:{current:number;previous:number|nul
   if(previous==null)return null;
   const diff=previous===0?(current>0?100:0):Math.round(((current-previous)/previous)*100);
   const good=invert?diff<=0:diff>=0;
-  return <span style={{fontSize:11,color:good?"var(--green)":"var(--red)",marginLeft:6}}>{diff>0?"+":""}{diff}%</span>;
+  return <span className={`stat-delta ${good?"up":"down"}`}>{diff>0?"+":""}{diff} % vs période précédente</span>;
 }
+
+// Tunnel (v3 : statistiques plus lisibles) : une barre par étape, d'une seule teinte (magnitude), la valeur
+// écrite à côté et le taux de conversion depuis l'étape précédente — lisible sans légende ni survol.
+function Funnel({ title, steps }: { title: string; steps: { label: string; value: number }[] }) {
+  const max = Math.max(1, ...steps.map(s => s.value));
+  return <section className="panel funnel" aria-label={title}>
+    <div className="panel-title"><h2>{title}</h2></div>
+    <ol>{steps.map((step, i) => {
+      const prev = i > 0 ? steps[i - 1].value : null;
+      const rate = prev ? Math.round((step.value / prev) * 100) : null;
+      return <li key={step.label}>
+        <span className="funnel-label">{step.label}</span>
+        <span className="funnel-track"><span className="funnel-bar" style={{ width: `${Math.max(step.value ? 2 : 0, (step.value / max) * 100)}%` }}/></span>
+        <b className="funnel-value">{step.value.toLocaleString("fr-FR")}</b>
+        <small className="funnel-rate">{rate == null ? "" : `${rate} %`}</small>
+      </li>;
+    })}</ol>
+    <p className="fine left">Pourcentage : part de l’étape précédente atteignant cette étape.</p>
+  </section>;
+}
+
 export function AdminStats() {
   const [stats,setStats]=useState<any>(null);
   const [range,setRange]=useState(STATS_PRESETS[3][1]());
+  const [preset,setPreset]=useState<string|null>(STATS_PRESETS[3][0]);
   const [scope,setScope]=useState<"all"|"participants"|"restaurants">("all");
   const load=useCallback(()=>api<any>(`/admin/stats?since=${range.since}&until=${range.until}&compareSince=${range.compareSince}&compareUntil=${range.compareUntil}`).then(setStats),[range]);
   useEffect(()=>{load()},[load]);
@@ -36,14 +60,20 @@ export function AdminStats() {
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");a.href=url;a.download=`statistiques-${range.since}-${range.until}.${ext}`;a.click();URL.revokeObjectURL(url);
   };
-  if(!stats)return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><Loading/></div></section></Layout>;
-  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Statistiques</h1>
-    <div className="filters">{STATS_PRESETS.map(([label,fn])=><button key={label} type="button" className="button small secondary" onClick={()=>setRange(fn())}>{label}</button>)}</div>
-    <div className="filters"><label>Depuis<input type="date" value={range.since} onChange={e=>setRange({...range,since:e.target.value})}/></label><label>Jusqu’au<input type="date" value={range.until} onChange={e=>setRange({...range,until:e.target.value})}/></label>
-      <select value={scope} onChange={e=>setScope(e.target.value as any)}><option value="all">Participants + restaurateurs</option><option value="participants">Participants</option><option value="restaurants">Restaurateurs</option></select>
-      <button type="button" className="button small secondary" onClick={()=>exportFile("csv")}>Exporter les ventes (CSV)</button>
-      <button type="button" className="button small secondary" onClick={()=>exportFile("xlsx")}>Exporter tout (Excel)</button>
+  const toolbar=<div className="stats-toolbar">
+    <div className="segmented" role="group" aria-label="Période">{STATS_PRESETS.map(([label,fn])=><button key={label} type="button" aria-pressed={preset===label} className={preset===label?"active":undefined} onClick={()=>{setRange(fn());setPreset(label)}}>{label}</button>)}</div>
+    <div className="stats-range">
+      <label>Du<input type="date" value={range.since} onChange={e=>{setRange({...range,since:e.target.value});setPreset(null)}}/></label>
+      <label>au<input type="date" value={range.until} onChange={e=>{setRange({...range,until:e.target.value});setPreset(null)}}/></label>
+      <label className="visually-hidden" htmlFor="stats-scope">Périmètre</label>
+      <select id="stats-scope" value={scope} onChange={e=>setScope(e.target.value as any)}><option value="all">Participants et restaurateurs</option><option value="participants">Participants</option><option value="restaurants">Restaurateurs</option></select>
+      <span className="stats-exports"><button type="button" className="button small secondary" onClick={()=>exportFile("csv")}><Download size={16} aria-hidden="true"/>Ventes (CSV)</button><button type="button" className="button small secondary" onClick={()=>exportFile("xlsx")}><Download size={16} aria-hidden="true"/>Tout (Excel)</button></span>
     </div>
+  </div>;
+  if(!stats)return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Statistiques</h1>{toolbar}<div className="stat-grid" aria-busy="true">{[0,1,2,3].map(i=><div key={i} className="stat skeleton-panel" style={{minHeight:104}}/>)}</div></div></section></Layout>;
+  const f=stats.funnelParticipant;
+  return <Layout><section className="admin-page"><AdminNav/><div className="admin-main"><h1>Statistiques</h1>
+    {toolbar}
     {(stats.alerts.cancellationRate24h>=stats.alerts.cancellationThreshold||stats.alerts.subscriptionsExpiringSoon>0||stats.alerts.blockedPayments24h>0||stats.alerts.pendingRefundRequests>0||stats.alerts.underfilledEventsPending>0)&&<Notice kind="error">
       {stats.alerts.cancellationRate24h>=stats.alerts.cancellationThreshold&&<>Taux d’annulation sur 24h : {stats.alerts.cancellationRate24h}% (seuil {stats.alerts.cancellationThreshold}%). </>}
       {stats.alerts.subscriptionsExpiringSoon>0&&<>{stats.alerts.subscriptionsExpiringSoon} abonnement{stats.alerts.subscriptionsExpiringSoon>1?"s":""} restaurateur{stats.alerts.subscriptionsExpiringSoon>1?"s":""} arrivent à échéance bientôt. </>}
@@ -61,35 +91,30 @@ export function AdminStats() {
       </div>:<p className="fine left">Non instrumenté (mesure d’audience désactivée).</p>}
       {stats.audience.instrumented&&stats.audience.bySource.length>0&&<p className="fine left">Sources : {stats.audience.bySource.map((s:any)=>`${s.source} (${s.visits})`).join(" · ")}</p>}
 
-      <div className="panel-title"><h2>Tunnel participant</h2></div>
+      <div className="stats-funnels">
+        <Funnel title="Tunnel participant" steps={[...(f.top.instrumented?[{label:"Visiteurs de l’accueil",value:f.top.homeVisitors},{label:"Visiteurs du catalogue",value:f.top.catalogVisitors}]:[]),{label:"Candidatures à un événement",value:f.applicationsCreated},{label:"Paiements réussis",value:f.paymentsSucceeded},{label:"Billets confirmés",value:f.ticketsConfirmed}]}/>
+        <Funnel title="Entretiens de validation" steps={[{label:"Entretiens demandés",value:f.interviewsRequested},{label:"Profils validés",value:f.interviewsAccepted}]}/>
+      </div>
       <div className="stat-grid">
-        {stats.funnelParticipant.top.instrumented&&<><Stat label="Visiteurs accueil" value={stats.funnelParticipant.top.homeVisitors}/><Stat label="Visiteurs catalogue" value={stats.funnelParticipant.top.catalogVisitors}/></>}
-        <Stat label="Entretiens demandés" value={stats.funnelParticipant.interviewsRequested}/>
-        <Stat label="Profils validés" value={stats.funnelParticipant.interviewsAccepted}/>
-        <Stat label="Taux d’acceptation" value={stats.funnelParticipant.interviewAcceptanceRate!=null?`${stats.funnelParticipant.interviewAcceptanceRate}%`:"—"}/>
-        <Stat label="Candidatures à un événement" value={stats.funnelParticipant.applicationsCreated}/>
-        <Stat label="Paiements réussis" value={stats.funnelParticipant.paymentsSucceeded}/>
-        <Stat label="Taux de succès paiement" value={stats.funnelParticipant.paymentSuccessRate!=null?`${stats.funnelParticipant.paymentSuccessRate}%`:"—"}/>
-        <Stat label="Billets confirmés" value={stats.funnelParticipant.ticketsConfirmed}/>
-        <Stat label="Annulations" value={stats.funnelParticipant.cancellationsCount}/>
-        <Stat label="Entrées liste d’attente" value={stats.funnelParticipant.waitlistCount}/>
+        <Stat label="Taux de succès des paiements" value={f.paymentSuccessRate!=null?`${f.paymentSuccessRate} %`:"—"}/>
+        <Stat label="Annulations" value={f.cancellationsCount}/>
+        <Stat label="Entrées en liste d’attente" value={f.waitlistCount}/>
       </div>
     </>}
 
     {(scope==="all"||scope==="restaurants")&&<>
-      <div className="panel-title"><h2>Tunnel restaurateur</h2></div>
-      <div className="stat-grid"><Stat label="Nouvelles demandes" value={stats.funnelRestaurant.newRequests}/><Stat label="Approuvées" value={stats.funnelRestaurant.approved}/><Stat label="Abonnements souscrits" value={stats.funnelRestaurant.subscriptionsStarted}/><Stat label="Événements créés" value={stats.funnelRestaurant.eventsCreated}/><Stat label="Événements publiés" value={stats.funnelRestaurant.eventsPublished}/></div>
+      <Funnel title="Tunnel restaurateur" steps={[{label:"Nouvelles demandes",value:stats.funnelRestaurant.newRequests},{label:"Établissements validés",value:stats.funnelRestaurant.approved},{label:"Abonnements souscrits",value:stats.funnelRestaurant.subscriptionsStarted},{label:"Événements créés",value:stats.funnelRestaurant.eventsCreated},{label:"Événements publiés",value:stats.funnelRestaurant.eventsPublished}]}/>
     </>}
 
     <div className="panel-title"><h2>Finance</h2></div>
     <div className="stat-grid">
       <Stat label="Revenu billetterie" value={<>{money(stats.finance.ticketRevenueCents)}<StatDelta current={stats.finance.ticketRevenueCents} previous={stats.previous?.finance.ticketRevenueCents}/></>}/>
       <Stat label="Remboursé" value={`${money(stats.finance.refundedCents)} (${stats.finance.refundedCount})`}/>
-      <Stat label="MRR abonnements" value={money(stats.finance.subscriptionMonthlyRevenueCents)}/>
+      <Stat label="Revenu mensuel des abonnements" value={money(stats.finance.subscriptionMonthlyRevenueCents)}/>
       <Stat label="Abonnements actifs" value={stats.finance.activeSubscriptionsCount}/>
-      <Stat label="Impayés (PAST_DUE)" value={stats.finance.pastDueCount}/>
+      <Stat label="Abonnements impayés" value={stats.finance.pastDueCount}/>
     </div>
-    <p className="fine left">Abonnements par statut : {stats.finance.subscriptionsByStatus.map((s:any)=>`${s.status} (${s.count})`).join(" · ")||"—"}</p>
+    <p className="fine left">Abonnements par statut : {stats.finance.subscriptionsByStatus.map((s:any)=>`${SUBSCRIPTION_STATUS_LABEL[s.status]??s.status} (${s.count})`).join(" · ")||"—"}</p>
 
     <div className="panel-title"><h2>Blog</h2></div>
     {stats.blog.instrumented?<div className="stat-grid"><Stat label="Lectures" value={stats.blog.reads}/><Stat label="Lecteurs uniques" value={stats.blog.uniqueReaders}/></div>:<p className="fine left">Non instrumenté (mesure d’audience désactivée).</p>}
