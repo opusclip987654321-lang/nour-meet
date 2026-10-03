@@ -197,6 +197,8 @@ type PrepareDeps = {
   aiProvider: AIProvider;
   // Absent (pas de clé OpenAI, ou publication manuelle qui ne doit pas attendre) : détails de la couverture.
   illustrate?: (slide: { title: string; imagePrompt: string }) => Promise<{ image: string; altText: string } | null>;
+  // Boucle d'apprentissage (2026-10-03) : choix à tester et rappel des résultats récents. Absente : prompt seul.
+  guidance?: () => Promise<{ variant: unknown; guidance: string }>;
   log: { warn: (o: unknown, m?: string) => void };
 };
 
@@ -216,9 +218,10 @@ export async function prepareArticleCarousel(prisma: PrismaClient, deps: Prepare
     const briefs = visualBriefs(varietySeed(article.publishedAt ?? new Date()), 1, CAROUSEL_MAX - 1);
     // Deux propositions au plus : la seconde connaît la raison du refus de la première (par exemple un
     // chiffre écrit en chiffres alors que l'article l'écrit en lettres).
+    const plan = deps.guidance ? await deps.guidance().catch(err => { deps.log.warn({ err: (err as Error).message }, "Consignes d’apprentissage indisponibles"); return null; }) : null;
     let script: CarouselScript | null = null, feedback: string | undefined;
     for (let attempt = 0; attempt < 2 && !script; attempt++) {
-      try { script = parseCarouselScript(await deps.aiProvider.writeCarousel(article, briefs, feedback), article); }
+      try { script = parseCarouselScript(await deps.aiProvider.writeCarousel(article, briefs, feedback, plan?.guidance), article); }
       catch (err) { feedback = (err as Error).message; if (attempt === 1) throw err; }
     }
     if (!script) return null;
@@ -226,7 +229,7 @@ export async function prepareArticleCarousel(prisma: PrismaClient, deps: Prepare
       const illustration = slot.imagePrompt && deps.illustrate && i < MAX_SLIDE_IMAGES ? await deps.illustrate({ title: article.title, imagePrompt: slot.imagePrompt }).catch(() => null) : null;
       Object.assign(slot, illustration ? { image: illustration.image, altText: illustration.altText } : { image: article.imageUrl, altText: null, fromCover: true });
     }
-    await prisma.article.update({ where: { id: articleId }, data: { instagramCarousel: script as unknown as Prisma.InputJsonValue, ...(script.caption ? { instagramCaption: script.caption } : {}) } });
+    await prisma.article.update({ where: { id: articleId }, data: { instagramCarousel: script as unknown as Prisma.InputJsonValue, ...(plan ? { instagramVariant: plan.variant as Prisma.InputJsonValue } : {}), ...(script.caption ? { instagramCaption: script.caption } : {}) } });
     return script;
   } catch (err) {
     deps.log.warn({ err: (err as Error).message }, "Carrousel réécrit indisponible, extraction de l’article");

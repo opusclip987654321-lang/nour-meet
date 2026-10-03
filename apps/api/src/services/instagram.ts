@@ -143,11 +143,12 @@ function renderSlide(slide: CarouselSlide, photo: Buffer | null, position: strin
   }
 }
 
-async function renderScript(script: CarouselScript, label: string, cover: Buffer, config: Config) {
+async function renderScript(script: CarouselScript, cover: Buffer, config: Config) {
   const total = script.slides.length + 2;
   let details = 0;
   const detailIndex = () => details++;
-  const slides = [await coverSlide(cover, script.hook, label, `1/${total}`, script.subtitle || undefined)];
+  // Pas de rubrique « Journal » sur la couverture réécrite : elle faisait lire le post comme une publicité.
+  const slides = [await coverSlide(cover, script.hook, "", `1/${total}`, script.subtitle || undefined)];
   for (const [i, slide] of script.slides.entries()) slides.push(await renderSlide(slide, await screenPhoto(slide, cover, detailIndex, config), `${i + 2}/${total}`));
   slides.push(await ctaSlide(script.cta.headline, script.cta.detail, siteLabel(config), `${total}/${total}`, await screenPhoto(script.cta, cover, detailIndex, config)));
   return slides;
@@ -160,7 +161,7 @@ export async function renderArticleCarousel(article: CarouselArticle, config: Pi
   const script = storedCarousel(article.instagramCarousel);
   // Un carrousel réécrit qui ne se rend pas (donnée enregistrée inattendue) ne bloque jamais la
   // publication : l'extraction de l'article prend le relais.
-  const rewritten = script ? await renderScript(script, plan.label, cover, config).catch(() => null) : null;
+  const rewritten = script ? await renderScript(script, cover, config).catch(() => null) : null;
   if (rewritten) return rewritten;
   const total = plan.middle.length + 2;
   if (total < CAROUSEL_MIN) throw new Error("Article trop court pour un carrousel de 4 slides au moins");
@@ -231,4 +232,24 @@ export async function shareEventOnInstagram(prisma: PrismaClient, config: Instag
     await prisma.event.update({ where: { id: eventId }, data: { instagramError: (mediaId ? `Publié (média ${mediaId}) mais non enregistré : ` : "") + (err as Error).message.slice(0, 450), ...(mediaId ? {} : { instagramPublishingAt: null }) } }).catch(() => {});
     throw err;
   }
+}
+
+// Statistiques d'un carrousel publié (boucle d'apprentissage du 2026-10-03). Le jeton doit porter la
+// permission instagram_business_manage_insights. « follows » et « profile_visits » ne sont pas
+// proposées partout : si Instagram refuse la liste complète, on se replie sur les mesures de base.
+const FULL_METRICS = "reach,views,likes,comments,shares,saved,total_interactions,profile_visits,follows";
+const BASE_METRICS = "reach,likes,comments,shares,saved";
+export type MediaInsights = Partial<Record<"reach" | "views" | "likes" | "comments" | "shares" | "saved" | "total_interactions" | "profile_visits" | "follows", number>>;
+type InsightsResponse = { data?: { name: string; values?: { value?: number }[]; total_value?: { value?: number } }[] };
+
+export async function fetchMediaInsights(prisma: PrismaClient, config: InstagramConfig, mediaId: string): Promise<MediaInsights> {
+  const token = await instagramToken(prisma, config);
+  const read = (metrics: string) => call<InsightsResponse>(graph(config, `${mediaId}/insights?metric=${metrics}&access_token=${encodeURIComponent(token)}`));
+  const response = await read(FULL_METRICS).catch(() => read(BASE_METRICS));
+  const out: MediaInsights = {};
+  for (const m of response.data ?? []) {
+    const value = m.total_value?.value ?? m.values?.[0]?.value;
+    if (typeof value === "number" && Number.isFinite(value)) out[m.name as keyof MediaInsights] = value;
+  }
+  return out;
 }

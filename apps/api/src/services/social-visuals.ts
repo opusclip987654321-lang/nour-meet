@@ -7,7 +7,9 @@ import sharp from "sharp";
 // Alpine n'a aucune police système. Chaque bloc de texte est réduit jusqu'à tenir dans sa zone : aucun
 // débordement, aucune coupure au milieu d'un mot.
 
-const SIZE = 1080;
+// Format portrait 4:5 (1080 × 1350) : le plus grand accepté dans le fil Instagram, il occupe environ 25 %
+// d'écran de plus qu'un carré, donc retient davantage le pouce (diagnostic du 2026-10-03).
+const W = 1080, H = 1350;
 const MARGIN = 88;
 const fontsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "assets", "fonts");
 const FONTS = {
@@ -37,35 +39,43 @@ export async function textBlock(text: string, options: TextOptions): Promise<{ i
   }
 }
 
-const solid = (color: string) => sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: color } });
-const svg = (body: string) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">${body}</svg>`);
+const solid = (color: string) => sharp({ create: { width: W, height: H, channels: 3, background: color } });
+const svg = (body: string) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${body}</svg>`);
 const toJpeg = (image: sharp.Sharp, layers: Layer[]) => image.composite(layers).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
 
 // Signature commune en bas de chaque slide : marque et, pour un carrousel, la position (2/6).
 async function footer(color: string, position?: string): Promise<Layer[]> {
   const brand = await textBlock("Nūr Meet", { font: "display", size: 34, weight: 700, color, width: 400, maxHeight: 60 });
-  const layers: Layer[] = [{ input: brand.input, top: SIZE - MARGIN - brand.height + 10, left: MARGIN }];
+  const layers: Layer[] = [{ input: brand.input, top: H - MARGIN - brand.height + 10, left: MARGIN }];
   if (position) {
     const pos = await textBlock(position, { font: "text", size: 30, color, width: 200, maxHeight: 50, align: "right" });
-    layers.push({ input: pos.input, top: SIZE - MARGIN - pos.height + 10, left: SIZE - MARGIN - pos.width });
+    layers.push({ input: pos.input, top: H - MARGIN - pos.height + 10, left: W - MARGIN - pos.width });
   }
   return layers;
 }
 
-/** Couverture : photo plein cadre, dégradé sombre en haut (rubrique lisible) et en bas, accroche et sous-titre. */
+/**
+ * Couverture : photo plein cadre et accroche en très gros en haut, là où le regard tombe en premier dans
+ * le fil (diagnostic du 2026-10-03 : l'accroche en bas, sous un bandeau « Journal », se lisait comme une
+ * publicité). Rubrique facultative ; en bas, une invitation à faire glisser, dessinée (pas d'emoji).
+ */
 export async function coverSlide(background: Buffer, title: string, label: string, position?: string, subtitle?: string) {
-  const base = sharp(background).resize(SIZE, SIZE, { fit: "cover", position: "attention" });
-  const shade = svg(`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${BRAND.night3}" stop-opacity="0.8"/><stop offset="0.24" stop-color="${BRAND.night3}" stop-opacity="0"/><stop offset="0.52" stop-color="${BRAND.night3}" stop-opacity="0.55"/><stop offset="1" stop-color="${BRAND.night3}" stop-opacity="0.95"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/>`);
-  const labelBlock = await textBlock(label.toUpperCase(), { font: "text", size: 24, weight: 700, color: BRAND.saffron, width: SIZE - 2 * MARGIN, maxHeight: 40, letterSpacing: 2 });
-  const titleBlock = await textBlock(title, { font: "display", size: 76, weight: 800, color: BRAND.onNight, width: SIZE - 2 * MARGIN, maxHeight: subtitle ? 340 : 420, minSize: 44 });
-  const sub = subtitle ? await textBlock(subtitle, { font: "text", size: 32, color: BRAND.onNight2, width: 820, maxHeight: 150, minSize: 24 }) : null;
-  const subTop = SIZE - MARGIN - 90 - (sub?.height ?? 0);
-  const titleTop = subTop - (sub ? 28 : 0) - titleBlock.height;
+  const base = sharp(background).resize(W, H, { fit: "cover", position: "attention" });
+  const shade = svg(`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${BRAND.night3}" stop-opacity="0.94"/><stop offset="0.5" stop-color="${BRAND.night3}" stop-opacity="0.55"/><stop offset="0.72" stop-color="${BRAND.night3}" stop-opacity="0.05"/><stop offset="1" stop-color="${BRAND.night3}" stop-opacity="0.7"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/>`);
+  const labelBlock = label ? await textBlock(label.toUpperCase(), { font: "text", size: 26, weight: 700, color: BRAND.saffron, width: W - 2 * MARGIN, maxHeight: 44, letterSpacing: 2 }) : null;
+  const titleBlock = await textBlock(title, { font: "display", size: 104, weight: 800, color: BRAND.onNight, width: W - 2 * MARGIN, maxHeight: subtitle ? 470 : 560, minSize: 56 });
+  const sub = subtitle ? await textBlock(subtitle, { font: "text", size: 40, weight: 600, color: BRAND.onNight, width: W - 2 * MARGIN, maxHeight: 160, minSize: 30 }) : null;
+  const titleTop = MARGIN + (labelBlock ? labelBlock.height + 28 : 0);
+  const swipe = await textBlock("Glisse", { font: "display", size: 34, weight: 700, color: BRAND.onNight, width: 300, maxHeight: 50 });
+  const swipeLeft = W - MARGIN - swipe.width - 64, swipeTop = H - MARGIN - 130;
+  const arrow = svg(`<path d="M${W - MARGIN - 44} ${swipeTop + swipe.height / 2}h40M${W - MARGIN - 20} ${swipeTop + swipe.height / 2 - 16}l16 16-16 16" fill="none" stroke="${BRAND.saffron}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`);
   return toJpeg(base, [
     { input: shade, top: 0, left: 0 },
-    { input: labelBlock.input, top: MARGIN, left: MARGIN },
+    ...(labelBlock ? [{ input: labelBlock.input, top: MARGIN, left: MARGIN }] : []),
     { input: titleBlock.input, top: titleTop, left: MARGIN },
-    ...(sub ? [{ input: sub.input, top: subTop, left: MARGIN }] : []),
+    ...(sub ? [{ input: sub.input, top: titleTop + titleBlock.height + 32, left: MARGIN }] : []),
+    { input: swipe.input, top: swipeTop, left: swipeLeft },
+    { input: arrow, top: 0, left: 0 },
     ...await footer(BRAND.onNight, position)
   ]);
 }
@@ -76,24 +86,24 @@ export async function coverSlide(background: Buffer, title: string, label: strin
 
 // Voile dégradé : dense derrière le texte, léger ailleurs, pour que la photo reste vivante.
 const gradientVeil = (from: number, to: number) => svg(`<defs><linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${BRAND.night3}" stop-opacity="${from}"/><stop offset="1" stop-color="${BRAND.night3}" stop-opacity="${to}"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#v)"/>`);
-const veil = (opacity: number, height = SIZE) => svg(`<rect width="${SIZE}" height="${height}" fill="${BRAND.night3}" fill-opacity="${opacity}"/>`);
-const photoBase = (photo: Buffer) => sharp(photo).resize(SIZE, SIZE, { fit: "cover", position: "attention" });
+const veil = (opacity: number, height = H) => svg(`<rect width="${W}" height="${height}" fill="${BRAND.night3}" fill-opacity="${opacity}"/>`);
+const photoBase = (photo: Buffer) => sharp(photo).resize(W, H, { fit: "cover", position: "attention" });
 // Bandeau photo (haut de slide) déjà recadré, à composer sur un fond uni.
-const photoBand = (photo: Buffer, height: number) => sharp(photo).resize(SIZE, height, { fit: "cover", position: "attention" }).toBuffer();
+const photoBand = (photo: Buffer, height: number) => sharp(photo).resize(W, height, { fit: "cover", position: "attention" }).toBuffer();
 
 /** Contraste « idée reçue / en réalité » : idée reçue barrée en haut (photo voilée ou bleu nuit), réponse sur safran. */
 export async function contrastSlide(photo: Buffer | null, myth: string, reality: string, position: string) {
-  const TOP = photo ? 500 : 460, PAD = 64;
+  const TOP = photo ? 640 : 600, PAD = 64;
   const mythColor = photo ? BRAND.onNight : BRAND.onNight2;
   const mythLabel = await textBlock("CE QU’ON ENTEND", { font: "text", size: 22, weight: 700, color: mythColor, width: 600, maxHeight: 40, letterSpacing: 2 });
-  const mythText = await textBlock(`« ${myth} »`, { font: "display", size: 48, weight: 700, color: mythColor, width: SIZE - 2 * MARGIN, maxHeight: TOP - 2 * PAD - mythLabel.height - 20, minSize: 30, italic: true, strike: true });
+  const mythText = await textBlock(`« ${myth} »`, { font: "display", size: 56, weight: 700, color: mythColor, width: W - 2 * MARGIN, maxHeight: TOP - 2 * PAD - mythLabel.height - 20, minSize: 30, italic: true, strike: true });
   const realLabel = await textBlock("EN RÉALITÉ", { font: "text", size: 22, weight: 800, color: BRAND.saffronInk, width: 600, maxHeight: 40, letterSpacing: 2 });
-  const realText = await textBlock(reality, { font: "display", size: 52, weight: 800, color: BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: SIZE - TOP - 2 * PAD - 90 - realLabel.height, minSize: 32 });
+  const realText = await textBlock(reality, { font: "display", size: 62, weight: 800, color: BRAND.onSaffron, width: W - 2 * MARGIN, maxHeight: H - TOP - 2 * PAD - 90 - realLabel.height, minSize: 32 });
   const mythTop = photo ? TOP - PAD - mythText.height - 20 - mythLabel.height : Math.round((TOP - mythLabel.height - 20 - mythText.height) / 2);
-  const realTop = TOP + Math.round((SIZE - TOP - 90 - realLabel.height - 20 - realText.height) / 2);
+  const realTop = TOP + Math.round((H - TOP - 90 - realLabel.height - 20 - realText.height) / 2);
   const top: Layer[] = photo
     ? [{ input: await photoBand(photo, TOP), top: 0, left: 0 }, { input: veil(0.5, TOP), top: 0, left: 0 }]
-    : [{ input: svg(`<rect width="${SIZE}" height="${TOP}" fill="${BRAND.night}"/>`), top: 0, left: 0 }];
+    : [{ input: svg(`<rect width="${W}" height="${TOP}" fill="${BRAND.night}"/>`), top: 0, left: 0 }];
   return toJpeg(solid(BRAND.saffron), [
     ...top,
     { input: mythLabel.input, top: mythTop, left: MARGIN },
@@ -109,20 +119,20 @@ export async function statementSlide(photo: Buffer | null, text: string, highlig
   const ink = photo ? BRAND.onNight : BRAND.ink;
   // Guillemet ouvrant dessiné (tracé Lucide « quote », retourné) : sa taille ne dépend pas du glyphe de la police.
   const mark = { input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 24 24" fill="${BRAND.saffron}"><g transform="rotate(180 12 12)"><path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/></g></svg>`), height: 150 };
-  const body = await textBlock(text, { font: "display", size: 64, weight: 700, color: ink, width: SIZE - 2 * MARGIN, maxHeight: 560, minSize: 36, highlight: highlight ? { text: highlight, color: photo ? BRAND.saffron : BRAND.saffronInk } : null });
-  const top = Math.max(MARGIN, Math.round((SIZE - 120 - mark.height - body.height) / 2));
+  const body = await textBlock(text, { font: "display", size: 74, weight: 700, color: ink, width: W - 2 * MARGIN, maxHeight: 560, minSize: 36, highlight: highlight ? { text: highlight, color: photo ? BRAND.saffron : BRAND.saffronInk } : null });
+  const top = Math.max(MARGIN, Math.round((H - 120 - mark.height - body.height) / 2));
   const layers: Layer[] = [{ input: mark.input, top, left: MARGIN - 8 }, { input: body.input, top: top + mark.height, left: MARGIN }, ...await footer(photo ? BRAND.onNight : BRAND.ink2, position)];
   return photo ? toJpeg(photoBase(photo), [{ input: veil(0.62), top: 0, left: 0 }, ...layers]) : toJpeg(solid(BRAND.canvas), layers);
 }
 
 /** Liste courte : titre safran en capitales, puis 2 à 4 lignes précédées d'une flèche. */
 export async function listSlide(photo: Buffer | null, title: string, items: string[], position: string) {
-  const head = await textBlock(title.toUpperCase(), { font: "text", size: 24, weight: 700, color: BRAND.saffron, width: SIZE - 2 * MARGIN, maxHeight: 80, letterSpacing: 2 });
-  const textLeft = MARGIN + 72, textWidth = SIZE - textLeft - MARGIN;
-  const rows = await Promise.all(items.map(item => textBlock(item, { font: "text", size: 40, weight: 600, color: BRAND.onNight, width: textWidth, maxHeight: 170, minSize: 28 })));
+  const head = await textBlock(title.toUpperCase(), { font: "text", size: 30, weight: 700, color: BRAND.saffron, width: W - 2 * MARGIN, maxHeight: 80, letterSpacing: 2 });
+  const textLeft = MARGIN + 72, textWidth = W - textLeft - MARGIN;
+  const rows = await Promise.all(items.map(item => textBlock(item, { font: "text", size: 50, weight: 600, color: BRAND.onNight, width: textWidth, maxHeight: 170, minSize: 28 })));
   const GAP = 44;
   const listHeight = rows.reduce((h, r) => h + r.height, 0) + GAP * (rows.length - 1);
-  const areaTop = MARGIN + head.height, areaBottom = SIZE - MARGIN - 70;
+  const areaTop = MARGIN + head.height, areaBottom = H - MARGIN - 70;
   let y = areaTop + Math.max(24, Math.round((areaBottom - areaTop - listHeight) / 2));
   const layers: Layer[] = [{ input: head.input, top: MARGIN, left: MARGIN }];
   const arrows: string[] = [];
@@ -139,10 +149,10 @@ export async function listSlide(photo: Buffer | null, title: string, items: stri
 
 /** Phrase à retenir sur fond safran (sous une photo si elle en a une), avec l'invitation à enregistrer le post. */
 export async function quoteSlide(photo: Buffer | null, text: string, position: string) {
-  const TOP = photo ? 470 : 0;
-  const body = await textBlock(text, { font: "display", size: photo ? 54 : 64, weight: 800, color: BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: photo ? 330 : 600, minSize: 34 });
+  const TOP = photo ? 600 : 0;
+  const body = await textBlock(text, { font: "display", size: photo ? 64 : 76, weight: 800, color: BRAND.onSaffron, width: W - 2 * MARGIN, maxHeight: photo ? 330 : 600, minSize: 34 });
   const save = await textBlock("À retenir · enregistre ce post", { font: "text", size: 28, weight: 700, color: BRAND.saffronInk, width: 800, maxHeight: 44 });
-  const top = TOP + Math.max(photo ? 56 : MARGIN, Math.round((SIZE - TOP - 120 - body.height - 40 - save.height) / 2));
+  const top = TOP + Math.max(photo ? 56 : MARGIN, Math.round((H - TOP - 120 - body.height - 40 - save.height) / 2));
   const saveTop = top + body.height + 40;
   // Icône « signet » (tracé Lucide bookmark), à l'échelle du texte.
   const bookmark = svg(`<g transform="translate(${MARGIN} ${saveTop + Math.round((save.height - 32) / 2)}) scale(1.33)" fill="none" stroke="${BRAND.saffronInk}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></g>`);
@@ -157,10 +167,10 @@ export async function quoteSlide(photo: Buffer | null, text: string, position: s
 
 /** Chiffre clé de l'article : très grand nombre, sa signification et sa source ; sur safran ou sur photo voilée. */
 export async function statSlide(photo: Buffer | null, value: string, text: string, source: string, position: string) {
-  const number = await textBlock(value, { font: "display", size: 230, weight: 800, color: photo ? BRAND.saffron : BRAND.night, width: SIZE - 2 * MARGIN, maxHeight: 280, minSize: 110 });
-  const body = await textBlock(text, { font: "display", size: 50, weight: 700, color: photo ? BRAND.onNight : BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: 300, minSize: 32 });
-  const src = await textBlock(`Source : ${source}`, { font: "text", size: 26, weight: 600, color: photo ? BRAND.onNight2 : BRAND.saffronInk, width: SIZE - 2 * MARGIN, maxHeight: 70, minSize: 20 });
-  const top = Math.max(MARGIN, Math.round((SIZE - 120 - number.height - 24 - body.height - 36 - src.height) / 2));
+  const number = await textBlock(value, { font: "display", size: 230, weight: 800, color: photo ? BRAND.saffron : BRAND.night, width: W - 2 * MARGIN, maxHeight: 280, minSize: 110 });
+  const body = await textBlock(text, { font: "display", size: 50, weight: 700, color: photo ? BRAND.onNight : BRAND.onSaffron, width: W - 2 * MARGIN, maxHeight: 300, minSize: 32 });
+  const src = await textBlock(`Source : ${source}`, { font: "text", size: 26, weight: 600, color: photo ? BRAND.onNight2 : BRAND.saffronInk, width: W - 2 * MARGIN, maxHeight: 70, minSize: 20 });
+  const top = Math.max(MARGIN, Math.round((H - 120 - number.height - 24 - body.height - 36 - src.height) / 2));
   const layers: Layer[] = [
     { input: number.input, top, left: MARGIN },
     { input: body.input, top: top + number.height + 24, left: MARGIN },
@@ -172,13 +182,13 @@ export async function statSlide(photo: Buffer | null, value: string, text: strin
 
 /** Point fort illustré : image propre à la slide, dégradé, titre et phrase ; sans image, fond bleu nuit. */
 export async function sceneSlide(background: Buffer | null, title: string, text: string, position: string) {
-  const head = await textBlock(title, { font: "display", size: 64, weight: 800, color: BRAND.onNight, width: SIZE - 2 * MARGIN, maxHeight: 300, minSize: 40 });
-  const body = await textBlock(text, { font: "text", size: 36, color: BRAND.onNight2, width: SIZE - 2 * MARGIN, maxHeight: 240, minSize: 26 });
+  const head = await textBlock(title, { font: "display", size: 76, weight: 800, color: BRAND.onNight, width: W - 2 * MARGIN, maxHeight: 300, minSize: 40 });
+  const body = await textBlock(text, { font: "text", size: 42, color: BRAND.onNight2, width: W - 2 * MARGIN, maxHeight: 240, minSize: 26 });
   if (!background) {
-    const top = Math.max(MARGIN, Math.round((SIZE - 120 - head.height - 24 - body.height) / 2));
+    const top = Math.max(MARGIN, Math.round((H - 120 - head.height - 24 - body.height) / 2));
     return toJpeg(solid(BRAND.night), [{ input: head.input, top, left: MARGIN }, { input: body.input, top: top + head.height + 24, left: MARGIN }, ...await footer(BRAND.onNight2, position)]);
   }
-  const bodyTop = SIZE - MARGIN - 90 - body.height, headTop = bodyTop - 24 - head.height;
+  const bodyTop = H - MARGIN - 90 - body.height, headTop = bodyTop - 24 - head.height;
   const layers: Layer[] = [{ input: head.input, top: headTop, left: MARGIN }, { input: body.input, top: bodyTop, left: MARGIN }, ...await footer(BRAND.onNight, position)];
   const shade = svg(`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0.3" stop-color="${BRAND.night3}" stop-opacity="0"/><stop offset="0.62" stop-color="${BRAND.night3}" stop-opacity="0.6"/><stop offset="1" stop-color="${BRAND.night3}" stop-opacity="0.95"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/>`);
   return toJpeg(photoBase(background), [{ input: shade, top: 0, left: 0 }, ...layers]);
@@ -187,11 +197,11 @@ export async function sceneSlide(background: Buffer | null, title: string, text:
 /** Point clé : numéro, intertitre et une ou deux phrases reprises de l'article, sur fond bleu nuit. */
 export async function pointSlide(index: number, heading: string, body: string, position: string) {
   const number = await textBlock(String(index).padStart(2, "0"), { font: "display", size: 140, weight: 800, color: BRAND.saffron, width: 400, maxHeight: 180 });
-  const head = await textBlock(heading, { font: "display", size: 76, weight: 700, color: BRAND.onNight, width: SIZE - 2 * MARGIN, maxHeight: 320, minSize: 44 });
-  const text = body ? await textBlock(body, { font: "text", size: 46, color: BRAND.onNight2, width: SIZE - 2 * MARGIN, maxHeight: 380, minSize: 32 }) : null;
+  const head = await textBlock(heading, { font: "display", size: 76, weight: 700, color: BRAND.onNight, width: W - 2 * MARGIN, maxHeight: 320, minSize: 44 });
+  const text = body ? await textBlock(body, { font: "text", size: 46, color: BRAND.onNight2, width: W - 2 * MARGIN, maxHeight: 380, minSize: 32 }) : null;
   // Bloc centré verticalement dans l'espace au-dessus de la signature : pas de grand vide en bas.
   const blockHeight = number.height + 40 + head.height + (text ? 40 + text.height : 0);
-  const top = Math.max(MARGIN, Math.round((SIZE - 120 - blockHeight) / 2));
+  const top = Math.max(MARGIN, Math.round((H - 120 - blockHeight) / 2));
   const headTop = top + number.height + 40;
   return toJpeg(solid(BRAND.night), [
     { input: number.input, top, left: MARGIN },
@@ -207,32 +217,32 @@ export type ChartData = { title: string; unit?: string; sourceLabel?: string; da
 export async function chartSlide(chart: ChartData, position: string) {
   const rows = chart.data.slice(0, 6);
   const max = Math.max(...rows.map(r => r.value), 0) || 1;
-  const title = await textBlock(chart.title, { font: "display", size: 56, weight: 700, color: BRAND.ink, width: SIZE - 2 * MARGIN, maxHeight: 200, minSize: 36 });
-  const areaTop = MARGIN + title.height + 56, rowHeight = Math.min(120, (SIZE - areaTop - MARGIN - 150) / rows.length);
-  const barMax = SIZE - 2 * MARGIN - 180;
+  const title = await textBlock(chart.title, { font: "display", size: 56, weight: 700, color: BRAND.ink, width: W - 2 * MARGIN, maxHeight: 200, minSize: 36 });
+  const areaTop = MARGIN + title.height + 56, rowHeight = Math.min(120, (H - areaTop - MARGIN - 150) / rows.length);
+  const barMax = W - 2 * MARGIN - 180;
   const bars = rows.map((r, i) => `<rect x="${MARGIN}" y="${Math.round(areaTop + i * rowHeight + 44)}" width="${Math.max(8, Math.round((r.value / max) * barMax))}" height="${Math.round(rowHeight - 64)}" rx="8" fill="${i === 0 ? BRAND.saffron : BRAND.night}"/>`).join("");
   const layers: Layer[] = [{ input: title.input, top: MARGIN, left: MARGIN }, { input: svg(bars), top: 0, left: 0 }];
   for (const [i, r] of rows.entries()) {
-    const label = await textBlock(r.label, { font: "text", size: 30, weight: 600, color: BRAND.ink2, width: SIZE - 2 * MARGIN, maxHeight: 40, minSize: 22 });
+    const label = await textBlock(r.label, { font: "text", size: 30, weight: 600, color: BRAND.ink2, width: W - 2 * MARGIN, maxHeight: 40, minSize: 22 });
     const value = await textBlock(`${r.value.toLocaleString("fr-FR")}${chart.unit ? ` ${chart.unit}` : ""}`, { font: "display", size: 34, weight: 700, color: BRAND.ink, width: 170, maxHeight: 44, minSize: 22 });
     const y = Math.round(areaTop + i * rowHeight);
     layers.push({ input: label.input, top: y, left: MARGIN });
     layers.push({ input: value.input, top: y + 44 + Math.max(0, Math.round((rowHeight - 64 - value.height) / 2)), left: MARGIN + Math.max(8, Math.round((r.value / max) * barMax)) + 16 });
   }
   if (chart.sourceLabel) {
-    const source = await textBlock(`Source : ${chart.sourceLabel}`, { font: "text", size: 26, color: BRAND.ink2, width: SIZE - 2 * MARGIN, maxHeight: 70, minSize: 20 });
-    layers.push({ input: source.input, top: SIZE - MARGIN - 70 - source.height, left: MARGIN });
+    const source = await textBlock(`Source : ${chart.sourceLabel}`, { font: "text", size: 26, color: BRAND.ink2, width: W - 2 * MARGIN, maxHeight: 70, minSize: 20 });
+    layers.push({ input: source.input, top: H - MARGIN - 70 - source.height, left: MARGIN });
   }
   return toJpeg(solid(BRAND.canvas), [...layers, ...await footer(BRAND.ink2, position)]);
 }
 
 /** Dernière slide : appel à l'action sur fond bleu nuit ou photo voilée, adresse du site dans une pastille. */
 export async function ctaSlide(headline: string, detail: string, site: string, position?: string, photo: Buffer | null = null) {
-  const head = await textBlock(headline, { font: "display", size: 68, weight: 800, color: BRAND.onNight, width: SIZE - 2 * MARGIN, maxHeight: 320, minSize: 44 });
-  const sub = await textBlock(detail, { font: "text", size: 36, color: photo ? BRAND.onNight : BRAND.onNight2, width: 840, maxHeight: 220, minSize: 26 });
-  const siteBlock = await textBlock(site, { font: "display", size: 32, weight: 700, color: BRAND.saffron, width: SIZE - 2 * MARGIN, maxHeight: 50 });
+  const head = await textBlock(headline, { font: "display", size: 80, weight: 800, color: BRAND.onNight, width: W - 2 * MARGIN, maxHeight: 320, minSize: 44 });
+  const sub = await textBlock(detail, { font: "text", size: 42, color: photo ? BRAND.onNight : BRAND.onNight2, width: 840, maxHeight: 220, minSize: 26 });
+  const siteBlock = await textBlock(site, { font: "display", size: 32, weight: 700, color: BRAND.saffron, width: W - 2 * MARGIN, maxHeight: 50 });
   const pillW = siteBlock.width + 72, pillH = siteBlock.height + 40;
-  const top = Math.max(MARGIN, Math.round((SIZE - 120 - head.height - 32 - sub.height - 44 - pillH) / 2));
+  const top = Math.max(MARGIN, Math.round((H - 120 - head.height - 32 - sub.height - 44 - pillH) / 2));
   const pillTop = top + head.height + 32 + sub.height + 44;
   const layers: Layer[] = [
     { input: head.input, top, left: MARGIN },
@@ -264,45 +274,45 @@ export async function eventVisual(background: Buffer, e: EventVisualData) {
   const kind = eventVisualKind(e.category);
   if (kind === "NETWORKING") {
     // Photo sur les 55 % du haut, bandeau bleu nuit en bas : la lecture d'une invitation professionnelle.
-    const PHOTO_H = 600;
-    const title = await textBlock(e.title, { font: "display", size: 64, weight: 800, color: BRAND.onNight, width: SIZE - 2 * MARGIN, maxHeight: 200, minSize: 38 });
-    const meta = await textBlock(`${e.when} · ${e.district}`, { font: "text", size: 34, weight: 600, color: BRAND.onNight2, width: SIZE - 2 * MARGIN, maxHeight: 100, minSize: 24 });
-    const cta = await textBlock(e.cta, { font: "display", size: 34, weight: 700, color: BRAND.saffron, width: SIZE - 2 * MARGIN, maxHeight: 50 });
+    const PHOTO_H = 760;
+    const title = await textBlock(e.title, { font: "display", size: 64, weight: 800, color: BRAND.onNight, width: W - 2 * MARGIN, maxHeight: 200, minSize: 38 });
+    const meta = await textBlock(`${e.when} · ${e.district}`, { font: "text", size: 34, weight: 600, color: BRAND.onNight2, width: W - 2 * MARGIN, maxHeight: 100, minSize: 24 });
+    const cta = await textBlock(e.cta, { font: "display", size: 34, weight: 700, color: BRAND.saffron, width: W - 2 * MARGIN, maxHeight: 50 });
     const titleTop = PHOTO_H + 56;
     return toJpeg(solid(BRAND.night), [
-      { input: await sharp(background).resize(SIZE, PHOTO_H, { fit: "cover", position: "attention" }).toBuffer(), top: 0, left: 0 },
+      { input: await sharp(background).resize(W, PHOTO_H, { fit: "cover", position: "attention" }).toBuffer(), top: 0, left: 0 },
       ...await categoryPill(e.category, BRAND.night, BRAND.onNight, MARGIN, MARGIN),
       { input: title.input, top: titleTop, left: MARGIN },
       { input: meta.input, top: titleTop + title.height + 16, left: MARGIN },
-      { input: cta.input, top: SIZE - MARGIN - cta.height - 50, left: MARGIN },
+      { input: cta.input, top: H - MARGIN - cta.height - 50, left: MARGIN },
       ...await footer(BRAND.onNight2)
     ]);
   }
   if (kind === "OTHER") {
     // Photo encadrée sur fond safran : une sortie, une activité, un moment différent.
-    const INSET = 56, PHOTO_H = 560;
-    const photo = await sharp(background).resize(SIZE - 2 * INSET, PHOTO_H, { fit: "cover", position: "attention" })
-      .composite([{ input: Buffer.from(`<svg width="${SIZE - 2 * INSET}" height="${PHOTO_H}"><rect width="100%" height="100%" rx="28" fill="#fff"/></svg>`), blend: "dest-in" }]).png().toBuffer();
-    const title = await textBlock(e.title, { font: "display", size: 62, weight: 800, color: BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: 190, minSize: 38 });
-    const meta = await textBlock(`${e.when} · ${e.district}`, { font: "text", size: 32, weight: 600, color: BRAND.onSaffron, width: SIZE - 2 * MARGIN, maxHeight: 90, minSize: 24 });
-    const cta = await textBlock(e.cta, { font: "display", size: 32, weight: 700, color: BRAND.saffronInk, width: SIZE - 2 * MARGIN, maxHeight: 50 });
+    const INSET = 56, PHOTO_H = 720;
+    const photo = await sharp(background).resize(W - 2 * INSET, PHOTO_H, { fit: "cover", position: "attention" })
+      .composite([{ input: Buffer.from(`<svg width="${W - 2 * INSET}" height="${PHOTO_H}"><rect width="100%" height="100%" rx="28" fill="#fff"/></svg>`), blend: "dest-in" }]).png().toBuffer();
+    const title = await textBlock(e.title, { font: "display", size: 62, weight: 800, color: BRAND.onSaffron, width: W - 2 * MARGIN, maxHeight: 190, minSize: 38 });
+    const meta = await textBlock(`${e.when} · ${e.district}`, { font: "text", size: 32, weight: 600, color: BRAND.onSaffron, width: W - 2 * MARGIN, maxHeight: 90, minSize: 24 });
+    const cta = await textBlock(e.cta, { font: "display", size: 32, weight: 700, color: BRAND.saffronInk, width: W - 2 * MARGIN, maxHeight: 50 });
     const titleTop = INSET + PHOTO_H + 36;
     return toJpeg(solid(BRAND.saffron), [
       { input: photo, top: INSET, left: INSET },
       ...await categoryPill(e.category, BRAND.onSaffron, "#ffffff", INSET + 28, INSET + 28),
       { input: title.input, top: titleTop, left: MARGIN },
       { input: meta.input, top: titleTop + title.height + 12, left: MARGIN },
-      { input: cta.input, top: SIZE - MARGIN - cta.height - 50, left: MARGIN },
+      { input: cta.input, top: H - MARGIN - cta.height - 50, left: MARGIN },
       ...await footer(BRAND.saffronInk)
     ]);
   }
   // Speed dating : photo plein cadre, voile bleu nuit, pastille safran.
-  const base = sharp(background).resize(SIZE, SIZE, { fit: "cover", position: "attention" });
+  const base = sharp(background).resize(W, H, { fit: "cover", position: "attention" });
   const shade = svg(`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0.2" stop-color="${BRAND.night3}" stop-opacity="0.15"/><stop offset="1" stop-color="${BRAND.night3}" stop-opacity="0.94"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/>`);
-  const title = await textBlock(e.title, { font: "display", size: 80, weight: 800, color: BRAND.onNight, width: SIZE - 2 * MARGIN, maxHeight: 340, minSize: 44 });
-  const meta = await textBlock(`${e.when}\n${e.district}`, { font: "text", size: 40, weight: 600, color: BRAND.onNight2, width: SIZE - 2 * MARGIN, maxHeight: 140, minSize: 28 });
-  const cta = await textBlock(e.cta, { font: "display", size: 38, weight: 700, color: BRAND.saffron, width: SIZE - 2 * MARGIN, maxHeight: 60 });
-  const ctaTop = SIZE - MARGIN - cta.height - 60;
+  const title = await textBlock(e.title, { font: "display", size: 80, weight: 800, color: BRAND.onNight, width: W - 2 * MARGIN, maxHeight: 340, minSize: 44 });
+  const meta = await textBlock(`${e.when}\n${e.district}`, { font: "text", size: 40, weight: 600, color: BRAND.onNight2, width: W - 2 * MARGIN, maxHeight: 140, minSize: 28 });
+  const cta = await textBlock(e.cta, { font: "display", size: 38, weight: 700, color: BRAND.saffron, width: W - 2 * MARGIN, maxHeight: 60 });
+  const ctaTop = H - MARGIN - cta.height - 60;
   const metaTop = ctaTop - 36 - meta.height;
   const titleTop = metaTop - 28 - title.height;
   return toJpeg(base, [

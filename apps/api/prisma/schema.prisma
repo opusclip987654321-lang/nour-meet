@@ -923,6 +923,13 @@ model Article {
   // par slide, préparé une seule fois puis réutilisé tel quel par Instagram et Facebook. Absent : le
   // carrousel est extrait de l'article comme avant.
   instagramCarousel    Json?
+  // Boucle d'apprentissage des carrousels (2026-10-03) : choix éditoriaux testés pour ce carrousel
+  // (type d'accroche, registre, appel à l'action), dernières statistiques Instagram relevées, date du
+  // relevé et score (interactions qui font grandir le compte, pour 1 000 comptes touchés).
+  instagramVariant     Json?
+  instagramInsights    Json?
+  instagramInsightsAt  DateTime?
+  instagramScore       Float?
   // Publication sur la Page Facebook (même carrousel qu'Instagram) : identifiant, date, verrou, erreur.
   facebookPostId       String?
   facebookPublishedAt  DateTime?

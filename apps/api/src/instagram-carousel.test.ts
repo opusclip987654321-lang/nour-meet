@@ -66,7 +66,7 @@ describe("plan du carrousel d’un article", () => {
 });
 
 describe("rendu des visuels Instagram", () => {
-  it("produit des JPEG carrés 1080 × 1080 : carrousel d’article et visuel d’événement", async () => {
+  it("produit des JPEG portrait 1080 × 1350 (4:5) : carrousel d’article et visuel d’événement", async () => {
     const publicDir = await mkdtemp(path.join(os.tmpdir(), "nour-ig-"));
     await mkdir(path.join(publicDir, "uploads", "articles"), { recursive: true });
     const cover = await sharp({ create: { width: 1600, height: 1000, channels: 3, background: "#8a6d5a" } }).webp().toBuffer();
@@ -76,7 +76,7 @@ describe("rendu des visuels Instagram", () => {
     expect(slides.length).toBe(articleCarouselPlan(article).middle.length + 2);
     for (const slide of slides) {
       const meta = await sharp(slide).metadata();
-      expect([meta.format, meta.width, meta.height]).toEqual(["jpeg", 1080, 1080]);
+      expect([meta.format, meta.width, meta.height]).toEqual(["jpeg", 1080, 1350]);
     }
     await mkdir(path.join(publicDir, "uploads", "events"), { recursive: true });
     await writeFile(path.join(publicDir, "uploads", "events", "event.webp"), cover);
@@ -147,7 +147,7 @@ describe("carrousel réécrit", () => {
     expect(() => parseCarouselScript({ ...draft, slides: draft.slides.slice(0, 1) }, article)).toThrow("trop court");
   });
 
-  it("rend chaque format, avec et sans photo, en JPEG carré 1080 × 1080", async () => {
+  it("rend chaque format, avec et sans photo, en JPEG portrait 1080 × 1350 (4:5)", async () => {
     const publicDir = await mkdtemp(path.join(os.tmpdir(), "nour-ig-"));
     await mkdir(path.join(publicDir, "uploads", "articles"), { recursive: true });
     const photo = await sharp({ create: { width: 1600, height: 1000, channels: 3, background: "#8a6d5a" } }).webp().toBuffer();
@@ -160,7 +160,7 @@ describe("carrousel réécrit", () => {
     for (const s of [script, bare]) {
       const slides = await renderArticleCarousel({ ...article, instagramCarousel: s }, { publicDir, webOrigin: "https://nourmeet.com" });
       expect(slides.length).toBe(8);
-      for (const jpeg of slides) expect(await sharp(jpeg).metadata()).toMatchObject({ format: "jpeg", width: 1080, height: 1080 });
+      for (const jpeg of slides) expect(await sharp(jpeg).metadata()).toMatchObject({ format: "jpeg", width: 1080, height: 1350 });
     }
   }, 120_000);
 });

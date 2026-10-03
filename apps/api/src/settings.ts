@@ -91,6 +91,11 @@ export const SETTINGS_SCHEMA = {
     default: 390,
     description: "Durée de conservation des visites (PageView) avant purge automatique. 390 jours par défaut (13 mois), plafond habituellement retenu pour l'exemption CNIL « mesure d'audience »."
   },
+  SOCIAL_POST_TIME: {
+    schema: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    default: "18:30" as string,
+    description: "Heure (Europe/Paris, HH:MM) à partir de laquelle le carrousel de l'article du jour part sur Instagram et Facebook. L'article est mis en ligne sur le blog dès minuit, mais un post publié la nuit meurt avant le réveil de son public (diagnostic du 2026-10-03) : la publication sociale attend ce créneau de forte audience."
+  },
   CANCELLATION_ALERT_THRESHOLD_PERCENT: {
     schema: z.number().min(0).max(100),
     default: 20,

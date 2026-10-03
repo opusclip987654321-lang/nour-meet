@@ -1,7 +1,7 @@
 // Corrections web du 2026-09-24 : règles critiques vérifiées contre le vrai serveur et une vraie base
 // (et Stripe en mode test pour les abonnements), comme critical-flows.test.ts.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { publishDailyArticle } from "../../src/services/blog-autopublish.js";
+import { publishDailyArticle, shareDailyArticle } from "../../src/services/blog-autopublish.js";
 import type { AIProvider } from "../../src/ai-provider.js";
 import { API_URL, NETWORKING_ANSWERS_FIXTURE, addRestaurantPhoto, adminToken, api, applyToEvent, deleteTestUsers, ensureServerRunning, payAndConfirm, prisma, signStripeWebhook, stripe, testPhone } from "./helpers.js";
 
@@ -294,6 +294,13 @@ describe("publication quotidienne du blog sans doublon (§3.1)", () => {
     expect(published.imageUrl).toBe("/static/uploads/articles/test-illustration.webp");
     expect(published.imageAiGenerated).toBe(true);
     expect(published.instagramCaption).toContain("lien en bio");
+    // 11 h à Paris : le carrousel attend le créneau de SOCIAL_POST_TIME (18:30 par défaut).
+    expect(shared).toEqual([]);
+    const shareDeps = { prisma, notify, log: silentLog, shareOnInstagram: async (id: string) => { shared.push(id); throw new Error("Instagram indisponible (test)"); } };
+    expect(await shareDailyArticle(shareDeps, new Date("2031-03-16T17:45:00Z"))).toBe("DONE");
+    expect(shared).toEqual([published.id]);
+    // Un seul essai automatique : l'échec n'est pas relancé au passage suivant.
+    await shareDailyArticle(shareDeps, new Date("2031-03-16T18:15:00Z"));
     expect(shared).toEqual([published.id]);
     // La route publique ne révèle jamais le suivi Instagram ni la consigne IA.
     const { body } = await api<Record<string, unknown>>(`/articles/${published.slug}`);

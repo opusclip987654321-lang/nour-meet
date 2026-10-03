@@ -5,10 +5,11 @@ import { logArticleTransition } from "./services/articles.js";
 import { audit } from "./services/audit.js";
 import { illustrateArticle, illustrateSlide } from "./services/article-image.js";
 import { prepareArticleCarousel } from "./services/instagram-carousel.js";
-import { publishDailyArticle } from "./services/blog-autopublish.js";
+import { publishDailyArticle, shareDailyArticle } from "./services/blog-autopublish.js";
 import { facebookConfig, illustrationConfig, instagramConfig } from "./services/social-config.js";
 import { shareArticleOnFacebook } from "./services/facebook.js";
-import { refreshInstagramToken, shareArticleOnInstagram } from "./services/instagram.js";
+import { fetchMediaInsights, refreshInstagramToken, shareArticleOnInstagram } from "./services/instagram.js";
+import { carouselGuidance, collectCarouselInsights, weeklyCarouselReport } from "./services/carousel-learning.js";
 import { cancelEventWithRefunds } from "./services/event-cancellation.js";
 import { links } from "./services/links.js";
 import { notify } from "./services/notify.js";
@@ -187,8 +188,10 @@ if (ownsBackgroundJobs) setInterval(() => { checkCancellationSpike().catch(err =
 const runDailyArticle = async () => {
   if (process.env.NODE_ENV !== "production" || getSetting("AI_BLOG_GENERATION_MODE") !== "AUTO_PUBLISH_DAILY") return;
   const illustration = illustrationConfig, instagram = instagramConfig, facebook = facebookConfig;
-  const outcome = await publishDailyArticle({ prisma, aiProvider, notify, log: app.log, illustrate: illustration ? article => illustrateArticle(illustration, aiProvider, article, app.log) : undefined, prepareCarousel: articleId => prepareArticleCarousel(prisma, { aiProvider, log: app.log, illustrate: illustration ? slide => illustrateSlide(illustration, aiProvider, slide, app.log) : undefined }, articleId), shareOnInstagram: instagram ? articleId => shareArticleOnInstagram(prisma, instagram, articleId) : undefined, shareOnFacebook: facebook ? articleId => shareArticleOnFacebook(prisma, facebook, articleId) : undefined });
+  const outcome = await publishDailyArticle({ prisma, aiProvider, notify, log: app.log, illustrate: illustration ? article => illustrateArticle(illustration, aiProvider, article, app.log) : undefined, prepareCarousel: articleId => prepareArticleCarousel(prisma, { aiProvider, log: app.log, guidance: () => carouselGuidance(prisma), illustrate: illustration ? slide => illustrateSlide(illustration, aiProvider, slide, app.log) : undefined }, articleId), shareOnInstagram: instagram ? articleId => shareArticleOnInstagram(prisma, instagram, articleId) : undefined, shareOnFacebook: facebook ? articleId => shareArticleOnFacebook(prisma, facebook, articleId) : undefined });
   if (outcome === "PUBLISHED_AI" || outcome === "PUBLISHED_QUEUE") app.log.info({ outcome }, "Article du jour publié");
+  // L'article déjà en ligne part sur les réseaux à partir de SOCIAL_POST_TIME (vérifié à chaque passage).
+  if (outcome === "ALREADY_PUBLISHED") await shareDailyArticle({ prisma, notify, log: app.log, shareOnInstagram: instagram ? articleId => shareArticleOnInstagram(prisma, instagram, articleId) : undefined, shareOnFacebook: facebook ? articleId => shareArticleOnFacebook(prisma, facebook, articleId) : undefined });
 };
 // Jeton Instagram (60 jours) renouvelé chaque semaine, indépendamment de la publication du jour.
 const instagramForRefresh = instagramConfig;
@@ -196,6 +199,19 @@ if (ownsBackgroundJobs && instagramForRefresh && process.env.NODE_ENV === "produ
   const refresh = () => refreshInstagramToken(prisma, instagramForRefresh).then(done => { if (done) app.log.info("Jeton Instagram renouvelé"); }).catch(err => app.log.warn({ err: (err as Error).message }, "Renouvellement du jeton Instagram échoué"));
   setTimeout(refresh, 5 * 60_000);
   setInterval(refresh, 24 * 60 * 60_000);
+}
+// Boucle d'apprentissage des carrousels (2026-10-03) : relevé des statistiques Instagram de la première
+// semaine de chaque carrousel (au plus une fois par jour et par carrousel), et bilan du lundi aux
+// administrateurs. Passage toutes les heures ; les deux tâches sont idempotentes.
+const insightsConfig = instagramConfig;
+if (ownsBackgroundJobs && insightsConfig && process.env.NODE_ENV === "production") {
+  const learn = async () => {
+    const collected = await collectCarouselInsights({ prisma, log: app.log, fetchInsights: mediaId => fetchMediaInsights(prisma, insightsConfig, mediaId) });
+    if (collected) app.log.info({ collected }, "Statistiques Instagram des carrousels relevées");
+    await weeklyCarouselReport({ prisma, notify });
+  };
+  setTimeout(() => { learn().catch(err => app.log.error(err)); }, 10 * 60_000);
+  setInterval(() => { learn().catch(err => app.log.error(err)); }, 60 * 60_000);
 }
 if (ownsBackgroundJobs) {
   setTimeout(() => { runDailyArticle().catch(err => app.log.error(err)); }, 60_000);
