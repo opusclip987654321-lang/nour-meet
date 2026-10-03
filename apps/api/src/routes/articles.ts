@@ -6,6 +6,7 @@ import { z } from "zod";
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, aiProvider, app, articleUploadsDir, prisma } from "../context.js";
 import { assertNoForbiddenWord, logArticleTransition } from "../services/articles.js";
 import { sanitizeInstagramCaption } from "../services/blog-content.js";
+import { carouselGuidance } from "../services/carousel-learning.js";
 import { shareArticleOnInstagram } from "../services/instagram.js";
 import { prepareArticleCarousel } from "../services/instagram-carousel.js";
 import { facebookConfig, instagramConfig } from "../services/social-config.js";
@@ -170,7 +171,7 @@ app.post("/admin/articles/:id/instagram", { preHandler: roles(UserRole.ADMIN), c
   // sans nouvelles illustrations, pour ne pas faire attendre l'administrateur plusieurs minutes. Il
   // enregistre alors sa légende courte ; celle saisie ici reste prioritaire.
   // Pas de réécriture pendant un envoi en cours (double clic) : le verrou le refusera de toute façon.
-  if (!article.instagramMediaId && !article.instagramPublishingAt) await prepareArticleCarousel(prisma, { aiProvider, log: request.log }, id);
+  if (!article.instagramMediaId && !article.instagramPublishingAt) await prepareArticleCarousel(prisma, { aiProvider, log: request.log, guidance: () => carouselGuidance(prisma) }, id);
   const stored = (await prisma.article.findUniqueOrThrow({ where: { id } })).instagramCaption;
   const finalCaption = clean ?? stored ?? sanitizeInstagramCaption(`${article.title}\n\nArticle complet : lien en bio\n\n#nurmeet #rencontres`);
   await prisma.article.update({ where: { id }, data: { instagramCaption: finalCaption } });

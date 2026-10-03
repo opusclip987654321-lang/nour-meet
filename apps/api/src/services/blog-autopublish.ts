@@ -2,6 +2,7 @@ import { Prisma, PrismaClient, UserRole } from "@prisma/client";
 import type { AIProvider } from "../ai-provider.js";
 import { defaultImagePrompt, type Illustration } from "./article-image.js";
 import { varietySeed, visualBrief } from "./image-variety.js";
+import { getSetting } from "../settings.js";
 import { BLOG_CATEGORIES, MAX_AI_ATTEMPTS_PER_DAY, parisDay, sanitizeGeneratedArticle, sanitizeInstagramCaption, slugifyTitle } from "./blog-content.js";
 
 // Publication automatique quotidienne du blog (corrections web 2026-09-24, §3) — remplace la
@@ -81,22 +82,43 @@ export async function publishDailyArticle(deps: Deps, now: Date = new Date()): P
     if (deps.prepareCarousel && (deps.shareOnInstagram || deps.shareOnFacebook)) {
       await deps.prepareCarousel(created!.id).catch(err => deps.log.warn({ err: (err as Error).message }, "Préparation du carrousel échouée"));
     }
-    if (deps.shareOnInstagram) {
-      try { await deps.shareOnInstagram(created!.id); }
-      catch (err) {
-        deps.log.warn({ err: (err as Error).message }, "Publication Instagram de l’article du jour échouée");
-        await Promise.all(admins.map(a => deps.notify(a.id, "Publication Instagram échouée", `« ${created!.title} » est en ligne sur le site, mais pas sur Instagram : ${(err as Error).message.slice(0, 200)}`, `/admin/blog/${created!.id}`)));
-      }
-    }
-    if (deps.shareOnFacebook) {
-      try { await deps.shareOnFacebook(created!.id); }
-      catch (err) {
-        deps.log.warn({ err: (err as Error).message }, "Publication Facebook de l’article du jour échouée");
-        await Promise.all(admins.map(a => deps.notify(a.id, "Publication Facebook échouée", `« ${created!.title} » est en ligne sur le site, mais pas sur Facebook : ${(err as Error).message.slice(0, 200)}`, `/admin/blog/${created!.id}`)));
-      }
-    }
+    await shareDailyArticle(deps, now);
     return outcome;
   } finally {
     running = false;
   }
+}
+
+// Heure de Paris « HH:MM » d'un instant, comparable à SOCIAL_POST_TIME par ordre alphabétique.
+const parisTime = (date: Date) => date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Europe/Paris" });
+
+export type SocialShareOutcome = "TOO_EARLY" | "NO_ARTICLE" | "DONE";
+
+/**
+ * Publication sociale de l'article du jour, séparée de sa mise en ligne (diagnostic du 2026-10-03) :
+ * l'article paraît sur le blog dès minuit, son carrousel ne part sur Instagram et Facebook qu'à partir de
+ * SOCIAL_POST_TIME, appelée à chaque passage de la tâche. Un seul essai automatique par réseau et par
+ * article (tracé dans le journal d'audit) : un échec prévient les administrateurs une fois, sans relance
+ * toutes les 30 minutes ; la republication reste possible à la main depuis l'administration.
+ */
+export async function shareDailyArticle(deps: Pick<Deps, "prisma" | "notify" | "log" | "shareOnInstagram" | "shareOnFacebook">, now: Date = new Date()): Promise<SocialShareOutcome> {
+  if (!deps.shareOnInstagram && !deps.shareOnFacebook) return "DONE";
+  if (parisTime(now) < getSetting("SOCIAL_POST_TIME")) return "TOO_EARLY";
+  const { prisma } = deps;
+  const article = await prisma.article.findUnique({ where: { autoPublishDay: parisDay(now) }, select: { id: true, title: true, status: true } });
+  if (!article || article.status !== "PUBLISHED") return "NO_ARTICLE";
+  const networks = [["Instagram", deps.shareOnInstagram], ["Facebook", deps.shareOnFacebook]] as const;
+  for (const [network, share] of networks) {
+    if (!share) continue;
+    const action = `DAILY_ARTICLE_${network.toUpperCase()}_ATTEMPT`;
+    if (await prisma.auditLog.count({ where: { action, entityId: article.id } })) continue;
+    await prisma.auditLog.create({ data: { action, entity: "Article", entityId: article.id } });
+    try { await share(article.id); }
+    catch (err) {
+      deps.log.warn({ err: (err as Error).message }, `Publication ${network} de l’article du jour échouée`);
+      const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+      await Promise.all(admins.map(a => deps.notify(a.id, `Publication ${network} échouée`, `« ${article.title} » est en ligne sur le site, mais pas sur ${network} : ${(err as Error).message.slice(0, 200)}`, `/admin/blog/${article.id}`)));
+    }
+  }
+  return "DONE";
 }

@@ -19,12 +19,15 @@ export const MAX_ILLUSTRATION_ATTEMPTS = 5;
 // à l'image » — y compris ce qui pourrait y ressembler (un thé glacé à la menthe passe pour un mojito).
 const IMAGE_GUARDRAILS = " Strict rules: absolutely no alcohol and nothing that could be mistaken for alcohol — no cocktails, no tall glasses with ice or straws, no wine or champagne glasses, no bottles. Drinks are optional and never the focus; if drinks appear, they are hot mint tea in small traditional tea glasses or coffee cups. No text, letters, logos or watermarks. No religious symbols or places.";
 
-async function generateImage(config: IllustrationConfig, prompt: string): Promise<Buffer> {
+// Portrait pour les slides du carrousel (affichées en 4:5 sur Instagram, 2026-10-03), paysage pour la
+// couverture du blog ; même prix chez OpenAI.
+type ImageSize = "1536x1024" | "1024x1536";
+async function generateImage(config: IllustrationConfig, prompt: string, size: ImageSize = "1536x1024"): Promise<Buffer> {
   const response = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS),
     headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: config.model, prompt: `${prompt}${IMAGE_GUARDRAILS}`, size: "1536x1024", quality: "medium", n: 1 })
+    body: JSON.stringify({ model: config.model, prompt: `${prompt}${IMAGE_GUARDRAILS}`, size, quality: "medium", n: 1 })
   });
   const data = await response.json().catch(() => ({})) as { data?: { b64_json?: string; url?: string }[]; error?: { message?: string } };
   if (!response.ok) throw new Error(`OpenAI Images a refusé la génération (${response.status}) : ${data.error?.message ?? "sans détail"}`);
@@ -54,13 +57,13 @@ export async function saveIllustration(source: Buffer, config: Pick<Illustration
 
 // Boucle commune génération → contrôle par Claude → nouvel essai avec les raisons du refus. Renvoie
 // l'image brute approuvée, jamais une image non contrôlée.
-async function reviewedImage(config: IllustrationConfig, reviewer: AIProvider, subject: { title: string; imagePrompt: string }, attempts: number, log: { warn: (o: unknown, m?: string) => void }) {
+async function reviewedImage(config: IllustrationConfig, reviewer: AIProvider, subject: { title: string; imagePrompt: string }, attempts: number, log: { warn: (o: unknown, m?: string) => void }, size?: ImageSize) {
   if (!reviewer.reviewCoverImage || !subject.imagePrompt.trim()) return null;
   let previousIssues: string[] = [];
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const prompt = previousIssues.length ? `${subject.imagePrompt} A previous version was rejected for these reasons, make sure none of them occurs: ${previousIssues.join(" ; ")}.` : subject.imagePrompt;
-      const raw = await generateImage(config, prompt);
+      const raw = await generateImage(config, prompt, size);
       const forReview = await sharp(raw).resize({ width: 1024, withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
       const review = await reviewer.reviewCoverImage(forReview, subject);
       if (!review.approved) { previousIssues = review.issues.slice(0, 5); log.warn({ attempt, issues: review.issues }, "Illustration IA refusée par le contrôle visuel"); continue; }
@@ -79,13 +82,13 @@ export async function illustrateArticle(config: IllustrationConfig, reviewer: AI
 
 // Illustration d'une slide du carrousel (refonte du 2026-09-26) : mêmes garde-fous et même contrôle que
 // la couverture, mais 3 essais au plus — une slide sans image reste lisible (fond bleu nuit), le coût
-// d'un article reste donc borné. Seule la déclinaison carrée Instagram est enregistrée.
+// d'un article reste donc borné. Seule la déclinaison portrait 4:5 Instagram est enregistrée.
 export const MAX_SLIDE_IMAGE_ATTEMPTS = 3;
 export async function illustrateSlide(config: IllustrationConfig, reviewer: AIProvider, slide: { title: string; imagePrompt: string }, log: { warn: (o: unknown, m?: string) => void }): Promise<{ image: string; altText: string } | null> {
-  const approved = await reviewedImage(config, reviewer, slide, MAX_SLIDE_IMAGE_ATTEMPTS, log);
+  const approved = await reviewedImage(config, reviewer, slide, MAX_SLIDE_IMAGE_ATTEMPTS, log, "1024x1536");
   if (!approved) return null;
   const name = `${randomUUID()}-slide.jpg`;
-  await writeFile(path.join(config.uploadsDir, name), await sharp(approved.raw).resize(1080, 1080, { fit: "cover", position: "attention" }).jpeg({ quality: 86, mozjpeg: true }).toBuffer());
+  await writeFile(path.join(config.uploadsDir, name), await sharp(approved.raw).resize(1080, 1350, { fit: "cover", position: "attention" }).jpeg({ quality: 86, mozjpeg: true }).toBuffer());
   return { image: `${config.publicPrefix}${name}`, altText: approved.altText };
 }
 

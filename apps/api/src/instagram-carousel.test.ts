@@ -66,7 +66,7 @@ describe("plan du carrousel d’un article", () => {
 });
 
 describe("rendu des visuels Instagram", () => {
-  it("produit des JPEG carrés 1080 × 1080 : carrousel d’article et visuel d’événement", async () => {
+  it("produit des JPEG portrait 1080 × 1350 (4:5) : carrousel d’article et visuel d’événement", async () => {
     const publicDir = await mkdtemp(path.join(os.tmpdir(), "nour-ig-"));
     await mkdir(path.join(publicDir, "uploads", "articles"), { recursive: true });
     const cover = await sharp({ create: { width: 1600, height: 1000, channels: 3, background: "#8a6d5a" } }).webp().toBuffer();
@@ -76,7 +76,7 @@ describe("rendu des visuels Instagram", () => {
     expect(slides.length).toBe(articleCarouselPlan(article).middle.length + 2);
     for (const slide of slides) {
       const meta = await sharp(slide).metadata();
-      expect([meta.format, meta.width, meta.height]).toEqual(["jpeg", 1080, 1080]);
+      expect([meta.format, meta.width, meta.height]).toEqual(["jpeg", 1080, 1350]);
     }
     await mkdir(path.join(publicDir, "uploads", "events"), { recursive: true });
     await writeFile(path.join(publicDir, "uploads", "events", "event.webp"), cover);
@@ -147,7 +147,7 @@ describe("carrousel réécrit", () => {
     expect(() => parseCarouselScript({ ...draft, slides: draft.slides.slice(0, 1) }, article)).toThrow("trop court");
   });
 
-  it("rend chaque format, avec et sans photo, en JPEG carré 1080 × 1080", async () => {
+  it("rend chaque format, avec et sans photo, en JPEG portrait 1080 × 1350 (4:5)", async () => {
     const publicDir = await mkdtemp(path.join(os.tmpdir(), "nour-ig-"));
     await mkdir(path.join(publicDir, "uploads", "articles"), { recursive: true });
     const photo = await sharp({ create: { width: 1600, height: 1000, channels: 3, background: "#8a6d5a" } }).webp().toBuffer();
@@ -160,7 +160,7 @@ describe("carrousel réécrit", () => {
     for (const s of [script, bare]) {
       const slides = await renderArticleCarousel({ ...article, instagramCarousel: s }, { publicDir, webOrigin: "https://nourmeet.com" });
       expect(slides.length).toBe(8);
-      for (const jpeg of slides) expect(await sharp(jpeg).metadata()).toMatchObject({ format: "jpeg", width: 1080, height: 1080 });
+      for (const jpeg of slides) expect(await sharp(jpeg).metadata()).toMatchObject({ format: "jpeg", width: 1080, height: 1350 });
     }
   }, 120_000);
 });
@@ -180,4 +180,48 @@ it("redemande le carrousel une fois, avec la raison du refus, avant de renoncer"
   expect(feedbacks).toEqual([undefined, "Chiffre absent de l’article : 300"]);
   expect(script?.slides.some(s => s.kind === "stat")).toBe(true);
   expect(stored.data).toHaveProperty("instagramCarousel");
+});
+
+// Formats « codes d'Internet » (2026-10-03) : conversation, grosse phrase sur photo, tweet.
+describe("carrousels façon Internet", () => {
+  const chat: CarouselDraft = {
+    format: "chat", hook: "POV : ta mère a découvert les accusés de lecture", subtitle: "", coverContact: "Maman",
+    coverMessages: [{ me: false, text: "Alors ?" }, { me: true, text: "Alors quoi ?" }, { me: false, text: "Tu sais très bien" }],
+    slides: [
+      slide({ kind: "chat", imagePrompt: "", contact: "Karim", messages: [{ me: false, text: "Elle m’a répondu « haha »" }, { me: true, text: "Frère, c’est fini" }] }),
+      slide({ kind: "chat", imagePrompt: "", contact: "Karim", messages: [{ me: false, text: "Je peux encore sauver ça ?" }, { me: true, text: "Slide 4, je t’explique" }] }),
+      slide({ kind: "list", imagePrompt: "", title: "Pour relancer", items: ["Une vraie question", "Une proposition concrète"] })
+    ],
+    ctaHeadline: "Envoie-le à Karim", ctaDetail: "Et viens à une soirée Nūr Meet, en vrai.", ctaImagePrompt: "", caption: "Le « haha » sec, on en parle ?\n\n#nurmeet"
+  };
+
+  it("garde la conversation de couverture, n'illustre rien, et permet les petits compteurs", () => {
+    const script = parseCarouselScript(chat, article);
+    expect(script.format).toBe("chat");
+    expect(script.cover?.messages).toHaveLength(3);
+    expect(script.slides.map(s => s.kind)).toEqual(["chat", "chat", "list"]);
+    expect(photoSlots(script)).toEqual([]);
+  });
+
+  it("refuse toujours une statistique inventée, même déguisée en compteur", () => {
+    const stat = { ...chat, slides: [...chat.slides, slide({ kind: "punch", text: "7 sur 10 abandonnent les applis" })] };
+    expect(() => parseCarouselScript(stat, article)).toThrow("Chiffre absent");
+    expect(() => parseCarouselScript({ ...chat, hook: "5 red flags (le n°3, c’est toi)" }, article)).not.toThrow();
+  });
+
+  it("illustre chaque grosse phrase du format punch, et rend les trois formats en 4:5", async () => {
+    const publicDir = await mkdtemp(path.join(os.tmpdir(), "nour-ig-"));
+    await mkdir(path.join(publicDir, "uploads", "articles"), { recursive: true });
+    await writeFile(path.join(publicDir, "uploads", "articles", "cover.webp"), await sharp({ create: { width: 1600, height: 1000, channels: 3, background: "#8a6d5a" } }).webp().toBuffer());
+    const punch: CarouselDraft = { ...chat, format: "punch", hook: "5 red flags au premier date. Le n°3, c’est sûrement toi.", slides: [1, 2, 3].map(n => slide({ kind: "punch", text: `Red flag n°${n} : il parle de son ex avant le dessert.` })) };
+    const tweet: CarouselDraft = { ...chat, format: "tweet", hook: "Phrases qui tuent un date :\n\n– « Je suis pas comme les autres »", slides: [1, 2, 3].map(() => slide({ kind: "tweet", imagePrompt: "", text: "Ce qu’il faut dire à la place :\n– une vraie question\n– un vrai compliment" })) };
+    expect(photoSlots(parseCarouselScript(punch, article))).toHaveLength(4);
+    for (const d of [chat, punch, tweet]) {
+      const script = parseCarouselScript(d, article);
+      photoSlots(script).forEach(slot => Object.assign(slot, { image: article.imageUrl, fromCover: true }));
+      const slides = await renderArticleCarousel({ ...article, instagramCarousel: script }, { publicDir, webOrigin: "https://nourmeet.com" });
+      expect(slides.length).toBe(5);
+      for (const jpeg of slides) expect(await sharp(jpeg).metadata()).toMatchObject({ format: "jpeg", width: 1080, height: 1350 });
+    }
+  }, 120_000);
 });
