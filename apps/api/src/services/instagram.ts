@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { sanitizeInstagramCaption } from "./blog-content.js";
 import type { Prisma } from "@prisma/client";
 import { CAROUSEL_MIN, articleCarouselPlan, storedCarousel, type CarouselScript, type CarouselSlide, type SlidePhoto } from "./instagram-carousel.js";
-import { chartSlide, contrastSlide, coverSlide, ctaSlide, eventVisual, eventVisualKind, listSlide, pointSlide, quoteSlide, sceneSlide, statSlide, statementSlide } from "./social-visuals.js";
+import { chartSlide, chatSlide, contrastSlide, coverSlide, ctaSlide, eventVisual, eventVisualKind, listSlide, pointSlide, punchSlide, quoteSlide, sceneSlide, statSlide, statementSlide, tweetSlide } from "./social-visuals.js";
 
 // Publication Instagram via l'API Instagram avec connexion Instagram (compte professionnel) :
 // - l'article du jour, en carrousel de 4 à 8 slides (décision v2 §6, remplace l'image unique) ;
@@ -140,6 +140,26 @@ function renderSlide(slide: CarouselSlide, photo: Buffer | null, position: strin
     case "scene": return sceneSlide(photo, slide.title, slide.text, position);
     case "stat": return statSlide(photo, slide.value, slide.text, slide.source, position);
     case "chart": return chartSlide(slide.chart, position);
+    case "chat": return chatSlide(slide.contact, slide.messages, position);
+    case "punch": return punchSlide(photo, slide.text, position);
+    case "tweet": return tweetSlide(slide.text, position);
+  }
+}
+
+// Couverture et fin d'un carrousel « codes d'Internet » (2026-10-03), dans le même style que ses slides.
+async function formatCover(script: CarouselScript, cover: Buffer, position: string) {
+  switch (script.format) {
+    case "chat": return script.cover ? chatSlide(script.cover.contact, script.cover.messages, position, script.hook) : punchSlide(cover, script.hook, position, script.subtitle || undefined, true);
+    case "tweet": return tweetSlide(script.hook, position);
+    default: return punchSlide(cover, script.hook, position, script.subtitle || undefined, true);
+  }
+}
+async function formatCta(script: CarouselScript, photo: Buffer | null, position: string) {
+  const { headline, detail } = script.cta;
+  switch (script.format) {
+    case "chat": return chatSlide("Nūr Meet", [{ me: false, text: headline }, { me: false, text: detail }], position);
+    case "tweet": return tweetSlide(`${headline}\n\n${detail}`, position);
+    default: return punchSlide(photo, headline, position, detail);
   }
 }
 
@@ -148,9 +168,10 @@ async function renderScript(script: CarouselScript, cover: Buffer, config: Confi
   let details = 0;
   const detailIndex = () => details++;
   // Pas de rubrique « Journal » sur la couverture réécrite : elle faisait lire le post comme une publicité.
-  const slides = [await coverSlide(cover, script.hook, "", `1/${total}`, script.subtitle || undefined)];
+  const slides = [script.format ? await formatCover(script, cover, `1/${total}`) : await coverSlide(cover, script.hook, "", `1/${total}`, script.subtitle || undefined)];
   for (const [i, slide] of script.slides.entries()) slides.push(await renderSlide(slide, await screenPhoto(slide, cover, detailIndex, config), `${i + 2}/${total}`));
-  slides.push(await ctaSlide(script.cta.headline, script.cta.detail, siteLabel(config), `${total}/${total}`, await screenPhoto(script.cta, cover, detailIndex, config)));
+  const ctaPhoto = await screenPhoto(script.cta, cover, detailIndex, config);
+  slides.push(script.format ? await formatCta(script, ctaPhoto, `${total}/${total}`) : await ctaSlide(script.cta.headline, script.cta.detail, siteLabel(config), `${total}/${total}`, ctaPhoto));
   return slides;
 }
 

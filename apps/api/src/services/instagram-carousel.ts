@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import type { AIProvider, CarouselDraft, CarouselDraftSlide } from "../ai-provider.js";
 import { sanitizeInstagramCaption } from "./blog-content.js";
 import { varietySeed, visualBriefs } from "./image-variety.js";
-import type { ChartData } from "./social-visuals.js";
+import type { ChartData, ChatMessage } from "./social-visuals.js";
 
 // Contenu du carrousel Instagram d'un article (décision v2 §6) : 4 à 8 slides, peu de texte, tout
 // repris de l'article lui-même — intertitres, premières phrases, chapô. Aucun chiffre n'est produit
@@ -23,11 +23,17 @@ export type SlideContent =
   | { kind: "quote"; text: string }
   | { kind: "scene"; title: string; text: string }
   | { kind: "stat"; value: string; text: string; source: string }
-  | { kind: "chart"; chart: ChartData };
+  | { kind: "chart"; chart: ChartData }
+  // Formats « codes d'Internet » (2026-10-03) : conversation, grosse phrase sur photo, tweet.
+  | { kind: "chat"; contact: string; messages: ChatMessage[] }
+  | { kind: "punch"; text: string }
+  | { kind: "tweet"; text: string };
+export type CarouselFormat = "chat" | "punch" | "tweet";
 // Photo d'une slide : illustration générée pour elle, ou à défaut un détail recadré de la couverture.
 export type SlidePhoto = { imagePrompt: string; image: string | null; altText: string | null; fromCover?: boolean };
 export type CarouselSlide = SlideContent & SlidePhoto;
-export type CarouselScript = { hook: string; subtitle: string; slides: CarouselSlide[]; cta: { headline: string; detail: string } & SlidePhoto; caption: string | null };
+// format absent : carrousel « classique » enregistré avant le 2026-10-03, rendu comme avant.
+export type CarouselScript = { format?: CarouselFormat; hook: string; subtitle: string; cover?: { contact: string; messages: ChatMessage[] }; slides: CarouselSlide[]; cta: { headline: string; detail: string } & SlidePhoto; caption: string | null };
 // Au plus 4 illustrations générées par article, en plus de la couverture : coût et durée bornés.
 export const MAX_SLIDE_IMAGES = 4;
 
@@ -99,6 +105,14 @@ export function articleCarouselPlan(article: { title: string; excerpt: string | 
 }
 
 const NUMBER = /\d+(?:[.,]\d+)?/g;
+// Petits compteurs (« 5 red flags », « le n°3 ») permis même absents de l'article (2026-10-03) : jamais
+// suivis d'un pourcentage, d'une proportion, d'un âge, d'une durée ou d'un montant, qui restent vérifiés.
+const COUNTER = /(?<![\d.,:])\b(?:[1-9]|10)\b(?![\d.,:]\d)(?!\s*(?:%|pour ?cent|sur\b|ans?\b|mois\b|jours?\b|heures?\b|h\b|min|fois\b|€|euros?\b|millions?|milliards?|personnes?\b|français))/gi;
+const withoutCounters = (text: string) => text.replace(COUNTER, " ");
+const chatMessages = (messages: CarouselDraftSlide["messages"] | undefined): ChatMessage[] =>
+  (messages ?? []).filter(m => m?.text?.trim()).slice(0, 6).map(m => ({ me: !!m.me, text: shortText(m.text, 80) }));
+// Guillemets conservés : dans une conversation ou un tweet, ils font partie de la blague (« haha »).
+const multiline = (text: string, max: number) => text.split(/\n/).map(l => l.trim() ? shortText(l, max) : "").join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, max + 40);
 const numbersOf = (text: string) => new Set((text.match(NUMBER) ?? []).map(n => n.replace(",", ".")));
 const oneLine = (text: string, max: number) => shortText(text.replace(/^["«»“”\s]+|["«»“”\s]+$/g, ""), max);
 const normalized = (text: string) => plain(text).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -111,6 +125,7 @@ function slideText(s: SlideContent): string {
     case "scene": return `${s.title}\n${s.text}`;
     case "stat": return `${s.value}\n${s.text}\n${s.source}`;
     case "chart": return "";
+    case "chat": return [s.contact, ...s.messages.map(m => m.text)].join("\n");
     default: return s.text;
   }
 }
@@ -128,6 +143,13 @@ function parseSlide(s: CarouselDraftSlide, sourceText: string): SlideContent | n
       return s.title?.trim() && items.length >= 2 ? { kind: "list", title: oneLine(s.title, 50), items } : null;
     }
     case "quote": return s.text?.trim() ? { kind: "quote", text: oneLine(s.text, 130) } : null;
+    case "chat": {
+      const messages = chatMessages(s.messages);
+      return messages.length >= 2 ? { kind: "chat", contact: oneLine(s.contact || "Message", 30), messages } : null;
+    }
+    case "punch": return s.text?.trim() ? { kind: "punch", text: shortText(s.text, 110) } : null;
+    // Un tweet garde ses retours à la ligne (listes à tirets) : chaque ligne est bornée à part.
+    case "tweet": return s.text?.trim() ? { kind: "tweet", text: multiline(s.text, 240) } : null;
     case "scene": return s.title?.trim() && s.text?.trim() ? { kind: "scene", title: oneLine(s.title, 70), text: oneLine(s.text, 160) } : null;
     case "stat": {
       // Un chiffre n'est montré qu'avec sa source, et seulement si l'article cite cette source.
@@ -148,25 +170,30 @@ function parseSlide(s: CarouselDraftSlide, sourceText: string): SlideContent | n
 export function parseCarouselScript(draft: CarouselDraft, article: { title: string; excerpt: string | null; content: string }): CarouselScript {
   const sourceText = normalized(`${article.title} ${article.excerpt ?? ""} ${article.content}`);
   const photo = (prompt: string | undefined): SlidePhoto => ({ imagePrompt: prompt?.trim() ?? "", image: null, altText: null });
+  const format = (["chat", "punch", "tweet"] as const).find(f => f === draft.format);
   const slides: CarouselSlide[] = [];
-  const chart = articleCarouselPlan(article).middle.find(m => m.kind === "chart");
+  // Le graphique sourcé de l'article n'a sa place que dans le carrousel classique.
+  const chart = format ? undefined : articleCarouselPlan(article).middle.find(m => m.kind === "chart");
   if (chart) slides.push({ ...chart, ...photo("") });
   for (const s of draft.slides ?? []) {
     const content = parseSlide(s, sourceText);
     if (content) slides.push({ ...content, ...photo(s.imagePrompt) });
   }
+  const coverMessages = format === "chat" ? chatMessages(draft.coverMessages) : [];
   const script: CarouselScript = {
-    hook: oneLine(draft.hook ?? "", 90) || shortText(article.title, 120),
-    subtitle: oneLine(draft.subtitle ?? "", 170),
+    ...(format ? { format } : {}),
+    hook: (format === "tweet" ? multiline(draft.hook ?? "", 200) : format ? shortText(draft.hook ?? "", 90) : oneLine(draft.hook ?? "", 90)) || shortText(article.title, 120),
+    subtitle: oneLine(draft.subtitle ?? "", format ? 90 : 170),
+    ...(coverMessages.length >= 2 ? { cover: { contact: oneLine(draft.coverContact || "Message", 30), messages: coverMessages } } : {}),
     slides: slides.slice(0, CAROUSEL_MAX - 2),
-    cta: { headline: oneLine(draft.ctaHeadline ?? "", 50) || "Lire l’article complet", detail: oneLine(draft.ctaDetail ?? "", 130) || "Lien en bio", ...photo(draft.ctaImagePrompt) },
+    cta: { headline: oneLine(draft.ctaHeadline ?? "", 50) || (format ? "Enregistre-le pour plus tard" : "Lire l’article complet"), detail: oneLine(draft.ctaDetail ?? "", 130) || (format ? "Et suis @nour_meetup pour la suite." : "Lien en bio"), ...photo(draft.ctaImagePrompt) },
     caption: sanitizeInstagramCaption(draft.caption)
   };
   if (script.slides.filter(s => s.kind !== "chart").length < CAROUSEL_MIN - 2) throw new Error("Carrousel trop court");
-  const visible = [script.hook, script.subtitle, script.cta.headline, script.cta.detail, script.caption ?? "", ...script.slides.map(slideText)].join("\n");
+  const visible = [script.hook, script.subtitle, script.cover?.contact ?? "", ...(script.cover?.messages ?? []).map(m => m.text), script.cta.headline, script.cta.detail, script.caption ?? "", ...script.slides.map(slideText)].join("\n");
   if (/musulman/i.test(visible)) throw new Error("Carrousel contraire à la charte éditoriale");
   const source = numbersOf(`${article.title} ${article.excerpt ?? ""} ${article.content}`);
-  const invented = [...numbersOf(visible)].filter(n => !source.has(n));
+  const invented = [...numbersOf(format ? withoutCounters(visible) : visible)].filter(n => !source.has(n));
   if (invented.length) throw new Error(`Chiffre absent de l’article : ${invented.join(", ")}`);
   return script;
 }
@@ -176,6 +203,9 @@ export function parseCarouselScript(draft: CarouselDraft, article: { title: stri
  * une), et toute slide « scene » en a une. Le graphique reste sur fond clair ; il suit la couverture.
  */
 export function photoSlots(script: CarouselScript): SlidePhoto[] {
+  // Formats « codes d'Internet » : seules les grosses phrases et la fin du format punch sont sur photo ;
+  // une conversation ou un tweet n'en a pas besoin (et n'occasionne donc aucun coût d'image).
+  if (script.format) return script.format === "punch" ? [...script.slides.filter(s => s.kind === "punch"), script.cta] : [];
   const slots: SlidePhoto[] = [];
   let previousHasPhoto = true;
   for (const screen of [...script.slides, script.cta]) {

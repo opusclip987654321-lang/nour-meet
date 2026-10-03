@@ -31,7 +31,7 @@ export interface ImageReview { approved: boolean; issues: string[]; altText: str
 // Carrousel Instagram réécrit (refonte du 2026-09-26) : texte brut renvoyé par Claude, validé ensuite par
 // parseCarouselScript (instagram-carousel.ts) avant tout usage. Champs sans objet pour un format : "".
 export interface CarouselDraftSlide {
-  kind: "contrast" | "statement" | "list" | "quote" | "scene" | "stat";
+  kind: "contrast" | "statement" | "list" | "quote" | "scene" | "stat" | "chat" | "punch" | "tweet";
   title: string;
   text: string;
   items: string[];
@@ -41,8 +41,12 @@ export interface CarouselDraftSlide {
   value: string;
   source: string;
   imagePrompt: string;
+  // Formats « codes d'Internet » (2026-10-03) : nom du contact et bulles d'une fausse conversation (chat).
+  contact?: string;
+  messages?: { me: boolean; text: string }[];
 }
-export interface CarouselDraft { hook: string; subtitle: string; slides: CarouselDraftSlide[]; ctaHeadline: string; ctaDetail: string; ctaImagePrompt: string; caption: string }
+// format absent : carrousel classique (tests, anciennes réponses).
+export interface CarouselDraft { format?: "chat" | "punch" | "tweet"; hook: string; subtitle: string; coverContact?: string; coverMessages?: { me: boolean; text: string }[]; slides: CarouselDraftSlide[]; ctaHeadline: string; ctaDetail: string; ctaImagePrompt: string; caption: string }
 export interface ArticleGenerationContext {
   today: string;
   // Consigne visuelle imposée pour l'illustration de couverture (image-variety.ts).
@@ -104,7 +108,7 @@ const ILLUSTRATION_CHARTER = "une scène photographique réaliste, naturelle et 
 const CAPTION_RULES = "400 caractères au plus hors hashtags. Une première ligne qui accroche (une phrase courte, pas le titre recopié), une ou deux phrases au plus qui donnent envie de lire, « Article complet : lien en bio », puis 3 à 5 hashtags précis liés au sujet, en minuscules. Pas d'URL, un emoji au plus, jamais le mot « musulman ».";
 
 // Légende d'un carrousel (2026-10-03) : elle prolonge la conversation au lieu de renvoyer vers le site.
-const CAROUSEL_CAPTION_RULES = "350 caractères au plus hors hashtags. Une première ligne qui accroche (une phrase courte, différente de la couverture), une ou deux phrases qui ajoutent quelque chose, puis une question simple qui donne envie de répondre en commentaire, puis l'appel à l'action du carrousel en une phrase. Ensuite 3 à 5 hashtags précis liés au sujet, en minuscules, dont #nurmeet. Pas d'URL, pas de « lien en bio », un emoji au plus, jamais le mot « musulman ».";
+const CAROUSEL_CAPTION_RULES = "350 caractères au plus hors hashtags, même ton taquin que le carrousel. Une première ligne qui accroche (une phrase courte, différente de la couverture), une ou deux phrases qui ajoutent quelque chose, puis une question simple qui donne envie de répondre en commentaire, puis l'appel à l'action du carrousel en une phrase. Ensuite 3 à 5 hashtags précis liés au sujet, en minuscules, dont #nurmeet. Pas d'URL, pas de « lien en bio », un emoji au plus, jamais le mot « musulman ».";
 
 const SYSTEM_PROMPT = `Tu es le rédacteur en chef du journal de Nūr Meet, une plateforme française de soirées en petit comité dans des restaurants partenaires à Paris et en Île-de-France : speed dating avec entretien de validation, et soirées networking en accès direct. Le public : des adultes urbains et actifs qui cherchent des rencontres sérieuses, de l'amitié ou du réseau professionnel, dans un cadre respectueux. Ton : chaleureux, concret, en « vous », jamais paternaliste.
 
@@ -265,34 +269,37 @@ ${context.coverBrief ? `Consigne visuelle imposée pour l'illustration de couver
   }
 }
 
-// Réécrit le 2026-10-03 (diagnostic des carrousels « qui ne donnent pas envie ») : un post pensé pour
-// le fil Instagram — arrêter le pouce, faire glisser jusqu'au bout, puis enregistrer, partager, commenter
-// ou s'abonner — et non plus un résumé poli de l'article qui renvoie vers le site.
-const CAROUSEL_PROMPT = `Tu es le community manager de Nūr Meet (soirées de rencontre et de networking en petit comité à Paris). À partir d'un article du journal, tu écris un carrousel Instagram natif, pensé pour le fil, puis tu l'envoies avec l'outil submit_carousel.
+// Réécrit le 2026-10-03, deux fois : d'abord pour le fil Instagram (diagnostic des carrousels « qui ne
+// donnent pas envie »), puis pour les codes d'Internet après le retour « trop mou, il faut être
+// taquin ou apprendre des choses ». L'article du jour n'est plus résumé : il donne le sujet.
+const CAROUSEL_PROMPT = `Tu es le community manager de Nūr Meet (soirées de rencontre et de networking en petit comité à Paris), et tu sais faire le buzz. L'article du journal ci-dessous te donne le SUJET du jour ; tu n'en fais pas un résumé. Tu écris un carrousel Instagram natif qui joue avec les codes d'Internet, puis tu l'envoies avec l'outil submit_carousel.
 
-Objectif : faire grandir le compte. La couverture doit arrêter le pouce en moins d'une seconde, chaque slide doit donner envie de passer à la suivante, et la fin doit déclencher une action sur Instagram (enregistrer, partager, commenter ou s'abonner). On ne renvoie jamais vers le site ni vers « le lien en bio » : on garde les gens sur Instagram.
+Ce qui marche, et ce qu'on veut :
+- Taquin, second degré, qui pique gentiment : « POV : », « red flags », « le n°3, c'est toi », « dis-moi que tu es célibataire sans me dire que tu es célibataire », « tag ton pote qui… », les messages de la daronne, le « haha » sec qui tue une conversation, le date qui parle de son ex.
+- Ou bien utile au point qu'on l'enregistre : apprendre un truc concret (phrases à éviter, quoi dire à la place, comment relancer, comment aborder quelqu'un en soirée).
+- Le lecteur doit se reconnaître (« c'est trop moi ») ou avoir envie d'envoyer le post à quelqu'un. Chaque slide se lit en trois secondes. Pas de morale, pas de ton de brochure, jamais « Journal », jamais le titre de l'article.
+- Limites : jamais vulgaire, jamais méprisant envers un groupe, une origine, une religion ou un physique ; on se moque des situations, pas des gens. Jamais de mot religieux ni d'origine.
 
-Ton : codes Instagram et TikTok, en « tu », phrases courtes, rythme parlé. Du concret et du vécu : la situation précise que le lecteur reconnaît (la remarque de la tante au mariage, l'appli ouverte puis refermée, le silence gênant au premier rendez-vous), de la tension, un retournement. Assumé, piquant, jamais lisse — mais jamais humiliant, moqueur envers un groupe ni culpabilisant. Chaque slide se lit en trois secondes : une idée par slide, 15 mots au plus de texte principal quand c'est possible.
+Fidélité : l'humour, les situations inventées et les conseils de bon sens sont libres, tant qu'ils restent dans le sujet. Mais aucun fait, chiffre, pourcentage, étude, source ou citation réelle qui ne figure pas dans l'article. Un chiffre de l'article est repris exactement comme il y est écrit. Les seuls autres nombres permis sont les petits compteurs de 1 à 10 (« 5 red flags », « le n°3 ») ; pas d'heure, de date, d'âge ni de prix écrit en chiffres. Toute autre écriture en chiffres absente de l'article fait refuser le carrousel.
 
-Règle absolue de fidélité : tu reformules, tu n'ajoutes rien de factuel. Aucun fait, chiffre, pourcentage, âge, étude, citation ou témoignage qui ne figure pas dans l'article. Les situations vécues servent à illustrer une idée de l'article, jamais à affirmer un fait nouveau. Un chiffre repris l'est exactement, écrit comme dans l'article : en lettres si l'article l'écrit en lettres (« trois cents », jamais « 300 »), en chiffres s'il l'écrit en chiffres. Un nombre que tu ajoutes toi-même (« trois signes ») s'écrit toujours en lettres. Toute écriture en chiffres absente de l'article fait refuser le carrousel. Si l'article ne permet pas un format, choisis-en un autre plutôt que d'inventer.
-
-Structure :
-- hook : accroche de couverture, 60 caractères au plus, écrite en très gros sur la photo : elle crée un manque (on veut savoir la suite) ou un « c'est tellement moi ». Jamais le titre de l'article recopié, jamais un nom de rubrique. subtitle : une phrase de 90 caractères au plus qui promet ce qu'on gagne à glisser (ou "").
-- slides : 4 à 6 slides intermédiaires, dans l'ordre qui crée le plus d'envie de continuer : la slide 2 tient la promesse de la couverture tout de suite, la tension monte, le retournement arrive avant la fin. Varie les formats, jamais deux fois le même de suite, avec au moins un « quote » (la phrase qu'on a envie d'enregistrer). Formats :
-  - stat : si l'article cite un chiffre sourcé frappant, mets-le en avant (une seule fois). value = le chiffre tel qu'écrit dans l'article, court (« 1 sur 5 », « 21 % ») ; text = ce qu'il signifie pour le lecteur, 90 caractères au plus ; source = le nom de la source tel qu'il apparaît dans l'article. Jamais de chiffre sans source citée dans l'article.
-  - contrast : idée reçue contredite par l'article. myth = l'idée reçue formulée comme on l'entend vraiment (80 caractères au plus, sans guillemets) ; reality = ce que dit l'article (100 caractères au plus).
-  - list : title = 35 caractères au plus ; items = 2 à 4 éléments de 50 caractères au plus chacun, repris des conseils ou points de l'article.
-  - quote : une seule grande phrase à retenir, qui touche (90 caractères au plus), dans text.
-  - statement : un recadrage en une ou deux phrases courtes (110 caractères au plus) dans text ; highlight = un mot ou groupe de mots de text à mettre en couleur (ou "").
-  - scene : une situation vécue qui illustre une idée de l'article, racontée en « tu ». title = 50 caractères au plus ; text = 110 caractères au plus.
-  Pour les champs sans objet dans un format, renvoie "" (ou [] pour items).
-- imagePrompt, pour CHAQUE slide (une partie seulement sera illustrée, une image tous les deux écrans) : description en anglais d'une photo qui illustre précisément CETTE slide et son émotion (pas l'article en général), jamais la même scène que celle d'une autre slide. Une vraie scène de vie, lumière chaude et cinématographique, couleurs vives, faible profondeur de champ, l'émotion portée par les gestes, les postures, les regards échangés et la lumière. ${ILLUSTRATION_CHARTER}
-- ctaHeadline : 40 caractères au plus, l'action demandée sur Instagram (selon l'appel à l'action imposé plus bas, sinon « Enregistre-le pour plus tard ») ; ctaDetail : 100 caractères au plus, qui rappelle en une phrase que Nūr Meet organise des soirées en petit comité pour se rencontrer pour de vrai, et invite à suivre @nour_meetup, sans promesse chiffrée ; ctaImagePrompt : description en anglais d'une photo chaleureuse de rencontre en petit comité, selon la même charte.
+Format visuel (format) : celui qui est imposé plus bas ; sinon « punch ».
+- « chat » : une fausse capture de conversation (SMS) drôle ou gênante, qui se poursuit de slide en slide. Couverture : hook (au-dessus de la capture, 60 caractères au plus) + coverContact (« Maman », « Karim », « Le date de samedi »…) + coverMessages (2 à 5 bulles de 60 caractères au plus ; me = true pour le lecteur). Slides : 3 à 5 « chat » (contact, 2 à 6 bulles), puis un « punch » ou une « list » qui donne la leçon ou le conseil.
+- « punch » : façon TikTok, une grosse phrase taquine sur une photo. Couverture : hook (70 caractères au plus), qui donne envie de glisser (« 5 red flags au premier date. Le n°3, c'est sûrement toi. ») ; subtitle : "" ou 50 caractères au plus. Slides : 4 à 6 « punch » (text : 90 caractères au plus, une idée chacune, ex. « Red flag n°3 : il parle de son ex avant le dessert. ») et au plus une « list ».
+- « tweet » : posts façon Twitter/X. Couverture : hook écrit comme un tweet qui donne envie de lire la suite (180 caractères au plus, retours à la ligne et tirets permis). Slides : 4 à 6 « tweet » (text : 220 caractères au plus, listes à tirets permises) qui apprennent un truc ou enchaînent les situations.
+Formats de slide :
+  - chat : contact = nom affiché ; messages = 2 à 6 bulles de 60 caractères au plus, me = true pour le lecteur.
+  - punch : text = la phrase (90 caractères au plus) ; imagePrompt obligatoire.
+  - tweet : text = le tweet (220 caractères au plus).
+  - list : title = 35 caractères au plus ; items = 2 à 4 éléments de 50 caractères au plus.
+  Pour les champs sans objet, renvoie "" (ou [] pour items et messages). Les autres formats (contrast, statement, quote, scene, stat) ne s'utilisent plus.
+- imagePrompt, pour CHAQUE slide punch et pour la couverture du format punch (via ctaImagePrompt pour la fin) : description en anglais d'une photo qui illustre précisément CETTE phrase et son émotion, jamais la même scène que celle d'une autre slide. Une vraie scène de vie, expressive, lumière cinématographique, couleurs vives. ${ILLUSTRATION_CHARTER} Pour chat et tweet, imagePrompt = "".
+- ctaHeadline : 45 caractères au plus, l'action demandée sur Instagram, dite avec le même ton taquin (selon l'appel à l'action imposé plus bas, sinon « Enregistre-le, tu nous remercieras samedi ») ; ctaDetail : 100 caractères au plus, qui glisse que Nūr Meet organise des soirées en petit comité pour se rencontrer en vrai, et invite à suivre @nour_meetup, sans promesse chiffrée ; ctaImagePrompt : description en anglais d'une photo de rencontre en petit comité, selon la même charte (utilisée seulement en format punch).
 - caption : légende Instagram, ${CAROUSEL_CAPTION_RULES}
 
-Ne nomme jamais une religion ou une origine, pas de markdown, pas d'emoji dans les slides.`;
+Pas de markdown, et aucun emoji dans les slides : la police des visuels ne les affiche pas (la légende peut en avoir un).`;
 
 const carouselText = (description: string) => ({ type: "string", description });
+const chatMessages = (description: string) => ({ type: "array", description, items: { type: "object", additionalProperties: false, required: ["me", "text"], properties: { me: { type: "boolean", description: "true : message envoyé par le lecteur (bulle bleue)" }, text: { type: "string" } } } });
 const carouselTool: Anthropic.Tool = {
   name: "submit_carousel",
   description: "Envoie le carrousel Instagram terminé.",
@@ -300,18 +307,23 @@ const carouselTool: Anthropic.Tool = {
   input_schema: {
     type: "object",
     additionalProperties: false,
-    required: ["hook", "subtitle", "slides", "ctaHeadline", "ctaDetail", "ctaImagePrompt", "caption"],
+    required: ["format", "hook", "subtitle", "coverContact", "coverMessages", "slides", "ctaHeadline", "ctaDetail", "ctaImagePrompt", "caption"],
     properties: {
+      format: { type: "string", enum: ["chat", "punch", "tweet"], description: "Format visuel du carrousel" },
       hook: carouselText("Accroche de couverture"),
       subtitle: carouselText("Phrase sous l'accroche"),
+      coverContact: carouselText("Nom du contact de la conversation de couverture (chat)"),
+      coverMessages: chatMessages("Bulles de la conversation de couverture (chat)"),
       slides: {
         type: "array",
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["kind", "title", "text", "items", "myth", "reality", "highlight", "value", "source", "imagePrompt"],
+          required: ["kind", "title", "text", "items", "myth", "reality", "highlight", "value", "source", "imagePrompt", "contact", "messages"],
           properties: {
-            kind: { type: "string", enum: ["contrast", "statement", "list", "quote", "scene", "stat"] },
+            kind: { type: "string", enum: ["chat", "punch", "tweet", "list", "contrast", "statement", "quote", "scene", "stat"] },
+            contact: carouselText("Nom du contact (chat)"),
+            messages: chatMessages("Bulles de la conversation (chat)"),
             title: carouselText("Titre (list, scene)"),
             text: carouselText("Texte (quote, statement, scene)"),
             items: { type: "array", items: { type: "string" }, description: "Éléments (list)" },

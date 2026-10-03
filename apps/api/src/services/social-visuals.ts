@@ -254,6 +254,80 @@ export async function ctaSlide(headline: string, detail: string, site: string, p
   return photo ? toJpeg(photoBase(photo), [{ input: gradientVeil(0.78, 0.3), top: 0, left: 0 }, ...layers]) : toJpeg(solid(BRAND.night), layers);
 }
 
+// Formats « codes d'Internet » (2026-10-03, retour : « trop mou, il faut être taquin ») : fausse
+// conversation de messagerie, grosse phrase façon TikTok sur photo, et post façon tweet. Ils ne
+// ressemblent volontairement pas à une publicité : la marque n'apparaît qu'en signature discrète.
+export type ChatMessage = { me: boolean; text: string };
+const CHAT = { canvas: "#f2f2f7", card: "#ffffff", line: "#e3e3e8", me: "#1f8bff", them: "#e9e9eb", ink: "#111111", muted: "#8e8e93" };
+
+/** Capture de conversation : contact en tête, bulles grises (lui/elle) et bleues (toi) ; accroche facultative au-dessus. */
+export async function chatSlide(contact: string, messages: ChatMessage[], position: string, hook?: string) {
+  const layers: Layer[] = [];
+  let y = 72;
+  if (hook) {
+    const h = await textBlock(hook, { font: "display", size: 76, weight: 800, color: CHAT.ink, width: W - 2 * 70, maxHeight: 330, minSize: 48 });
+    layers.push({ input: h.input, top: y, left: 70 });
+    y += h.height + 48;
+  }
+  const head = await textBlock(contact, { font: "text", size: 38, weight: 700, color: CHAT.ink, width: 700, maxHeight: 60, align: "centre" });
+  const cardBottom = H - 120;
+  const shapes = [`<rect x="40" y="${y}" width="${W - 80}" height="${cardBottom - y}" rx="40" fill="${CHAT.card}" stroke="${CHAT.line}" stroke-width="2"/>`, `<circle cx="${W / 2}" cy="${y + 72}" r="42" fill="#c7c7cc"/>`];
+  layers.push({ input: head.input, top: y + 124, left: Math.round(W / 2 - head.width / 2) });
+  // Bulles réduites ensemble jusqu'à tenir dans la carte : aucune conversation ne déborde.
+  for (let size = 54; ; size -= 4) {
+    const bubbles = await Promise.all(messages.map(m => textBlock(m.text, { font: "text", size, color: m.me ? "#ffffff" : CHAT.ink, width: 660, maxHeight: 600, minSize: size })));
+    const total = bubbles.reduce((h, b) => h + b.height + 44 + 22, 0);
+    if (y + 210 + total <= cardBottom - 30 || size <= 28) {
+      let my = y + 210;
+      for (const [i, b] of bubbles.entries()) {
+        const bw = b.width + 64, bh = b.height + 44, x = messages[i].me ? W - 80 - bw : 80;
+        shapes.push(`<rect x="${x}" y="${my}" width="${bw}" height="${bh}" rx="36" fill="${messages[i].me ? CHAT.me : CHAT.them}"/>`);
+        layers.push({ input: b.input, top: my + 22, left: x + 32 });
+        my += bh + 22;
+      }
+      break;
+    }
+  }
+  return toJpeg(solid(CHAT.canvas), [{ input: svg(shapes.join("")), top: 0, left: 0 }, ...layers, ...await footer(CHAT.muted, position)]);
+}
+
+/** Grosse phrase façon TikTok : texte blanc ombré au centre d'une photo assombrie ; mention facultative en bas. */
+export async function punchSlide(photo: Buffer | null, text: string, position: string, small?: string, swipe = false) {
+  const options = { font: "display" as const, size: 100, weight: 800, width: W - 160, maxHeight: 760, minSize: 56, align: "centre" as const };
+  const t = await textBlock(text, { ...options, color: "#ffffff" });
+  // Ombre portée floutée : lisible sur n'importe quelle photo, sans bandeau de couleur.
+  const shadow = await sharp((await textBlock(text, { ...options, color: "#000000" })).input).blur(10).toBuffer();
+  const top = Math.round(H * 0.44 - t.height / 2), left = Math.round(W / 2 - t.width / 2);
+  const layers: Layer[] = [{ input: svg(`<rect width="${W}" height="${H}" fill="#000000" fill-opacity="${photo ? 0.3 : 0}"/>`), top: 0, left: 0 }, { input: shadow, top: top + 5, left: left + 2 }, { input: shadow, top: top + 5, left: left + 2 }, { input: t.input, top, left }];
+  if (small) {
+    const s = await textBlock(small, { font: "text", size: 40, weight: 700, color: "#ffffff", width: W - 220, maxHeight: 200, minSize: 28, align: "centre" });
+    layers.push({ input: s.input, top: Math.min(H - 300, top + t.height + 60), left: Math.round(W / 2 - s.width / 2) });
+  }
+  if (swipe) {
+    const label = await textBlock("Glisse", { font: "display", size: 36, weight: 700, color: "#ffffff", width: 300, maxHeight: 50 });
+    const x = Math.round(W / 2 - (label.width + 60) / 2), y = H - MARGIN - 150;
+    layers.push({ input: label.input, top: y, left: x }, { input: svg(`<path d="M${x + label.width + 16} ${y + label.height / 2}h40M${x + label.width + 40} ${y + label.height / 2 - 16}l16 16-16 16" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`), top: 0, left: 0 });
+  }
+  const base = photo ? sharp(photo).resize(W, H, { fit: "cover", position: "attention" }) : solid(BRAND.night3);
+  return toJpeg(base, [...layers, ...await footer("#ffffff", position)]);
+}
+
+/** Post façon tweet : carte blanche, avatar de la marque, nom et compte, texte (retours à la ligne permis). */
+export async function tweetSlide(text: string, position: string, handle = "@nour_meetup") {
+  const ink = "#0f1419", muted = "#536471";
+  const body = await textBlock(text, { font: "text", size: 60, weight: 600, color: ink, width: W - 240, maxHeight: H - 520, minSize: 34 });
+  const name = await textBlock("Nūr Meet", { font: "text", size: 40, weight: 800, color: ink, width: 500, maxHeight: 60 });
+  const at = await textBlock(handle, { font: "text", size: 34, color: muted, width: 500, maxHeight: 60 });
+  const cardH = 210 + body.height + 90, top = Math.max(60, Math.round((H - 60 - cardH) / 2));
+  return toJpeg(solid("#f7f9f9"), [
+    { input: svg(`<rect x="60" y="${top}" width="${W - 120}" height="${cardH}" rx="36" fill="#ffffff" stroke="#e1e8ed" stroke-width="2"/><circle cx="170" cy="${top + 112}" r="52" fill="${BRAND.night}"/><circle cx="170" cy="${top + 112}" r="20" fill="${BRAND.saffron}"/>`), top: 0, left: 0 },
+    { input: name.input, top: top + 64, left: 245 },
+    { input: at.input, top: top + 114, left: 245 },
+    { input: body.input, top: top + 210, left: 120 },
+    ...await footer(muted, position)
+  ]);
+}
+
 // Visuel d'un événement publié (§14, puis v3 §8) : trois modèles cohérents avec la marque, selon le type
 // d'événement — speed dating (photo plein cadre, voile bleu nuit), networking (photo en haut, bandeau bleu
 // nuit), autre activité (photo encadrée sur fond safran). Photo principale si disponible, nom, date, lieu,

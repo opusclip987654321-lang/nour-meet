@@ -8,6 +8,12 @@ import type { MediaInsights } from "./instagram.js";
 // du monde sur le compte (abonnements, visites du profil), puis ce qui fait circuler le post.
 
 export const VARIANT_OPTIONS = {
+  // Style visuel, testé lui aussi (retour du 2026-10-03 : « jouer avec les codes d'Internet »).
+  format: {
+    chat: "chat",
+    punch: "punch",
+    tweet: "tweet"
+  },
   hook: {
     question: "une question directe, en « tu », qui pique là où ça fait mal (« Pourquoi tu attires toujours le même genre de personne ? »)",
     liste: "une promesse de liste, avec le nombre écrit en lettres et égal au nombre réel de points des slides (« Trois signes que tu n'es pas fait(e) pour les applis »)",
@@ -73,7 +79,7 @@ export function chooseVariant(history: Scored[], random: () => number = Math.ran
 
 /** Consigne d'écriture correspondant aux choix du jour, ajoutée au message envoyé à Claude. */
 export const variantInstructions = (v: CarouselVariant) =>
-  `Choix imposés pour ce carrousel (test en cours, respecte-les) :\n- accroche de couverture : ${VARIANT_OPTIONS.hook[v.hook as keyof typeof VARIANT_OPTIONS.hook]}\n- registre : ${VARIANT_OPTIONS.register[v.register as keyof typeof VARIANT_OPTIONS.register]}\n- appel à l'action final (ctaHeadline, ctaDetail et fin de légende) : ${VARIANT_OPTIONS.cta[v.cta as keyof typeof VARIANT_OPTIONS.cta]}`;
+  `Choix imposés pour ce carrousel (test en cours, respecte-les) :\n- format visuel (champ format) : ${v.format}\n- accroche de couverture : ${VARIANT_OPTIONS.hook[v.hook as keyof typeof VARIANT_OPTIONS.hook]}\n- registre : ${VARIANT_OPTIONS.register[v.register as keyof typeof VARIANT_OPTIONS.register]}\n- appel à l'action final (ctaHeadline, ctaDetail et fin de légende) : ${VARIANT_OPTIONS.cta[v.cta as keyof typeof VARIANT_OPTIONS.cta]}`;
 
 type ScoredArticle = { title: string; instagramCarousel: Prisma.JsonValue | null; instagramVariant: Prisma.JsonValue | null; instagramScore: number | null; instagramInsights: Prisma.JsonValue | null };
 
@@ -87,7 +93,7 @@ async function scoredArticles(prisma: PrismaClient, now: Date, days = LEARNING_W
 
 const hookOf = (a: ScoredArticle) => ((a.instagramCarousel as { hook?: unknown } | null)?.hook as string | undefined) ?? a.title;
 const describe = (a: ScoredArticle) => {
-  const v = isVariant(a.instagramVariant) ? ` [accroche ${a.instagramVariant.hook}, registre ${a.instagramVariant.register}, CTA ${a.instagramVariant.cta}]` : "";
+  const v = isVariant(a.instagramVariant) ? ` [format ${a.instagramVariant.format}, accroche ${a.instagramVariant.hook}, registre ${a.instagramVariant.register}, CTA ${a.instagramVariant.cta}]` : "";
   return `« ${hookOf(a)} »${v} : score ${a.instagramScore}`;
 };
 

@@ -17,7 +17,7 @@ describe("score d'un carrousel", () => {
 });
 
 describe("choix du prochain carrousel", () => {
-  const all = (v: Partial<CarouselVariant>): CarouselVariant => ({ hook: "question", register: "emotion", cta: "save", ...v });
+  const all = (v: Partial<CarouselVariant>): CarouselVariant => ({ format: "punch", hook: "question", register: "emotion", cta: "save", ...v });
 
   it("essaie d'abord les choix encore jamais mesurés", () => {
     const history = Object.keys(VARIANT_OPTIONS.hook).filter(h => h !== "pov").flatMap(hook => [{ variant: all({ hook: hook as CarouselVariant["hook"] }), score: 50 }, { variant: all({ hook: hook as CarouselVariant["hook"] }), score: 50 }]);
@@ -25,8 +25,8 @@ describe("choix du prochain carrousel", () => {
   });
 
   it("reprend le meilleur choix une fois tout essayé, sauf tirage d'exploration", () => {
-    const history = Object.entries(VARIANT_OPTIONS).flatMap(([d, options]) => Object.keys(options).flatMap(o => [1, 2].map(() => ({ variant: all({ [d]: o }), score: o === "scene" || o === "humour" || o === "share" ? 90 : 10 }))));
-    expect(chooseVariant(history, seq(0.9))).toEqual({ hook: "scene", register: "humour", cta: "share" });
+    const history = Object.entries(VARIANT_OPTIONS).flatMap(([d, options]) => Object.keys(options).flatMap(o => [1, 2].map(() => ({ variant: all({ [d]: o }), score: o === "chat" || o === "scene" || o === "humour" || o === "share" ? 90 : 10 }))));
+    expect(chooseVariant(history, seq(0.9))).toEqual({ format: "chat", hook: "scene", register: "humour", cta: "share" });
     // Tirage sous le taux d'exploration : un choix au hasard, pas forcément le meilleur.
     expect(Object.keys(VARIANT_OPTIONS.hook)).toContain(chooseVariant(history, seq(0.1, 0)).hook);
   });
