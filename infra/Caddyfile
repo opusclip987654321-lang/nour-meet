@@ -45,3 +45,13 @@ n8n.nourmeet.com {
 	reverse_proxy n8n:5678
 	encode gzip
 }
+
+# Sites Leviaro servis par le même Caddy (seul à écouter sur 80/443 sur ce serveur) : ajoutés à la main en
+# production le 2026-10, reportés ici pour que deploy.sh ne bloque plus sur un Caddyfile modifié.
+admin.leviaro.fr {
+	reverse_proxy leviaro-agent-web-1:8787
+}
+
+leviaro.fr, www.leviaro.fr {
+	reverse_proxy leviaro-site:80
+}
