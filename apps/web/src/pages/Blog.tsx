@@ -7,7 +7,8 @@ import { Layout } from "../components/Layout";
 import { Picture } from "../components/brand";
 import { imgUrl } from "../lib/format";
 import { BLOG_CATEGORIES } from "../lib/labels";
-import { SITE_NAME, absoluteUrl, breadcrumbJsonLd, useSeo } from "../lib/seo";
+import { PAGE_META, blogPostingJsonLd } from "@nour/shared";
+import { SITE_URL, absoluteUrl, breadcrumbJsonLd, useSeo } from "../lib/seo";
 import { NotFound } from "./NotFound";
 
 const publishedDate = (value: string) => new Date(value).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
@@ -32,7 +33,7 @@ export function Blog() {
     api<any[]>(`/articles${category ? `?category=${encodeURIComponent(category)}` : ""}`).then(a => { if (!ignore) setArticles(a); }).catch(() => { if (!ignore) setArticles([]); });
     return () => { ignore = true; };
   }, [category]);
-  useSeo({ title: "Le journal : rencontres, amitié et vie sociale", description: "Conseils, repères et études pour faire de vraies rencontres, élargir son cercle d’amis et développer son réseau professionnel à Paris.", path: "/blog" });
+  useSeo({ ...PAGE_META.blog, path: "/blog" });
   return <Layout><section className="page">
     <h1>Rencontres, amitié et vie sociale</h1>
     <p className="page-lead">Des repères concrets et des études sourcées pour rencontrer, se faire des amis et développer son réseau.</p>
@@ -65,16 +66,7 @@ export function ArticlePage() {
     image: coverAbsoluteUrl(article.imageUrl),
     type: "article",
     jsonLd: [
-      {
-        "@context": "https://schema.org", "@type": "BlogPosting",
-        headline: article.title, description: article.excerpt ?? undefined,
-        image: coverAbsoluteUrl(article.imageUrl) ?? undefined,
-        datePublished: article.publishedAt ?? undefined, dateModified: article.updatedAt ?? article.publishedAt ?? undefined,
-        author: article.author ? { "@type": "Person", name: article.author.displayName } : { "@type": "Organization", name: SITE_NAME },
-        publisher: { "@type": "Organization", name: SITE_NAME, logo: { "@type": "ImageObject", url: absoluteUrl("/icon-512.png") } },
-        mainEntityOfPage: absoluteUrl(`/blog/${article.slug}`),
-        articleSection: article.category, keywords: article.keywords?.join(", ") || undefined, inLanguage: "fr-FR"
-      },
+      blogPostingJsonLd(article, SITE_URL, coverAbsoluteUrl(article.imageUrl)),
       breadcrumbJsonLd([{ name: "Accueil", path: "/" }, { name: "Le journal", path: "/blog" }, { name: article.title, path: `/blog/${article.slug}` }])
     ]
   } : null);

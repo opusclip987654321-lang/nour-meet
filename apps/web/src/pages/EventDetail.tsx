@@ -1,4 +1,4 @@
-import { NETWORKING_QUESTIONS, SCREENING_QUESTIONS, eventRequiresScreening } from "@nour/shared";
+import { NETWORKING_QUESTIONS, SCREENING_QUESTIONS, eventJsonLd, eventRequiresScreening } from "@nour/shared";
 import type { PublicEvent } from "@nour/shared";
 import { FormEvent, Suspense, lazy, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -10,7 +10,7 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import { Layout } from "../components/Layout";
 import { CategoryBadge, Loading, Notice, ShareButton, ViewerStatusBadge, availabilityLabel } from "../components/ui";
-import { absoluteUrl, breadcrumbJsonLd, useSeo } from "../lib/seo";
+import { SITE_URL, breadcrumbJsonLd, useSeo } from "../lib/seo";
 import { NotFound } from "./NotFound";
 import { dateTime, imgUrl, money } from "../lib/format";
 import { APPLICATION_STATUS_LABEL } from "../lib/labels";
@@ -132,15 +132,7 @@ export function EventDetail() {
     path:`/events/${event.slug}`,
     image:imgUrl(event.imageUrl),
     noindex:!event.bookable,
-    jsonLd:event.bookable?[{
-      "@context":"https://schema.org","@type":"Event",name:event.title,description:event.description,
-      startDate:event.startsAt,endDate:event.endsAt,eventStatus:event.status==="CANCELLED"?"https://schema.org/EventCancelled":"https://schema.org/EventScheduled",
-      eventAttendanceMode:"https://schema.org/OfflineEventAttendanceMode",image:[imgUrl(event.imageUrl)],
-      location:{"@type":event.venue?"Restaurant":"Place",name:event.venue?.name??event.district,address:{"@type":"PostalAddress",addressLocality:event.district,addressRegion:"Île-de-France",addressCountry:"FR"}},
-      organizer:{"@type":"Organization",name:event.organizer.name},
-      offers:{"@type":"Offer",url:absoluteUrl(`/events/${event.slug}`),price:(event.priceCents/100).toFixed(2),priceCurrency:"EUR",availability:event.availability.kind!=="unknown"&&event.availability.full?"https://schema.org/SoldOut":"https://schema.org/InStock"},
-      ...(event.minAge?{typicalAgeRange:event.maxAge?`${event.minAge}-${event.maxAge}`:`${event.minAge}-`}:{})
-    },breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Soirées",path:"/events"},{name:event.title,path:`/events/${event.slug}`}])]:null
+    jsonLd:event.bookable?[eventJsonLd(event,SITE_URL,imgUrl(event.imageUrl)),breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Soirées",path:"/events"},{name:event.title,path:`/events/${event.slug}`}])]:null
   }:null);
   if(notFound)return <NotFound title="Cette soirée est introuvable" message="Elle a peut-être été retirée, ou le lien est incomplet."/>;
   if(!event)return <Layout><Loading/></Layout>;

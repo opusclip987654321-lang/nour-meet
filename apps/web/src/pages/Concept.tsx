@@ -7,6 +7,7 @@ import { ContactExplainer, InterviewExplainer } from "../components/explainers";
 import { Layout } from "../components/Layout";
 import { ShareSiteButton } from "../components/ShareSite";
 import { useAuth } from "../auth";
+import { PAGE_META, PARTICIPANT_FAQ, faqPageJsonLd } from "@nour/shared";
 import { breadcrumbJsonLd, useSeo } from "../lib/seo";
 
 // Page « Comment ça marche » : le parcours réel de chaque format, étape par étape. Chaque phrase
@@ -17,7 +18,7 @@ export function Concept() {
   const [video,setVideo]=useState<{url:string;thumbnail:string;subtitles:string}|null>(null);
   // Les réglages vidéo sont publics par nature (contenu éditorial), mais /admin/settings est
   // réservé à l'administration : on lit les trois clés utiles depuis une petite route publique dédiée.
-  useSeo({title:"Comment ça marche : speed dating sur sélection et networking",description:"Le parcours réel d’une soirée Nūr Meet : choix de la soirée, entretien pour les rencontres, paiement sécurisé, billet QR et mise en relation seulement si l’intérêt est réciproque.",path:"/concept",jsonLd:breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Comment ça marche",path:"/concept"}])});
+  useSeo({...PAGE_META.concept,path:"/concept",jsonLd:[breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Comment ça marche",path:"/concept"}]),faqPageJsonLd(PARTICIPANT_FAQ)]});
   useEffect(()=>{api<{url:string;thumbnail:string;subtitles:string}>("/concept-video").then(setVideo).catch(()=>{})},[]);
   return <Layout>
     <section className="page concept-intro">
@@ -70,6 +71,13 @@ export function Concept() {
         <li><ListOrdered size={22} aria-hidden="true"/><span>Soirée complète ? Liste d’attente, et une soirée comparable si elle existe</span></li>
         <li><Trash2 size={22} aria-hidden="true"/><span>Compte supprimable à tout moment</span></li>
       </ul>
+    </section>
+
+    {/* Questions fréquentes : les mêmes que sur l'accueil, déclarées ici en FAQPage (audit SEO 2026-10-07). */}
+    <section className="section faq" aria-labelledby="concept-faq">
+      <div className="section-title"><h2 id="concept-faq">Vos questions</h2></div>
+      <div className="faq-list">{PARTICIPANT_FAQ.map(item=><details key={item.q}><summary>{item.q}</summary><p>{item.a}</p></details>)}</div>
+      <p className="faq-more">Une autre question ? <a className="text-link" href="mailto:contact@nourmeet.com">contact@nourmeet.com</a></p>
     </section>
 
     <section className="final-cta" aria-labelledby="concept-cta">

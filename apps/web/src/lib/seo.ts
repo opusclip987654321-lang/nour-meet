@@ -1,11 +1,11 @@
+import { DEFAULT_DESCRIPTION, SITE_NAME, breadcrumbJsonLd as sharedBreadcrumb, pageTitle } from "@nour/shared";
 import { useEffect } from "react";
 
 // Référencement (corrections web 2026-09-24, §19/§20) : chaque page importante pose ses propres
 // balises (titre, description, canonique, Open Graph, Twitter, robots) et ses données structurées,
 // strictement fidèles au contenu affiché. Les valeurs par défaut restent celles de index.html.
-export const SITE_NAME = "Nūr Meet";
+export { DEFAULT_DESCRIPTION, SITE_NAME, pageTitle };
 export const SITE_URL = (import.meta.env.VITE_SITE_URL as string | undefined)?.replace(/\/$/, "") || (typeof window !== "undefined" ? window.location.origin : "");
-export const DEFAULT_DESCRIPTION = "Speed dating et soirées networking en petit comité dans des restaurants partenaires à Paris et en Île-de-France. Profils vérifiés, contact uniquement si l’intérêt est réciproque.";
 export const DEFAULT_IMAGE = "/images/paris-terrace-1600.webp";
 export const absoluteUrl = (path: string) => /^https?:\/\//.test(path) ? path : `${SITE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 
@@ -32,12 +32,13 @@ const setCanonical = (href: string | null) => {
   el.href = href;
 };
 
-export const pageTitle = (title: string) => title.includes(SITE_NAME) ? title : `${title} — ${SITE_NAME}`;
-
 export function useSeo(seo: Seo | null) {
   const key = seo ? JSON.stringify(seo) : null;
   useEffect(() => {
     if (!seo) return;
+    // Données structurées déjà posées par le serveur pour les robots (apps/api/src/services/prerender.ts) :
+    // la page les remplace par les siennes, jamais deux exemplaires.
+    document.head.querySelectorAll('script[data-seo="ssr"]').forEach(s => s.remove());
     const title = pageTitle(seo.title);
     const description = seo.description || DEFAULT_DESCRIPTION;
     const url = seo.path ? absoluteUrl(seo.path) : null;
@@ -68,8 +69,4 @@ export function useSeo(seo: Seo | null) {
   }, [key]);
 }
 
-export const breadcrumbJsonLd = (items: { name: string; path: string }[]) => ({
-  "@context": "https://schema.org",
-  "@type": "BreadcrumbList",
-  itemListElement: items.map((item, index) => ({ "@type": "ListItem", position: index + 1, name: item.name, item: absoluteUrl(item.path) }))
-});
+export const breadcrumbJsonLd = (items: { name: string; path: string }[]) => sharedBreadcrumb(SITE_URL, items);

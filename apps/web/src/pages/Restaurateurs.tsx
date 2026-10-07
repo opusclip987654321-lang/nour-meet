@@ -1,4 +1,5 @@
 import type { BillingPeriod } from "@nour/shared";
+import { PAGE_META, RESTAURANT_FAQ as FAQ, faqPageJsonLd } from "@nour/shared";
 import { ArrowRight, BadgeCheck, CalendarPlus, Check, ClipboardCheck, CreditCard, Megaphone, Minus, QrCode, Send, ShieldCheck, Store, UserPlus, Users, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -33,22 +34,13 @@ const STEPS = [
   { icon: ClipboardCheck, title: "Accueillez", text: "Vous scannez les billets, la soirée commence." }
 ];
 
-const FAQ: { q: string; a: string }[] = [
-  { q: "Suis-je engagé sur la durée ?", a: "Non. Vous résiliez depuis votre espace quand vous le souhaitez : la résiliation prend effet à la fin de la période déjà payée." },
-  { q: "Qui fixe le prix des places ?", a: "Vous. Le prix est affiché TTC aux participants, avec ce qui est compris. L’équipe Nūr Meet peut demander un ajustement avant publication." },
-  { q: "Comment suis-je payé pour les places vendues ?", a: "Nūr Meet encaisse les paiements via Stripe. Les sommes qui vous reviennent sont reversées au plus tard 15 jours ouvrés après la soirée. La commission et les frais applicables sont précisés dans votre offre professionnelle." },
-  { q: "Et si ma soirée ne se remplit pas ?", a: "Vous pouvez fixer un nombre minimum de participants et une date de décision. À cette date, vous maintenez ou annulez la soirée ; en cas d’annulation, les participants sont remboursés automatiquement." },
-  { q: "Mes soirées sont-elles publiées automatiquement ?", a: "Non. Chaque soirée est vérifiée par l’équipe avant publication, pour garantir la qualité de ce qui est proposé aux membres. Elle compte alors dans le nombre de soirées de votre formule." },
-  { q: "Que recevez-vous des participants ?", a: "Le prénom de chaque participant pour l’accueil, et son billet à scanner. Leur numéro et leur e-mail ne sont jamais transmis aux restaurants." },
-  { q: "Puis-je changer de formule ?", a: "Oui, depuis votre espace. Formule supérieure : immédiat, au prorata. Formule inférieure : à la fin de la période déjà payée." }
-];
 
 export function Restaurateurs() {
   const {user}=useAuth();
   const [plans,setPlans]=useState<Plan[]|null>(null);
   const [period,setPeriod]=useState<BillingPeriod>("MONTHLY");
   useEffect(()=>{api<Plan[]>("/plans").then(setPlans).catch(()=>setPlans([]))},[]);
-  useSeo({title:"Restaurateurs : accueillez des soirées Nūr Meet",description:"Accueillez des soirées speed dating et networking dans votre restaurant à Paris et en Île-de-France : places payées d’avance, participants vérifiés, formules sans engagement.",path:"/restaurateurs",jsonLd:breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Restaurateurs",path:"/restaurateurs"}])});
+  useSeo({...PAGE_META.restaurateurs,path:"/restaurateurs",jsonLd:[breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Restaurateurs",path:"/restaurateurs"}]),faqPageJsonLd(FAQ)]});
   // Sans compte : création du compte (le choix « Je suis restaurateur » vient juste après). Déjà
   // connecté : directement l'espace restaurateur, qui affiche la candidature ou l'établissement.
   const start=user?"/restaurant":"/login";

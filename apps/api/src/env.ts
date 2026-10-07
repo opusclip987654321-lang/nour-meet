@@ -16,6 +16,9 @@ const envSchema = z.object({
   TWILIO_VERIFY_SERVICE_SID: optionalEnvironmentSecret,
   API_PORT: z.coerce.number().default(4000),
   WEB_ORIGIN: z.string().default("http://localhost:5173"),
+  // Adresse du conteneur du site sur le réseau Docker : l'API y relit index.html pour servir les pages
+  // publiques déjà remplies aux robots (routes/pages.ts).
+  WEB_INTERNAL_URL: z.string().default("http://web:80"),
   STRIPE_SECRET_KEY: optionalEnvironmentSecret,
   STRIPE_WEBHOOK_SECRET: optionalEnvironmentSecret,
   RESEND_API_KEY: optionalEnvironmentSecret,
