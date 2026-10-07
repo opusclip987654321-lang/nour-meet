@@ -1,4 +1,4 @@
-import { EVENT_CATEGORIES } from "@nour/shared";
+import { EVENT_CATEGORIES, PAGE_META } from "@nour/shared";
 import type { Paginated, PublicEvent } from "@nour/shared";
 import { CalendarDays, Search } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -13,7 +13,7 @@ export function Events() {
   // §5 (cahier des charges 2026-09) : permet au blog (et à tout autre lien externe) de renvoyer
   // directement vers les événements d'une catégorie précise, ex. /events?category=Speed%20dating.
   const category=searchParams.get("category")??"";
-  useSeo({title:category?`${category} à Paris : prochaines soirées`:"Prochaines soirées speed dating et networking à Paris",description:"Toutes les soirées à venir, de la plus proche à la plus lointaine : lieu, organisateur, prix et ce qui est compris.",path:"/events",jsonLd:breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Soirées",path:"/events"}])});
+  useSeo({...(category?PAGE_META.eventsCategory(category):PAGE_META.events),path:"/events",jsonLd:breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Soirées",path:"/events"}])});
   const [q,setQ]=useState("");
   const [debouncedQ,setDebouncedQ]=useState("");
   const [events,setEvents]=useState<PublicEvent[]|null>(null);

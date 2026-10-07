@@ -203,3 +203,4 @@ export const isAdult = (birthDate: Date | string | null | undefined, now: Date =
 export * from "./article.js";
 export * from "./interests.js";
 export * from "./interviews.js";
+export * from "./seo.js";

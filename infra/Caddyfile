@@ -16,6 +16,16 @@
 	handle @seo {
 		reverse_proxy api:4000
 	}
+	# Pages publiques servies déjà remplies aux robots (audit SEO 2026-10-07) : l'API reprend l'index.html
+	# du site et y pose titre, canonique, données structurées et texte de la page (routes/pages.ts).
+	@pages {
+		method GET HEAD
+		path / /events /events/* /concept /restaurateurs /blog /blog/*
+	}
+	handle @pages {
+		rewrite * /__pages{uri}
+		reverse_proxy api:4000
+	}
 	# Agent vidéo : fichiers publics téléchargés par Instagram/Facebook lors de la publication.
 	handle_path /va/* {
 		root * /srv/va

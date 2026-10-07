@@ -3,7 +3,7 @@ import { ArrowRight, BadgeCheck, CalendarDays, Check, Flag, Handshake, Heart, Lo
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { SOCIAL_LINKS } from "@nour/shared";
+import { PAGE_META, PARTICIPANT_FAQ as FAQ, SOCIAL_LINKS, faqPageJsonLd } from "@nour/shared";
 import { Picture, SocialLinks } from "../components/brand";
 import { ContactExplainer, InterviewExplainer } from "../components/explainers";
 import { Layout } from "../components/Layout";
@@ -42,16 +42,6 @@ function NextEventCard({ event }: { event?: PublicEvent }) {
   </Link>;
 }
 
-const FAQ: { q: string; a: string }[] = [
-  { q: "À qui s’adresse Nūr Meet ?", a: "Aux adultes de 18 ans et plus qui veulent rencontrer des personnes partageant leurs valeurs : pour une relation sérieuse (speed dating) ou pour élargir leur réseau (networking)." },
-  { q: "Pourquoi un entretien pour le speed dating ?", a: "Pour que chacun vienne avec la même intention. C’est un court appel, une seule fois, valable pour toutes les soirées de rencontre. Le networking est en accès direct." },
-  { q: "Et si mon profil n’est pas validé ?", a: "L’entretien sert à vérifier que votre démarche correspond au cadre des soirées. Si ce n’est pas le cas, vous pourrez refaire une demande plus tard." },
-  { q: "Comment revoir quelqu’un après la soirée ?", a: "Échangez vos codes personnels : ils fonctionnent entre personnes inscrites à la même soirée, même si l’une d’elles n’a finalement pas pu venir. La personne reçoit votre demande et choisit : la conversation ne s’ouvre que si elle accepte." },
-  { q: "Qui voit mes informations ?", a: "Aucun participant ne voit votre numéro ni votre e-mail. Le restaurant ne reçoit que votre prénom pour l’accueil ; vos réponses au questionnaire de rencontre restent privées." },
-  { q: "Puis-je annuler ?", a: "Oui : remboursement intégral et automatique jusqu’à 24 heures avant la soirée. Passé ce délai, ou en cas d’absence, la place n’est pas remboursée. Si l’organisateur annule, vous êtes remboursé(e)." },
-  { q: "Comment se passe le paiement ?", a: "Par carte, via Stripe : Nūr Meet ne conserve jamais vos données bancaires. Votre billet avec QR code arrive dans votre espace dès la confirmation." }
-];
-
 const STEPS = [
   { icon: CalendarDays, title: "Choisissez une soirée", text: "Lieu, prix, ce qui est compris : tout est sur la fiche." },
   { icon: BadgeCheck, title: "Validez votre profil", text: "Speed dating : un court appel, une seule fois.", link: "#entretien", linkLabel: "Comment ça se passe" },
@@ -74,10 +64,10 @@ export function Home() {
   const [events,setEvents]=useState<PublicEvent[]|null>(null);
   useEffect(()=>{api<Paginated<PublicEvent>>("/events?pageSize=6").then(r=>setEvents(r.items)).catch(()=>setEvents([]))},[]);
   // Organisation, site et FAQ : uniquement des informations visibles sur la page ou dans le pied de page.
-  useSeo({title:`${SITE_NAME} — rencontres et soirées en petit comité à Paris`,path:"/",jsonLd:[
+  useSeo({title:PAGE_META.home.title,path:"/",jsonLd:[
     {"@context":"https://schema.org","@type":"Organization",name:SITE_NAME,url:SITE_URL,logo:absoluteUrl("/icon-512.png"),email:"contact@nourmeet.com",areaServed:{"@type":"AdministrativeArea",name:"Île-de-France"},sameAs:[SOCIAL_LINKS.instagram.url,SOCIAL_LINKS.facebook.url]},
     {"@context":"https://schema.org","@type":"WebSite",name:SITE_NAME,url:SITE_URL,inLanguage:"fr-FR"},
-    {"@context":"https://schema.org","@type":"FAQPage",mainEntity:FAQ.map(f=>({"@type":"Question",name:f.q,acceptedAnswer:{"@type":"Answer",text:f.a}}))}
+    faqPageJsonLd(FAQ)
   ]});
   // Refonte conversion du 2026-09-25 : la page se lit en diagonale — une promesse, le principe en
   // trois points, les deux formats, le parcours, puis les deux mécanismes qui inquiètent ou

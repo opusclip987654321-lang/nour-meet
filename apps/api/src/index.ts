@@ -27,6 +27,7 @@ await import("./routes/admin-events.js");
 await import("./routes/admin-finance.js");
 await import("./routes/admin-content.js");
 await import("./routes/articles.js");
+await import("./routes/pages.js");
 await import("./jobs.js");
 
 const close = async () => { await prisma.$disconnect(); await app.close(); };
