@@ -55,3 +55,21 @@ admin.leviaro.fr {
 leviaro.fr, www.leviaro.fr {
 	reverse_proxy leviaro-site:80
 }
+
+# Cerveau central : ajouté à la main en production, reporté ici pour que le Caddyfile suivi corresponde au serveur.
+cerveau.nourmeet.com {
+	reverse_proxy cerveau-central:8090
+}
+
+# VégéBudget (dépôt v-g-budget, conteneur « vegebudget » dans /opt/vegebudget, joint par le réseau nour-v2_default).
+vegebudget.fr {
+	encode zstd gzip
+	request_body {
+		max_size 5MB
+	}
+	reverse_proxy vegebudget:3000
+}
+
+www.vegebudget.fr {
+	redir https://vegebudget.fr{uri} permanent
+}
