@@ -26,6 +26,8 @@ apps/api/public/uploads/*
 *.p8
 *.key
 *service-account*.json
+# Statistiques Umami : la version du serveur contient ses secrets ; le modèle versionné est docker-compose.umami.example.yml.
+docker-compose.umami.yml
 
 # Bases de données locales
 *.sqlite

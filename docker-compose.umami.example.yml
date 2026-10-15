@@ -1,0 +1,34 @@
+# Modèle de docker-compose.umami.yml (statistiques du site, servies sur stats.nourmeet.com par infra/Caddyfile).
+# Le vrai fichier n'est pas versionné : il contient APP_SECRET et le mot de passe Postgres.
+# Sur le serveur : copier ce modèle en docker-compose.umami.yml, remplir les valeurs <À COMPLÉTER>.
+services:
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    container_name: umami
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://umami:${UMAMI_DB_MOT_DE_PASSE}@umami-db:5432/umami
+      DATABASE_TYPE: postgresql
+      APP_SECRET: <À COMPLÉTER>
+      DISABLE_TELEMETRY: "1"
+    depends_on:
+      umami-db:
+        condition: service_healthy
+  umami-db:
+    image: postgres:16-alpine
+    container_name: umami-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: umami
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: <À COMPLÉTER>
+    volumes:
+      - umami-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umami"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  umami-db:

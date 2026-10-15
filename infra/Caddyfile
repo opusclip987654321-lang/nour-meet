@@ -88,3 +88,7 @@ vegebudget.fr {
 www.vegebudget.fr {
 	redir https://vegebudget.fr{uri} permanent
 }
+
+stats.nourmeet.com {
+    reverse_proxy umami:3000
+}
