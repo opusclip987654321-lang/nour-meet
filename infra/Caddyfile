@@ -62,8 +62,13 @@ admin.leviaro.fr {
 	reverse_proxy leviaro-agent-web-1:8787
 }
 
-leviaro.fr, www.leviaro.fr {
+leviaro.fr {
 	reverse_proxy leviaro-site:80
+}
+
+# Une seule adresse publique pour le référencement : www renvoie vers le domaine nu (chemin et paramètres conservés).
+www.leviaro.fr {
+	redir https://leviaro.fr{uri} permanent
 }
 
 # Cerveau central : ajouté à la main en production, reporté ici pour que le Caddyfile suivi corresponde au serveur.
