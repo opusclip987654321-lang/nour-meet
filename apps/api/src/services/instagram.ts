@@ -16,23 +16,30 @@ import { chartSlide, chatSlide, contrastSlide, coverSlide, ctaSlide, eventVisual
 // instagramPublishingAt), délais bornés, et aucune erreur ne remonte : l'article ou l'événement reste
 // en ligne sur le site, l'échec est tracé (instagramError) et un nouvel essai reste possible.
 
-export type InstagramConfig = { userId: string; initialToken: string; graphVersion: string; publicApiOrigin: string; webOrigin: string; uploadsDir: string; publicPrefix: string; publicDir: string };
+export type InstagramConfig = { userId: string; initialToken: string; graphVersion: string; api?: "instagram" | "facebook"; publicApiOrigin: string; webOrigin: string; uploadsDir: string; publicPrefix: string; publicDir: string };
 const PROVIDER = "instagram";
 const TOKEN_REFRESH_AFTER_MS = 7 * 24 * 60 * 60_000;
 // Un envoi interrompu (redémarrage du serveur) libère son verrou au bout d'une heure — bien au-delà du
 // pire cas d'un carrousel de 8 médias (chaque attente est bornée à 60 s).
 const STALE_LOCK_MS = 60 * 60_000;
 
-const graph = (config: InstagramConfig, pathAndQuery: string) => `https://graph.instagram.com/${config.graphVersion}/${pathAndQuery}`;
+const viaFacebook = (config: Pick<InstagramConfig, "api">) => config.api === "facebook";
+const graph = (config: InstagramConfig, pathAndQuery: string) => `https://graph.${viaFacebook(config) ? "facebook" : "instagram"}.com/${config.graphVersion}/${pathAndQuery}`;
+// Sur une limite d'appels, Meta ne dit pas laquelle : on joint l'usage qu'il renvoie en en-tête.
+const USAGE_HEADERS = ["x-app-usage", "x-business-use-case-usage", "x-ad-account-usage"];
 async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(30_000) });
   const data = await response.json().catch(() => ({})) as T & { error?: { message?: string; code?: number } };
-  if (!response.ok || data.error) throw new Error(`Instagram (${response.status}) : ${data.error?.message ?? "réponse invalide"}`);
+  if (!response.ok || data.error) {
+    const usage = USAGE_HEADERS.map(h => response.headers.get(h) ? `${h}=${response.headers.get(h)}` : "").filter(Boolean).join(" ");
+    throw new Error(`Instagram (${response.status}) : ${data.error?.message ?? "réponse invalide"}${usage ? ` [${usage}]`.slice(0, 300) : ""}`);
+  }
   return data;
 }
 
 // Jeton courant : celui conservé en base (renouvelé), sinon le jeton initial de l'environnement.
 export async function instagramToken(prisma: PrismaClient, config: InstagramConfig) {
+  if (viaFacebook(config)) return config.initialToken;
   const stored = await prisma.socialCredential.findUnique({ where: { provider: PROVIDER } });
   if (stored) return stored.accessToken;
   await prisma.socialCredential.create({ data: { provider: PROVIDER, accessToken: config.initialToken } }).catch(() => null);
@@ -41,6 +48,7 @@ export async function instagramToken(prisma: PrismaClient, config: InstagramConf
 
 // Les jetons Instagram expirent au bout de 60 jours : renouvellement hebdomadaire, bien avant l'échéance.
 export async function refreshInstagramToken(prisma: PrismaClient, config: InstagramConfig) {
+  if (viaFacebook(config)) return false;
   const stored = await prisma.socialCredential.findUnique({ where: { provider: PROVIDER } });
   if (stored && Date.now() - stored.refreshedAt.getTime() < TOKEN_REFRESH_AFTER_MS) return false;
   const current = stored?.accessToken ?? config.initialToken;
@@ -70,13 +78,14 @@ export async function loadImage(image: string | null, config: Pick<InstagramConf
   return Buffer.from(await source.arrayBuffer());
 }
 
-// Instagram télécharge et traite chaque média de façon asynchrone : on attend FINISHED (60 s au plus).
+// Instagram télécharge et traite chaque média de façon asynchrone : on attend FINISHED (60 s au plus),
+// en interrogeant toutes les 5 s pour ménager la limite d'appels de l'appli (12 essais).
 async function waitFinished(config: InstagramConfig, token: string, containerId: string) {
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 12; i++) {
     const status = await call<{ status_code?: string }>(graph(config, `${containerId}?fields=status_code&access_token=${encodeURIComponent(token)}`));
     if (status.status_code === "FINISHED") return;
     if (status.status_code === "ERROR" || status.status_code === "EXPIRED") throw new Error(`Traitement du média refusé par Instagram (${status.status_code})`);
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 5000));
   }
   throw new Error("Instagram n’a pas fini de traiter le média à temps");
 }
