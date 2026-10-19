@@ -54,6 +54,11 @@ const envSchema = z.object({
   INSTAGRAM_ACCESS_TOKEN: optionalEnvironmentSecret,
   INSTAGRAM_USER_ID: optionalEnvironmentSecret,
   INSTAGRAM_GRAPH_VERSION: z.string().default("v24.0"),
+  // « facebook » : publier via graph.facebook.com avec une clé permanente (utilisateur système Meta ou
+  // clé de Page) et l'identifiant du compte Instagram professionnel relié à la Page. Sert quand la
+  // connexion Instagram est bridée (« Application request limit reached ») ; la clé n'est alors ni
+  // renouvelée ni conservée en base, elle n'expire pas.
+  INSTAGRAM_API: z.enum(["instagram", "facebook"]).default("instagram"),
   // Publication automatique sur la Page Facebook (API Pages) : identifiant de la Page et jeton de Page
   // permanent (dérivé d'un jeton utilisateur longue durée). Facultatifs : sans eux, rien n'est publié.
   FACEBOOK_PAGE_ID: optionalEnvironmentSecret,
