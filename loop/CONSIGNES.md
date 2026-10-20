@@ -42,3 +42,7 @@ articles du blog, liens marqués (UTM) et page d'arrivée des réseaux, mise en 
 
 Ajouter à `loop/LECONS.md` une ligne par essai jugé (date, essai, chiffre, gardé ou arrêté) ou par
 erreur à ne pas refaire. Garder les 40 dernières lignes.
+
+Ajouter à `loop/DECISIONS.md` une ligne datée par décision (changé, gardé, arrêté ou question : quoi,
+et pourquoi avec les chiffres), y compris quand la revue garde la méthode telle quelle. Ne jamais
+effacer ce fichier : c'est l'historique des décisions, gardé pour toujours dans Notion.
