@@ -47,6 +47,8 @@ Monorepo npm : `apps/api` (Fastify + Prisma + Postgres), `apps/web` (React + Vit
 - `apps/mobile` — `App.tsx` (navigation racine), `src/screens/`, `src/components/ui.tsx`,
   `src/theme.ts`. Le paiement mobile ouvre la page web `/pay/:id` (pas de SDK Stripe natif).
 - Nouveau code : dans le module de son domaine, jamais de retour à un fichier fourre-tout.
+- `loop/` — loop grand public (revue hebdomadaire) : `CONSIGNES.md` (consigne courte) et `LECONS.md`
+  (carnet relu avant chaque décision, complété après chaque revue, 40 dernières lignes).
 
 ## Commandes
 
