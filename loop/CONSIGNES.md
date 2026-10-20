@@ -31,6 +31,9 @@ cerveau (tunnel sur 30 jours, réseaux, soirées, origine des visiteurs), lu dan
 Page d'accueil et pages publiques, textes et formats des posts Instagram / Facebook, choix des
 articles du blog, liens marqués (UTM) et page d'arrivée des réseaux, mise en avant des soirées.
 
+Méthodes à consulter (louis, 20/10/2026) : skills marketing et design dans `.claude/skills/` (textes, conversion,
+SEO, réseaux, stores, événements, `frontend-design`). À utiliser si elles servent l'objectif, jamais contre les règles fixes.
+
 ## Pistes de louis (à peser, pas des ordres)
 
 - Tunnel : les visiteurs comprennent-ils l'objectif du site ? S'inscrivent-ils ? Participent-ils ?
