@@ -27,12 +27,16 @@ const viaFacebook = (config: Pick<InstagramConfig, "api">) => config.api === "fa
 const graph = (config: InstagramConfig, pathAndQuery: string) => `https://graph.${viaFacebook(config) ? "facebook" : "instagram"}.com/${config.graphVersion}/${pathAndQuery}`;
 // Sur une limite d'appels, Meta ne dit pas laquelle : on joint l'usage qu'il renvoie en en-tête.
 const USAGE_HEADERS = ["x-app-usage", "x-business-use-case-usage", "x-ad-account-usage"];
+// Code et sous-code Meta en tête du message (21/10/2026) : gardés sur l'article, ils permettent au cerveau
+// central d'expliquer la cause d'un échec (clé, limite, compte bloqué, image refusée) sans e-mail.
+export type MetaError = { message?: string; code?: number; error_subcode?: number };
+export const metaStatus = (status: number, error?: MetaError) => [status, error?.code !== undefined ? `code ${error.code}` : "", error?.error_subcode !== undefined ? `sous-code ${error.error_subcode}` : ""].filter(Boolean).join(", ");
 async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(30_000) });
-  const data = await response.json().catch(() => ({})) as T & { error?: { message?: string; code?: number } };
+  const data = await response.json().catch(() => ({})) as T & { error?: MetaError };
   if (!response.ok || data.error) {
     const usage = USAGE_HEADERS.map(h => response.headers.get(h) ? `${h}=${response.headers.get(h)}` : "").filter(Boolean).join(" ");
-    throw new Error(`Instagram (${response.status}) : ${data.error?.message ?? "réponse invalide"}${usage ? ` [${usage}]`.slice(0, 300) : ""}`);
+    throw new Error(`Instagram (${metaStatus(response.status, data.error)}) : ${data.error?.message ?? "réponse invalide"}${usage ? ` [${usage}]`.slice(0, 300) : ""}`);
   }
   return data;
 }

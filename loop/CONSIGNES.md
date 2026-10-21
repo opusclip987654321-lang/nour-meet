@@ -8,6 +8,12 @@ objectif, règles fixes, leviers, pistes, rien de plus.
 Relire `loop/LECONS.md` : ne pas refaire un essai déjà raté sans raison nouvelle. Un essai à la fois
 quand c'est possible. Données trop maigres : ne rien changer et le noter.
 
+Relire le résultat des publications de la semaine (bloc « Réseaux » de la page Nūr Meet du cerveau, ou
+colonnes `instagramError` / `facebookError` des articles) : le cerveau y explique chaque échec (code Meta)
+et dit qui agit. Cause « loop » (image, format, légende, article trop court) : la corriger ; cause
+« attendre » : ne pas multiplier les essais ; cause « louis » : le cerveau l'a déjà prévenu. Aucun e-mail
+n'est envoyé pour une publication réussie ou échouée (louis, 21/10/2026).
+
 ## Objectif
 
 Des particuliers (networking, rencontres amoureuses) qui découvrent le site, créent un compte,
