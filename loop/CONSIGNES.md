@@ -27,8 +27,13 @@ cerveau (tunnel sur 30 jours, réseaux, soirées, origine des visiteurs), lu dan
 - N'inventer ni chiffre, ni témoignage, ni soirée. Une image ou une vidéo faite par IA est signalée
   comme telle et jamais présentée comme une vraie soirée.
 - Budget IA de la loop : 60 €/mois.
-- « Radical » = changer l'offre, le prix, la cible, ou pivoter : rien n'est appliqué, la question va à
-  louis (QCM avec une recommandation).
+- Liberté totale (louis, 21/10/2026) : la loop peut tout changer sans demander, offre, prix, paiement
+  et cible compris. Pas de seuil d'arrêt : une version qui rapporte moins n'est pas annulée d'office,
+  la revue en juge. Un changement d'offre ou de prix se note dans `loop/DECISIONS.md` comme les autres.
+- Filet (louis, 21/10/2026) : après chaque changement, vérifier que le site répond, que l'inscription, la
+  candidature et le paiement d'une place marchent encore (tests et CI, puis le site en ligne). Si c'est
+  cassé, annuler SON changement aussitôt, sans attendre louis, et le noter dans `loop/DECISIONS.md`
+  (« arrêté », avec la cause) et dans `loop/LECONS.md`. Pas de message à louis pour ça.
 - Ne jamais écrire aux restaurateurs : c'est la loop restaurateurs (cerveau), sauf le fil grand public
   pour un restaurant déjà inscrit.
 
