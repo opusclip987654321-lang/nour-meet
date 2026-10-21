@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient, UserRole } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import type { AIProvider } from "../ai-provider.js";
 import { defaultImagePrompt, type Illustration } from "./article-image.js";
 import { varietySeed, visualBrief } from "./image-variety.js";
@@ -9,12 +9,14 @@ import { BLOG_CATEGORIES, MAX_AI_ATTEMPTS_PER_DAY, parisDay, sanitizeGeneratedAr
 // validation manuelle préalable demandée jusque-là. Un article par jour calendaire (Europe/Paris),
 // sans doublon : la colonne unique Article.autoPublishDay le garantit au niveau de la base, même si
 // deux passages de la tâche se chevauchent ou si le serveur redémarre en pleine génération.
-// Dépendances injectées (base, fournisseur IA, notifications) pour être testable sans serveur.
+// Dépendances injectées (base, fournisseur IA) pour être testable sans serveur. Aucun e-mail ni
+// notification aux administrateurs (demande de louis du 21/10/2026) : la publication et le résultat de
+// chaque réseau sont tracés en base (Article, journal d'audit), le cerveau central les relève chaque heure.
 // illustrate, shareOnInstagram et shareOnFacebook sont facultatifs : absents (pas de clé OpenAI, Instagram
 // ou Facebook), l'article garde sa photo de la photothèque et n'est pas publié sur ces réseaux. Leurs erreurs ne bloquent jamais le blog.
 // prepareCarousel (refonte du 2026-09-26) réécrit le carrousel et ses illustrations une seule fois, avant
 // Instagram et Facebook qui le reprennent tel quel ; en cas d'échec, ils extraient le carrousel de l'article.
-type Deps = { illustrate?: (article: { title: string; imagePrompt: string }) => Promise<Illustration | null>; prepareCarousel?: (articleId: string) => Promise<unknown>; shareOnInstagram?: (articleId: string) => Promise<unknown>; shareOnFacebook?: (articleId: string) => Promise<unknown>; prisma: PrismaClient; aiProvider: AIProvider; notify: (userId: string, title: string, body: string, link?: string) => Promise<unknown>; log: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void } };
+type Deps = { illustrate?: (article: { title: string; imagePrompt: string }) => Promise<Illustration | null>; prepareCarousel?: (articleId: string) => Promise<unknown>; shareOnInstagram?: (articleId: string) => Promise<unknown>; shareOnFacebook?: (articleId: string) => Promise<unknown>; prisma: PrismaClient; aiProvider: AIProvider; log: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void } };
 export type DailyArticleOutcome = "ALREADY_PUBLISHED" | "PUBLISHED_AI" | "PUBLISHED_QUEUE" | "NOTHING_TO_PUBLISH" | "BUSY";
 
 let running = false;
@@ -77,8 +79,6 @@ export async function publishDailyArticle(deps: Deps, now: Date = new Date()): P
     }
     await prisma.articleReviewLog.create({ data: { articleId: created!.id, fromStatus: "DRAFT", toStatus: "PUBLISHED", note: outcome === "PUBLISHED_AI" ? "Publication automatique quotidienne (IA)" : "Publication automatique quotidienne (réserve)" } });
     await prisma.auditLog.create({ data: { action: "DAILY_ARTICLE_PUBLISHED", entity: "Article", entityId: created!.id, metadata: { day, outcome } } });
-    const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
-    await Promise.all(admins.map(a => deps.notify(a.id, "Article du jour publié", `« ${created!.title} » est en ligne. Vous pouvez le consulter ou le supprimer depuis le blog.`, `/admin/blog/${created!.id}`)));
     if (deps.prepareCarousel && (deps.shareOnInstagram || deps.shareOnFacebook)) {
       await deps.prepareCarousel(created!.id).catch(err => deps.log.warn({ err: (err as Error).message }, "Préparation du carrousel échouée"));
     }
@@ -98,14 +98,14 @@ export type SocialShareOutcome = "TOO_EARLY" | "NO_ARTICLE" | "DONE";
  * Publication sociale de l'article du jour, séparée de sa mise en ligne (diagnostic du 2026-10-03) :
  * l'article paraît sur le blog dès minuit, son carrousel ne part sur Instagram et Facebook qu'à partir de
  * SOCIAL_POST_TIME, appelée à chaque passage de la tâche. Un seul essai automatique par réseau et par
- * article (tracé dans le journal d'audit) : un échec prévient les administrateurs une fois, sans relance
- * toutes les 30 minutes ; la republication reste possible à la main depuis l'administration.
+ * article (tracé dans le journal d'audit), sans relance toutes les 30 minutes ; l'échec reste noté sur
+ * l'article et la republication reste possible à la main depuis l'administration.
  */
-export async function shareDailyArticle(deps: Pick<Deps, "prisma" | "notify" | "log" | "shareOnInstagram" | "shareOnFacebook">, now: Date = new Date()): Promise<SocialShareOutcome> {
+export async function shareDailyArticle(deps: Pick<Deps, "prisma" | "log" | "shareOnInstagram" | "shareOnFacebook">, now: Date = new Date()): Promise<SocialShareOutcome> {
   if (!deps.shareOnInstagram && !deps.shareOnFacebook) return "DONE";
   if (parisTime(now) < getSetting("SOCIAL_POST_TIME")) return "TOO_EARLY";
   const { prisma } = deps;
-  const article = await prisma.article.findUnique({ where: { autoPublishDay: parisDay(now) }, select: { id: true, title: true, status: true } });
+  const article = await prisma.article.findUnique({ where: { autoPublishDay: parisDay(now) }, select: { id: true, status: true } });
   if (!article || article.status !== "PUBLISHED") return "NO_ARTICLE";
   const networks = [["Instagram", deps.shareOnInstagram], ["Facebook", deps.shareOnFacebook]] as const;
   for (const [network, share] of networks) {
@@ -115,9 +115,9 @@ export async function shareDailyArticle(deps: Pick<Deps, "prisma" | "notify" | "
     await prisma.auditLog.create({ data: { action, entity: "Article", entityId: article.id } });
     try { await share(article.id); }
     catch (err) {
+      // L'erreur (code et message Meta) est déjà gardée sur l'article (instagramError / facebookError) :
+      // le cerveau la relève, l'explique et ne prévient louis que si c'est à lui d'agir.
       deps.log.warn({ err: (err as Error).message }, `Publication ${network} de l’article du jour échouée`);
-      const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
-      await Promise.all(admins.map(a => deps.notify(a.id, `Publication ${network} échouée`, `« ${article.title} » est en ligne sur le site, mais pas sur ${network} : ${(err as Error).message.slice(0, 200)}`, `/admin/blog/${article.id}`)));
     }
   }
   return "DONE";

@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { renderArticleCarousel, renderEventVisual } from "./instagram.js";
+import { metaStatus, renderArticleCarousel, renderEventVisual, type MetaError } from "./instagram.js";
 
 // Publication sur la Page Facebook de Nūr Meet (API Pages, décision du 2026-09-25) : mêmes visuels
 // qu'Instagram — carrousel pour l'article du jour, visuel pour une soirée restaurateur réellement
@@ -17,8 +17,8 @@ const STALE_LOCK_MS = 60 * 60_000;
 async function call<T>(config: FacebookConfig, pathName: string, params: Record<string, string>): Promise<T> {
   const body = new URLSearchParams({ ...params, access_token: config.pageToken });
   const response = await fetch(`https://graph.facebook.com/${config.graphVersion}/${pathName}`, { method: "POST", body, signal: AbortSignal.timeout(60_000) });
-  const data = await response.json().catch(() => ({})) as T & { error?: { message?: string } };
-  if (!response.ok || data.error) throw new Error(`Facebook (${response.status}) : ${data.error?.message ?? "réponse invalide"}`);
+  const data = await response.json().catch(() => ({})) as T & { error?: MetaError };
+  if (!response.ok || data.error) throw new Error(`Facebook (${metaStatus(response.status, data.error)}) : ${data.error?.message ?? "réponse invalide"}`);
   return data;
 }
 

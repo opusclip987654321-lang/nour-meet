@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchMediaInsights, instagramToken, refreshInstagramToken } from "./services/instagram.js";
+import { fetchMediaInsights, instagramToken, metaStatus, refreshInstagramToken } from "./services/instagram.js";
 
 // Instagram via graph.facebook.com (décision du 2026-10-19) : clé permanente d'utilisateur système,
 // jamais renouvelée ni lue en base ; les limites d'appels de Meta citent l'usage renvoyé en en-tête.
@@ -23,8 +23,13 @@ describe("Instagram via l'API Facebook", () => {
       urls.push(url);
       return new Response(JSON.stringify({ error: { message: "Application request limit reached", code: 4 } }), { status: 403, headers: { "x-app-usage": '{"call_count":100}' } });
     }));
-    await expect(fetchMediaInsights(prisma, { ...base, api: "facebook" }, "m1")).rejects.toThrow(/limit reached \[x-app-usage=\{"call_count":100\}\]/);
+    await expect(fetchMediaInsights(prisma, { ...base, api: "facebook" }, "m1")).rejects.toThrow(/^Instagram \(403, code 4\) : Application request limit reached \[x-app-usage=\{"call_count":100\}\]/);
     expect(urls.every(u => u.startsWith("https://graph.facebook.com/v24.0/m1/insights"))).toBe(true);
+  });
+
+  it("met le code et le sous-code Meta en tête de l'erreur, pour que le cerveau en explique la cause", () => {
+    expect(metaStatus(400, { message: "x", code: 190, error_subcode: 463 })).toBe("400, code 190, sous-code 463");
+    expect(metaStatus(500)).toBe("500");
   });
 
   it("garde graph.instagram.com par défaut", async () => {

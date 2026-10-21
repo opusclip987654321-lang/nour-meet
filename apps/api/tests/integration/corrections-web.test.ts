@@ -256,16 +256,15 @@ describe("abonnement restaurateur : montée immédiate avec prorata, descente à
 
 describe("publication quotidienne du blog sans doublon (§3.1)", () => {
   const silentLog = { info: () => {}, warn: () => {} };
-  const notify = async () => {};
   const article = { imagePrompt: "A warm Parisian café terrace at dusk", instagramCaption: "Oser aller vers les autres.\n\nArticle complet : lien en bio\n#rencontres", kind: "editorial" as const, title: "Oser aller vers les autres en soirée", excerpt: "Quelques repères simples.", category: "Solitude et vie sociale", keywords: ["soirée"], metaTitle: "Oser aller vers les autres", metaDescription: "Des repères simples.", coverPhoto: "paris-terrace", sources: [], content: Array.from({ length: 12 }, (_, i) => `## Étape ${i + 1}\n\n${"Un conseil concret et bienveillant pour faire le premier pas lors d'une soirée. ".repeat(8)}`).join("\n\n") };
 
   it("publie un seul article par jour, même avec des passages simultanés ou répétés", async () => {
     const now = new Date("2031-03-14T10:00:00Z");
     let calls = 0;
     const aiProvider = { mode: "external", generateDraft: async () => ({ title: "", excerpt: "", content: "", keywords: [] }), generateSocialCopy: async () => [], generateArticle: async () => { calls++; await new Promise(r => setTimeout(r, 200)); return { article, searchedUrls: [] }; } } as AIProvider;
-    const results = await Promise.all([publishDailyArticle({ prisma, aiProvider, notify, log: silentLog }, now), publishDailyArticle({ prisma, aiProvider, notify, log: silentLog }, now)]);
+    const results = await Promise.all([publishDailyArticle({ prisma, aiProvider, log: silentLog }, now), publishDailyArticle({ prisma, aiProvider, log: silentLog }, now)]);
     expect(results.sort()).toEqual(["BUSY", "PUBLISHED_AI"]);
-    expect(await publishDailyArticle({ prisma, aiProvider, notify, log: silentLog }, new Date("2031-03-14T21:00:00Z"))).toBe("ALREADY_PUBLISHED");
+    expect(await publishDailyArticle({ prisma, aiProvider, log: silentLog }, new Date("2031-03-14T21:00:00Z"))).toBe("ALREADY_PUBLISHED");
     const published = await prisma.article.findMany({ where: { autoPublishDay: "2031-03-14" } });
     createdArticleIds.push(...published.map(a => a.id));
     expect(published).toHaveLength(1);
@@ -283,7 +282,7 @@ describe("publication quotidienne du blog sans doublon (§3.1)", () => {
     const aiProvider = { mode: "external", generateDraft: async () => ({ title: "", excerpt: "", content: "", keywords: [] }), generateSocialCopy: async () => [], generateArticle: async () => ({ article, searchedUrls: [] }) } as AIProvider;
     const shared: string[] = [];
     const outcome = await publishDailyArticle({
-      prisma, aiProvider, notify, log: silentLog,
+      prisma, aiProvider, log: silentLog,
       illustrate: async () => ({ imageUrl: "/static/uploads/articles/test-illustration.webp", instagramImageUrl: "/static/uploads/articles/test-illustration-instagram.jpg", altText: "Une terrasse" }),
       shareOnInstagram: async id => { shared.push(id); throw new Error("Instagram indisponible (test)"); }
     }, now);
@@ -296,7 +295,7 @@ describe("publication quotidienne du blog sans doublon (§3.1)", () => {
     expect(published.instagramCaption).toContain("lien en bio");
     // 11 h à Paris : le carrousel attend le créneau de SOCIAL_POST_TIME (18:30 par défaut).
     expect(shared).toEqual([]);
-    const shareDeps = { prisma, notify, log: silentLog, shareOnInstagram: async (id: string) => { shared.push(id); throw new Error("Instagram indisponible (test)"); } };
+    const shareDeps = { prisma, log: silentLog, shareOnInstagram: async (id: string) => { shared.push(id); throw new Error("Instagram indisponible (test)"); } };
     expect(await shareDailyArticle(shareDeps, new Date("2031-03-16T17:45:00Z"))).toBe("DONE");
     expect(shared).toEqual([published.id]);
     // Un seul essai automatique : l'échec n'est pas relancé au passage suivant.
@@ -313,9 +312,9 @@ describe("publication quotidienne du blog sans doublon (§3.1)", () => {
     const failing = { mode: "external", generateDraft: async () => ({ title: "", excerpt: "", content: "", keywords: [] }), generateSocialCopy: async () => [], generateArticle: async () => { throw new Error("Anthropic indisponible (test)"); } } as AIProvider;
     const queued = await prisma.articleQueueEntry.create({ data: { position: -1, title: "Article de réserve (test)", slug: `reserve-test-${Date.now()}`, excerpt: "Réserve.", content: "Contenu de réserve.", category: "Amitié", keywords: [], metaTitle: "Réserve", metaDescription: "Réserve" } });
     try {
-      expect(await publishDailyArticle({ prisma, aiProvider: failing, notify, log: silentLog }, now)).toBe("NOTHING_TO_PUBLISH");
-      expect(await publishDailyArticle({ prisma, aiProvider: failing, notify, log: silentLog }, now)).toBe("NOTHING_TO_PUBLISH");
-      expect(await publishDailyArticle({ prisma, aiProvider: failing, notify, log: silentLog }, now)).toBe("PUBLISHED_QUEUE");
+      expect(await publishDailyArticle({ prisma, aiProvider: failing, log: silentLog }, now)).toBe("NOTHING_TO_PUBLISH");
+      expect(await publishDailyArticle({ prisma, aiProvider: failing, log: silentLog }, now)).toBe("NOTHING_TO_PUBLISH");
+      expect(await publishDailyArticle({ prisma, aiProvider: failing, log: silentLog }, now)).toBe("PUBLISHED_QUEUE");
       const published = await prisma.article.findUniqueOrThrow({ where: { autoPublishDay: "2031-03-15" } });
       createdArticleIds.push(published.id);
       expect(published.title).toBe("Article de réserve (test)");
