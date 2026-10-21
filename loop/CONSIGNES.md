@@ -46,6 +46,17 @@ SEO, réseaux, stores, événements, `frontend-design`). À utiliser si elles se
   S'ils ne comprennent pas, poser la question d'un pivot.
 - Réseaux sociaux : jouer sur le besoin de rencontre amoureuse et de networking.
 - SEO organique du site (Google, blog, balises) ; SEO de l'appli sur les stores quand elle y sera.
+- Organique IA (louis, 21/10/2026) : être cité par les IA (ChatGPT, Perplexity, Google) autant que par
+  Google. Robots des IA autorisés dans robots.txt ; pages « réponse » (une question, réponse dans la 1re
+  phrase, FAQ) ; chaque soirée en données structurées Event, sur Facebook Événements et les agendas
+  gratuits ; un Short (Remotion) par article, publié partout via Post for Me dès que la clé est là.
+- Séance vidéo de louis (21/10/2026) : il donne 1 à 2 h par semaine et peut se filmer. La revue peut lui
+  préparer chaque semaine 2 textes de 30 s face caméra pour les particuliers ; sous-titres et publication
+  par l'IA. Juger ces vidéos contre les carrousels.
+- Mesure : visites venues de chatgpt.com, perplexity.ai, gemini, copilot (Umami), et une fois par semaine
+  5 questions types posées avec la recherche web pour voir si Nūr Meet sort.
+
+Recherche web : autorisée sans demander à louis (21/10/2026), chaque fois qu'elle aide l'objectif.
 
 ## Après la revue
 
