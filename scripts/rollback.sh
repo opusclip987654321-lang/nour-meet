@@ -26,7 +26,7 @@ if [ -z "$TARGET_SHA" ]; then
 fi
 
 echo "Retour vers $TARGET_SHA sur $ENVIRONMENT..."
-if [ -n "$(git status --porcelain)" ]; then
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "Modifications locales non commitées détectées sur le serveur : arrêt."
   exit 1
 fi

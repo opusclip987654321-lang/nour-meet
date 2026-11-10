@@ -29,7 +29,10 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-if [ -n "$(git status --porcelain)" ]; then
+# Seuls les fichiers SUIVIS comptent : les marqueurs .last_deployed_* / .last_good_* écrits par ce script
+# et les fichiers propres au serveur ne sont pas des modifications du code (ils bloquaient la mise à
+# jour automatique, constaté le 10/11/2026).
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "Modifications locales non commitées détectées sur le serveur : arrêt (le déploiement ne doit provenir que de git)."
   exit 1
 fi

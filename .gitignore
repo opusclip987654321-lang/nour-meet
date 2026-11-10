@@ -47,3 +47,6 @@ docker-compose.umami.yml
 .claude/settings.local.json
 tests/e2e/.consent-state.json
 .e2e-dist
+# Marqueurs de déploiement écrits sur le serveur par scripts/deploy.sh.
+.last_deployed_*
+.last_good_*
