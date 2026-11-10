@@ -117,6 +117,11 @@ const checkSubscriptionExpirySoon = async () => {
   const due = candidates.filter(sub => !sub.expiryReminderSentAt || sub.expiryReminderSentAt < sub.currentPeriodStart);
   for (const sub of due) {
     await prisma.restaurantSubscription.update({ where: { id: sub.id }, data: { expiryReminderSentAt: new Date() } });
+    // Essai gratuit sans carte : rien ne se renouvelle seul, le rappel invite à choisir une formule.
+    if (sub.freeTrial) {
+      await notify(sub.restaurant.ownerId, "Votre essai gratuit se termine bientôt", `Votre essai de la formule ${sub.plan.name} se termine le ${sub.currentPeriodEnd.toLocaleDateString("fr-FR")}. Rien ne sera prélevé : choisissez une formule pour continuer à publier vos soirées.`, "/restaurant?tab=subscription");
+      continue;
+    }
     const label = sub.status === "TRIALING" ? "votre essai gratuit se termine" : "votre abonnement se renouvelle";
     await notify(sub.restaurant.ownerId, "Abonnement bientôt renouvelé", `Formule ${sub.plan.name} : ${label} le ${sub.currentPeriodEnd.toLocaleDateString("fr-FR")}.`, "/restaurant?tab=subscription");
   }
@@ -128,7 +133,7 @@ if (ownsBackgroundJobs) setInterval(() => { checkSubscriptionExpirySoon().catch(
 // Stripe lui-même (trial_period_days) et synchronisé par les webhooks customer.subscription.*,
 // jamais par ce balayage, pour ne jamais désynchroniser notre statut de la réalité Stripe.
 const checkTrialSubscriptionsDue = async () => {
-  const due = await prisma.restaurantSubscription.findMany({ where: { status: "TRIALING", currentPeriodEnd: { lt: new Date() }, stripeSubscriptionId: null }, include: { restaurant: true, plan: true } });
+  const due = await prisma.restaurantSubscription.findMany({ where: { status: "TRIALING", freeTrial: false, currentPeriodEnd: { lt: new Date() }, stripeSubscriptionId: null }, include: { restaurant: true, plan: true } });
   for (const sub of due) {
     await prisma.restaurantSubscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", currentPeriodStart: new Date(), currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60_000) } });
     await notify(sub.restaurant.ownerId, "Abonnement activé", `Votre essai gratuit est terminé : l’abonnement « ${sub.plan.name} » (${(sub.plan.monthlyPriceCents / 100).toFixed(0)} €/mois) est maintenant actif.`, "/restaurant?tab=subscription");
@@ -136,6 +141,22 @@ const checkTrialSubscriptionsDue = async () => {
   }
 };
 if (ownsBackgroundJobs) setInterval(() => { checkTrialSubscriptionsDue().catch(err => app.log.error(err)); }, 60_000);
+// Fin d'un essai gratuit sans carte (décision du 2026-11-10) : il s'arrête, jamais de passage payant
+// automatique (aucun moyen de paiement n'a été enregistré). Les soirées déjà publiées ne sont pas
+// touchées ; seule une nouvelle publication demande une formule. Écriture conditionnelle : une
+// souscription Stripe arrivée entre-temps (freeTrial repassé à false) n'est jamais résiliée ici.
+const checkFreeTrialsEnded = async () => {
+  const due = await prisma.restaurantSubscription.findMany({ where: { status: "TRIALING", freeTrial: true, currentPeriodEnd: { lt: new Date() }, stripeSubscriptionId: null }, include: { restaurant: true, plan: true } });
+  for (const sub of due) {
+    const ended = await prisma.restaurantSubscription.updateMany({ where: { id: sub.id, status: "TRIALING", freeTrial: true, stripeSubscriptionId: null }, data: { status: "CANCELLED", cancelledAt: new Date() } });
+    if (ended.count === 0) continue;
+    await notify(sub.restaurant.ownerId, "Votre essai gratuit est terminé", `Votre essai de la formule ${sub.plan.name} est terminé et rien n’a été prélevé. Choisissez une formule pour continuer à publier vos soirées.`, "/restaurant?tab=subscription");
+    const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+    await Promise.all(admins.map(a => notify(a.id, "Essai gratuit restaurateur terminé", `L’essai de ${sub.restaurant.name} (formule ${sub.plan.name}) est terminé sans souscription pour le moment.`, "/admin/restaurants")));
+    await audit(undefined, "FREE_TRIAL_ENDED", "RestaurantSubscription", sub.id);
+  }
+};
+if (ownsBackgroundJobs) setInterval(() => { checkFreeTrialsEnded().catch(err => app.log.error(err)); }, 60_000);
 // Plus d'essai gratuit pour les nouveaux abonnements (décision du 2026-09-25) : seuls d'éventuels
 // abonnements souscrits avant cette date peuvent encore être en essai ; Stripe gère seul leur échéance.
 if (ownsBackgroundJobs) setInterval(() => { sendEventReminders().catch(err => app.log.error(err)); }, 60_000);

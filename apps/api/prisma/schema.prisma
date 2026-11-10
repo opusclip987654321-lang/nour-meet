@@ -818,6 +818,10 @@ model RestaurantSubscription {
   cancelAtPeriodEnd    Boolean            @default(false)
   stripeCustomerId     String?
   stripeSubscriptionId String?
+  // Essai gratuit sans carte bancaire (décision du 2026-11-10) : abonnement TRIALING sans objet
+  // Stripe, qui s'ARRÊTE à son échéance (jamais de passage payant automatique, aucune carte n'étant
+  // enregistrée). Repasse à false dès qu'une vraie souscription Stripe le remplace.
+  freeTrial            Boolean            @default(false)
   // §3 (cahier des charges 2026-09) : rappel envoyé une seule fois par période avant l'échéance de
   // l'abonnement. Comparé à currentPeriodStart (pas seulement non-null) pour redevenir envoyable dès
   // qu'une nouvelle période démarre.

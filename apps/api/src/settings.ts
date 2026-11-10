@@ -81,6 +81,11 @@ export const SETTINGS_SCHEMA = {
     default: 3,
     description: "Délai avant l'échéance d'un abonnement restaurateur (fin de période ou fin d'essai) auquel un rappel est envoyé, une seule fois par période."
   },
+  RESTAURANT_FREE_TRIAL_MONTHS: {
+    schema: z.number().int().min(0).max(12),
+    default: 1,
+    description: "Durée, en mois, de l'essai gratuit sans carte bancaire proposé une seule fois à un établissement qui n'a jamais eu d'abonnement (décision du 2026-11-10). 0 : l'essai n'est plus proposé. À la fin de l'essai rien n'est prélevé : le restaurateur choisit une formule ou l'essai s'arrête."
+  },
   ANALYTICS_ENABLED: {
     schema: z.boolean(),
     default: true,
