@@ -92,3 +92,7 @@ www.vegebudget.fr {
 stats.nourmeet.com {
     reverse_proxy umami:3000
 }
+
+sponsors.leviaro.fr {
+	reverse_proxy impacteur-sponsors:8790
+}
