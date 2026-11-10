@@ -8,7 +8,7 @@ import confidentialiteMd from "./legal/politique-confidentialite.md?raw";
 import cookiesMd from "./legal/politique-cookies.md?raw";
 import { COMPANY, companyPending, fillCompany } from "./legal/company";
 
-// Documents juridiques (version du 25/09/2026 ; identité de la société dans ./legal/company.ts). Le texte fait foi dans les fichiers ./legal/*.md :
+// Documents juridiques (CGV du 10/11/2026, autres textes du 25/09/2026 ; identité de la société dans ./legal/company.ts). Le texte fait foi dans les fichiers ./legal/*.md :
 // pour mettre à jour une page, on édite uniquement le Markdown correspondant. Les données de
 // société (société en cours de constitution) y figurent sous la forme {{societe.cle}}, remplie depuis
 // ./legal/company.ts — jamais de valeur fictive présentée comme réelle. Tant qu'une information

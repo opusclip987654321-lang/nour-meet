@@ -1,6 +1,6 @@
 # Conditions Générales de Vente (CGV) — Nūr Meet
 
-Dernière mise à jour : 25 septembre 2026
+Dernière mise à jour : 10 novembre 2026
 
 Les présentes CGV comprennent :
 - **Partie A : participants** (consommateurs qui réservent une place à une soirée) ;
@@ -135,6 +135,8 @@ Nūr Meet propose des abonnements **Standard** et **Premium**, en facturation **
 
 La souscription se fait par carte bancaire via **Stripe**. Le premier paiement est effectué à la souscription, puis à chaque échéance de la périodicité choisie (mensuelle ou annuelle).
 
+**Essai gratuit.** Nūr Meet peut proposer à un établissement qui n'a jamais eu d'abonnement un essai gratuit de la formule de son choix, **sans carte bancaire**, pour la durée affichée dans l'espace restaurateur au moment où l'essai est démarré. L'essai n'est proposé qu'une fois par établissement. Les présentes conditions s'appliquent pendant l'essai comme pendant un abonnement. Si l'essai est démarré avant la validation de l'établissement (B1), sa durée court à compter de cette validation. **À la fin de l'essai, aucun paiement n'est prélevé et l'essai ne se transforme pas en abonnement payant** : le professionnel souscrit une formule s'il souhaite continuer à publier des soirées, à défaut l'essai prend fin. La fin de l'essai ne remet pas en cause les soirées déjà publiées. Le professionnel peut arrêter l'essai ou souscrire une formule à tout moment depuis son espace.
+
 Le choix d'une formule ne publie aucune soirée : chaque soirée reste soumise à la validation de Nūr Meet (B4).
 
 ## B3. Gestion de l'abonnement par le restaurateur
@@ -154,7 +156,7 @@ L'équipe Nūr Meet peut consulter l'abonnement d'un établissement pour l'accom
 
 Le restaurateur crée ses soirées en brouillon puis les soumet à validation. Une soirée ne peut être soumise que si l'établissement dispose d'**au moins une photo**. Nūr Meet vérifie la cohérence, la qualité et la conformité de la soirée avant de la publier, et peut demander des modifications.
 
-La publication requiert un **abonnement actif** et s'impute sur le nombre de soirées publiables par mois de la formule.
+La publication requiert un **abonnement actif ou un essai gratuit en cours** et s'impute sur le nombre de soirées publiables par mois de la formule.
 
 Le restaurateur reste responsable :
 - de l'exactitude des informations fournies (date, prix, prestations comprises, capacité) ;
