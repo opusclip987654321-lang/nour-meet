@@ -18,7 +18,11 @@ export type SubscriptionOverview = {
     status: string; billingPeriod: BillingPeriod; plan: { id: string; name: string; monthlyPriceCents: number; annualPriceCents: number | null; monthlyEventQuota: number | null };
     currentPeriodEnd: string; cancelAtPeriodEnd: boolean; pendingPlan: { id: string; name: string } | null; pendingBillingPeriod: BillingPeriod | null; pendingChangeAt: string | null;
     managedByStripe: boolean; hasBillingAccount: boolean;
+    // Essai gratuit sans carte bancaire : s'arrête seul à l'échéance, rien n'est prélevé.
+    freeTrial?: boolean;
   };
+  // Durée de l'essai gratuit encore proposable à cet établissement (0 : pas ou plus d'essai).
+  freeTrialMonthsOffered?: number;
   eventsPublishedThisMonth: number;
   invoices: Invoice[];
 };
@@ -31,7 +35,9 @@ export function SubscriptionSummary({ overview, actions }: { overview: Subscript
   const subscription = overview.subscription;
   if (!subscription) return <p className="fine left">Aucun abonnement souscrit pour le moment.</p>;
   return <>
-    <p className="subscription-line">Formule <b>{subscription.plan.name}</b> · facturation {periodLabel(subscription.billingPeriod)} · {subscription.cancelAtPeriodEnd ? `résiliation effective le ${longDate(subscription.currentPeriodEnd)}` : subscription.status === "TRIALING" ? `essai gratuit jusqu’au ${longDate(subscription.currentPeriodEnd)}` : `prochaine échéance le ${longDate(subscription.currentPeriodEnd)}`}</p>
+    {subscription.freeTrial && subscription.status === "TRIALING"
+      ? <p className="subscription-line">Formule <b>{subscription.plan.name}</b> · essai gratuit sans carte bancaire jusqu’au {longDate(subscription.currentPeriodEnd)} · rien ne sera prélevé à la fin</p>
+      : <p className="subscription-line">Formule <b>{subscription.plan.name}</b> · facturation {periodLabel(subscription.billingPeriod)} · {subscription.cancelAtPeriodEnd ? `résiliation effective le ${longDate(subscription.currentPeriodEnd)}` : subscription.status === "TRIALING" ? `essai gratuit jusqu’au ${longDate(subscription.currentPeriodEnd)}` : `prochaine échéance le ${longDate(subscription.currentPeriodEnd)}`}</p>}
     <p className="subscription-line">Ce mois-ci : {overview.eventsPublishedThisMonth}{subscription.plan.monthlyEventQuota == null ? " soirée(s) publiée(s), sans limite" : ` / ${subscription.plan.monthlyEventQuota} soirées publiées`}</p>
     {subscription.pendingPlan && subscription.pendingChangeAt && <Notice kind="info"><span><CalendarClock size={16} aria-hidden="true" /> Passage en formule <b>{subscription.pendingPlan.name}</b> (facturation {periodLabel(subscription.pendingBillingPeriod ?? subscription.billingPeriod)}) le <b>{longDate(subscription.pendingChangeAt)}</b>.</span></Notice>}
     {subscription.status === "PAST_DUE" && <Notice kind="error">Le dernier prélèvement a échoué : moyen de paiement à mettre à jour.</Notice>}
@@ -64,6 +70,9 @@ export function RestaurantSubscriptionPanel({ onChanged }: { onChanged: () => vo
   const [overview, setOverview] = useState<SubscriptionOverview | null>(null);
   const subscription = overview?.subscription ?? null;
   const subscribed = !!subscription && subscription.status !== "CANCELLED";
+  // Essai gratuit en cours : le restaurateur peut souscrire une vraie formule à tout moment.
+  const onFreeTrial = subscribed && !!subscription?.freeTrial;
+  const trialMonths = overview?.freeTrialMonthsOffered ?? 0;
   const [period, setPeriod] = useState<BillingPeriod>("MONTHLY");
   // CGV partie B : acceptation exigée avant toute souscription ou tout changement de formule (paiement immédiat).
   const [acceptCgv, setAcceptCgv] = useState(false);
@@ -105,6 +114,11 @@ export function RestaurantSubscriptionPanel({ onChanged }: { onChanged: () => vo
     const { url } = await api<{ url: string }>("/restaurants/me/subscription/checkout", { method: "POST", body: JSON.stringify({ planId, billingPeriod: period, acceptCgv }) });
     window.location.href = url;
   });
+  const startFreeTrial = (plan: Plan) => run(`trial-${plan.id}`, async () => {
+    const started = await api<{ currentPeriodEnd: string }>("/restaurants/me/subscription/free-trial", { method: "POST", body: JSON.stringify({ planId: plan.id, acceptCgv }) });
+    setNotice({ kind: "success", text: `Essai gratuit démarré : formule ${plan.name} offerte jusqu’au ${longDate(started.currentPeriodEnd)}, sans carte bancaire. Rien ne sera prélevé à la fin.` });
+    refresh();
+  });
   const changePlan = (plan: Plan) => run(plan.id, async () => {
     const result = await api<{ direction: "UPGRADE" | "DOWNGRADE"; subscription: any }>("/restaurants/me/subscription/change-plan", { method: "POST", body: JSON.stringify({ planId: plan.id, billingPeriod: period, acceptCgv }) });
     setConfirming(null);
@@ -141,8 +155,9 @@ export function RestaurantSubscriptionPanel({ onChanged }: { onChanged: () => vo
 
     <div className="pricing-head">
       <div>
-        <h2>{subscribed ? "Changer de formule ou de périodicité" : "Choisissez votre formule"}</h2>
-        <p className="fine left">Prix hors taxes. {!subscription ? "Paiement par carte à la souscription, puis à chaque échéance." : "Formule supérieure ou passage à l’annuel : immédiat, au prorata. Formule inférieure ou passage au mensuel : à la fin de la période déjà payée."}</p>
+        <h2>{onFreeTrial ? "Continuer après l’essai" : subscribed ? "Changer de formule ou de périodicité" : "Choisissez votre formule"}</h2>
+        {trialMonths > 0 && <Notice kind="info"><span>Vous hésitez ? Essayez gratuitement pendant <b>{trialMonths} mois</b>, sans carte bancaire. À la fin de l’essai, rien n’est prélevé : vous choisissez une formule, ou l’essai s’arrête.</span></Notice>}
+        <p className="fine left">Prix hors taxes. {onFreeTrial ? "Vous pouvez souscrire dès maintenant ou attendre la fin de l’essai : paiement par carte à la souscription, puis à chaque échéance." : !subscription ? "Paiement par carte à la souscription, puis à chaque échéance." : "Formule supérieure ou passage à l’annuel : immédiat, au prorata. Formule inférieure ou passage au mensuel : à la fin de la période déjà payée."}</p>
         <label className="consent-check"><input type="checkbox" checked={acceptCgv} onChange={e => setAcceptCgv(e.target.checked)} /> <span>J’ai lu et j’accepte les <Link to="/legal/cgv" target="_blank">conditions générales de vente</Link> (partie B, abonnements restaurateurs).</span></label>
       </div>
       <div className="segmented" role="group" aria-label="Périodicité de facturation">
@@ -155,7 +170,7 @@ export function RestaurantSubscriptionPanel({ onChanged }: { onChanged: () => vo
       ? <div className="pricing-grid" aria-busy="true">{[0, 1].map(i => <div key={i} className="pricing-card skeleton skeleton-pricing" />)}</div>
       : <div className="pricing-grid">{plans.map(plan => {
         const price = priceFor(plan, period);
-        const isCurrent = subscribed && subscription!.plan.id === plan.id && subscription!.billingPeriod === period;
+        const isCurrent = subscribed && !onFreeTrial && subscription!.plan.id === plan.id && subscription!.billingPeriod === period;
         const isPending = subscribed && subscription!.pendingPlan?.id === plan.id && (subscription!.pendingBillingPeriod ?? subscription!.billingPeriod) === period;
         const featured = plan.highlightTier === "priority";
         const timing = subscribed ? subscriptionChangeTiming({ monthlyPriceCents: subscription!.plan.monthlyPriceCents, billingPeriod: subscription!.billingPeriod }, { monthlyPriceCents: plan.monthlyPriceCents, billingPeriod: period }) : null;
@@ -164,7 +179,7 @@ export function RestaurantSubscriptionPanel({ onChanged }: { onChanged: () => vo
         return <article key={plan.id} className={`pricing-card${featured ? " featured" : ""}${isCurrent ? " current" : ""}`} aria-labelledby={`plan-${plan.id}`}>
           <div className="pricing-card-top">
             <h3 id={`plan-${plan.id}`}>{plan.name}</h3>
-            {isCurrent ? <span className="pricing-tag">Offre actuelle</span> : isPending && subscription!.pendingChangeAt ? <span className="pricing-tag muted">Dès le {longDate(subscription!.pendingChangeAt)}</span> : null}
+            {onFreeTrial && subscription!.plan.id === plan.id ? <span className="pricing-tag">Essai en cours</span> : isCurrent ? <span className="pricing-tag">Offre actuelle</span> : isPending && subscription!.pendingChangeAt ? <span className="pricing-tag muted">Dès le {longDate(subscription!.pendingChangeAt)}</span> : null}
           </div>
           <p className="pricing-price">{price == null ? <span className="pricing-unavailable">Non disponible en annuel</span> : <><strong>{money(price).replace(",00", "")}</strong><span>{period === "ANNUAL" ? "HT / an" : "HT / mois"}</span></>}</p>
           {period === "ANNUAL" && price != null && <p className="pricing-note">soit {money(Math.round(price / 12))} HT par mois</p>}
@@ -181,9 +196,12 @@ export function RestaurantSubscriptionPanel({ onChanged }: { onChanged: () => vo
                       <div className="decision-buttons"><button type="button" className={`button small${featured ? " accent" : ""}`} disabled={!!busy || !acceptCgv} onClick={() => changePlan(plan)}>{busy === plan.id ? "Confirmation…" : "Confirmer"}</button><button type="button" className="button small secondary" disabled={!!busy} onClick={() => setConfirming(null)}>Annuler</button></div>
                     </div>
                     : <button type="button" className={`button full${featured ? " accent" : " secondary"}`} disabled={!!busy || price == null} onClick={() => setConfirming(plan.id)}>{changeLabel}</button>
-                  : subscribed
+                  : subscribed && !onFreeTrial
                     ? <p className="fine">Abonnement géré par l’équipe Nūr Meet : contactez-nous pour le modifier.</p>
-                    : <button type="button" className={`button full${featured ? " accent" : ""}`} disabled={!!busy || price == null || !acceptCgv} onClick={() => checkout(plan.id)}>{busy === plan.id ? "Redirection…" : "Choisir cette formule"}</button>}
+                    : <>
+                      <button type="button" className={`button full${featured ? " accent" : ""}`} disabled={!!busy || price == null || !acceptCgv} onClick={() => checkout(plan.id)}>{busy === plan.id ? "Redirection…" : "Choisir cette formule"}</button>
+                      {trialMonths > 0 && <button type="button" className="button full secondary" disabled={!!busy || !acceptCgv} onClick={() => startFreeTrial(plan)}>{busy === `trial-${plan.id}` ? "Démarrage…" : `Essayer ${trialMonths} mois gratuitement, sans carte`}</button>}
+                    </>}
           </div>
         </article>;
       })}</div>}

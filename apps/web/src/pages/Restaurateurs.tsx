@@ -39,7 +39,9 @@ export function Restaurateurs() {
   const {user}=useAuth();
   const [plans,setPlans]=useState<Plan[]|null>(null);
   const [period,setPeriod]=useState<BillingPeriod>("MONTHLY");
-  useEffect(()=>{api<Plan[]>("/plans").then(setPlans).catch(()=>setPlans([]))},[]);
+  // Essai gratuit sans carte bancaire (réglage côté serveur) : annoncé seulement s'il est proposé.
+  const [trialMonths,setTrialMonths]=useState(0);
+  useEffect(()=>{api<Plan[]>("/plans").then(setPlans).catch(()=>setPlans([]));api<{months:number}>("/plans/free-trial").then(t=>setTrialMonths(t.months)).catch(()=>setTrialMonths(0))},[]);
   useSeo({...PAGE_META.restaurateurs,path:"/restaurateurs",jsonLd:[breadcrumbJsonLd([{name:"Accueil",path:"/"},{name:"Restaurateurs",path:"/restaurateurs"}]),faqPageJsonLd(FAQ)]});
   // Sans compte : création du compte (le choix « Je suis restaurateur » vient juste après). Déjà
   // connecté : directement l'espace restaurateur, qui affiche la candidature ou l'établissement.
@@ -62,14 +64,14 @@ export function Restaurateurs() {
 
     <section className="section how" aria-labelledby="demarrer">
       <div className="section-title"><h2 id="demarrer">Comment démarrer</h2><p>Cinq étapes, de l’inscription à votre première soirée.</p></div>
-      <ol className="steps">{STEPS.map(s=><li key={s.title}><s.icon size={22} aria-hidden="true"/><b>{s.title}</b><span>{s.text}</span></li>)}</ol>
+      <ol className="steps">{STEPS.map(s=><li key={s.title}><s.icon size={22} aria-hidden="true"/><b>{s.title}</b><span>{trialMonths>0&&s.icon===BadgeCheck?`${trialMonths} mois d’essai gratuit sans carte bancaire, puis sans engagement de durée.`:s.text}</span></li>)}</ol>
     </section>
 
     <section className="section" id="tarifs" aria-labelledby="tarifs-title">
       <div className="pricing-head">
         <div>
           <h2 id="tarifs-title" className="pro-pricing-title">Nos formules</h2>
-          <p className="fine left">Prix hors taxes. Sans engagement : résiliable à tout moment depuis votre espace.</p>
+          <p className="fine left">{trialMonths>0&&<><b>{trialMonths} mois d’essai gratuit, sans carte bancaire.</b> </>}Prix hors taxes. Sans engagement : résiliable à tout moment depuis votre espace.</p>
         </div>
         <div className="segmented" role="group" aria-label="Périodicité de facturation">
           <button type="button" aria-pressed={period==="MONTHLY"} className={period==="MONTHLY"?"active":undefined} onClick={()=>setPeriod("MONTHLY")}>Mensuel</button>

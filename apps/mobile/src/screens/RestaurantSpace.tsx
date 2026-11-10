@@ -270,7 +270,7 @@ function Subscription({ restaurant, onChanged: onRestaurantChanged }: { restaura
     <View style={s.row}><Chip label="Mensuel" active={period === "MONTHLY"} onPress={() => { setPeriod("MONTHLY"); setConfirming(null); }} /><Chip label="Annuel · 2 mois offerts" active={period === "ANNUAL"} onPress={() => { setPeriod("ANNUAL"); setConfirming(null); }} /></View>
     {plans === null ? [0, 1].map(i => <Skeleton key={i} height={380} />) : plans.map(plan => {
       const price = priceFor(plan, period);
-      const isCurrent = subscribed && subscription.plan.id === plan.id && subscription.billingPeriod === period;
+      const isCurrent = subscribed && !subscription.freeTrial && subscription.plan.id === plan.id && subscription.billingPeriod === period;
       const isPending = subscribed && subscription.pendingPlan?.id === plan.id && (subscription.pendingBillingPeriod ?? subscription.billingPeriod) === period;
       const featured = plan.highlightTier === "priority";
       const timing = subscribed ? subscriptionChangeTiming({ monthlyPriceCents: subscription.plan.monthlyPriceCents, billingPeriod: subscription.billingPeriod }, { monthlyPriceCents: plan.monthlyPriceCents, billingPeriod: period }) : null;
@@ -299,7 +299,7 @@ function Subscription({ restaurant, onChanged: onRestaurantChanged }: { restaura
                   <View style={s.row}><Button small variant={featured ? "accent" : "primary"} title="Confirmer" busy={busy === plan.id} disabled={!acceptCgv} onPress={() => changePlan(plan)} /><Button small variant="secondary" title="Annuler" disabled={!!busy} onPress={() => setConfirming(null)} /></View>
                 </View>
                 : <Button variant={featured ? "accent" : "secondary"} title={changeLabel} disabled={!!busy || price == null} onPress={() => setConfirming(plan.id)} />
-              : subscribed
+              : subscribed && !subscription.freeTrial
                 ? <Text style={[s.meta, { color: ink2 }]}>Abonnement géré par l’équipe Nūr Meet : contactez-nous pour le modifier.</Text>
                 : <Button variant={featured ? "accent" : "primary"} title="Choisir cette formule" busy={busy === plan.id} disabled={!!busy || price == null || !acceptCgv} onPress={() => checkout(plan.id)} />}
       </View>;

@@ -6,6 +6,7 @@ import { notify } from "./notify.js";
 import { BillingPeriod, subscriptionChangeTiming } from "@nour/shared";
 import { mapStripeSubscriptionStatus } from "./payments.js";
 import { currentYearMonth } from "../domain.js";
+import { getSetting } from "../settings.js";
 
 // Changement de formule restaurateur (corrections web 2026-09-24, §1.4) : règle métier unique,
 // jamais dupliquée dans l'interface.
@@ -177,7 +178,9 @@ export const recordCheckoutSession = async (session: Stripe.Checkout.Session) =>
   const data = {
     planId, billingPeriod, status: mapStripeSubscriptionStatus(stripeSub.status), stripeCustomerId: customerId, stripeSubscriptionId,
     currentPeriodStart: new Date(item.current_period_start * 1000), currentPeriodEnd: new Date(item.current_period_end * 1000),
-    cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false, cancelledAt: null, pendingPlanId: null, pendingBillingPeriod: null, pendingChangeAt: null, stripeScheduleId: null
+    cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false, cancelledAt: null, pendingPlanId: null, pendingBillingPeriod: null, pendingChangeAt: null, stripeScheduleId: null,
+    // Une vraie souscription remplace l'essai gratuit sans carte : Stripe pilote désormais l'échéance.
+    freeTrial: false
   };
   // Écriture conditionnelle : si le webhook et la resynchronisation arrivent en même temps, un seul
   // des deux enregistre l'abonnement et envoie la notification.
@@ -217,11 +220,47 @@ export const subscriptionOverview = async (restaurantId: string) => {
       currentPeriodStart: subscription.currentPeriodStart, currentPeriodEnd: subscription.currentPeriodEnd,
       cancelAtPeriodEnd: subscription.cancelAtPeriodEnd, cancelledAt: subscription.cancelledAt,
       pendingPlan, pendingBillingPeriod: subscription.pendingBillingPeriod, pendingChangeAt: subscription.pendingChangeAt,
-      managedByStripe: !!subscription.stripeSubscriptionId, hasBillingAccount: !!subscription.stripeCustomerId, createdAt: subscription.createdAt
+      managedByStripe: !!subscription.stripeSubscriptionId, hasBillingAccount: !!subscription.stripeCustomerId, createdAt: subscription.createdAt,
+      freeTrial: subscription.freeTrial
     } : null,
+    // Essai gratuit sans carte : proposé une seule fois, tant qu'aucun abonnement n'a jamais existé.
+    freeTrialMonthsOffered: subscription ? 0 : getSetting("RESTAURANT_FREE_TRIAL_MONTHS"),
     eventsPublishedThisMonth: usage?.eventsPublished ?? 0,
     invoices
   };
+};
+
+// Essai gratuit sans carte bancaire (décision du 2026-11-10, pour les restaurateurs qui hésitent à
+// s'inscrire) : N mois (réglage RESTAURANT_FREE_TRIAL_MONTHS) sur la formule choisie, sans objet
+// Stripe ni moyen de paiement. Une seule fois par établissement : la ligne d'abonnement est unique
+// par établissement et n'est jamais supprimée, donc un essai terminé ou un abonnement résilié
+// ferment définitivement l'offre. À l'échéance, jobs.ts arrête l'essai (jamais de passage payant
+// automatique). L'essai ne valide pas l'établissement : la demande reste examinée par l'équipe.
+export const addMonths = (from: Date, months: number) => { const d = new Date(from); d.setMonth(d.getMonth() + months); return d; };
+export const startFreeTrial = async (restaurantId: string, plan: Pick<Plan, "id" | "active">) => {
+  const months = getSetting("RESTAURANT_FREE_TRIAL_MONTHS");
+  if (months <= 0) throw httpError(409, "L’essai gratuit n’est pas proposé pour le moment.");
+  if (!plan.active) throw httpError(409, "Cette formule n’est plus proposée.");
+  const now = new Date();
+  try {
+    return await prisma.restaurantSubscription.create({
+      data: { restaurantId, planId: plan.id, status: SubscriptionStatus.TRIALING, freeTrial: true, billingPeriod: "MONTHLY", currentPeriodStart: now, currentPeriodEnd: addMonths(now, months) },
+      include: { plan: true }
+    });
+  } catch (err) {
+    // Contrainte d'unicité sur restaurantId : un abonnement (ou un essai passé) existe déjà.
+    if ((err as { code?: string }).code === "P2002") throw httpError(409, "L’essai gratuit n’est proposé qu’une fois, aux établissements qui n’ont jamais eu d’abonnement.");
+    throw err;
+  }
+};
+// L'essai ne commence vraiment qu'une fois l'établissement validé : s'il a été demandé pendant
+// l'examen de la demande, sa durée repart de la date d'approbation (aucun jour perdu à attendre).
+export const restartFreeTrialOnApproval = async (restaurantId: string) => {
+  const now = new Date();
+  await prisma.restaurantSubscription.updateMany({
+    where: { restaurantId, freeTrial: true, status: SubscriptionStatus.TRIALING },
+    data: { currentPeriodStart: now, currentPeriodEnd: addMonths(now, Math.max(1, getSetting("RESTAURANT_FREE_TRIAL_MONTHS"))), expiryReminderSentAt: null }
+  });
 };
 
 // Premier paiement réellement encaissé par Stripe (webhook ou resynchronisation serveur, jamais un

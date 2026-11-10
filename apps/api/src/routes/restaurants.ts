@@ -12,8 +12,9 @@ import { auth, currentId, roles } from "../services/auth.js";
 import { notify } from "../services/notify.js";
 import { sendWelcomeEmailOnce } from "../services/welcome.js";
 import { searchRestaurants } from "../services/restaurant-search.js";
-import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, subscriptionOverview, syncSubscriptionFromStripe } from "../services/subscriptions.js";
+import { cancelPendingPlanChange, changeSubscriptionPlan, recordCheckoutSession, restartFreeTrialOnApproval, startFreeTrial, subscriptionOverview, syncSubscriptionFromStripe } from "../services/subscriptions.js";
 import { eventCreateData, eventCreateSchema } from "../services/event-drafts.js";
+import { getSetting } from "../settings.js";
 
 // Jamais les notes internes de l'administration, le taux de commission, l'auteur de la décision ni le
 // marquage démo dans une réponse destinée au restaurateur : informations internes de Nūr Meet
@@ -110,6 +111,8 @@ app.post("/admin/restaurants/:id/decision", { preHandler: roles(UserRole.ADMIN) 
       prisma.restaurant.update({ where: { id }, data: { status: "APPROVED", verifiedAt: new Date(), reviewedBy: adminId, rejectionReason: null } }),
       prisma.user.update({ where: { id: restaurant.ownerId }, data: { role: restaurant.owner.role === UserRole.PARTICIPANT ? UserRole.ORGANIZER : restaurant.owner.role } })
     ]);
+    // Essai gratuit demandé pendant l'examen : il démarre maintenant, à la validation.
+    await restartFreeTrialOnApproval(id);
     await notify(restaurant.ownerId, "Compte restaurateur approuvé", "Votre établissement est validé. Choisissez votre formule d’abonnement pour commencer à publier vos événements.", "/restaurant?tab=subscription");
     await audit(adminId, "APPROVE_RESTAURANT", "Restaurant", id);
     return updated;
@@ -260,6 +263,27 @@ app.post("/restaurants/me/subscription/checkout", { preHandler: auth }, async (r
   await audit(currentId(request), "SUBSCRIPTION_CHECKOUT_CREATED", "Restaurant", restaurant.id, { planId, billingPeriod });
   return { url: session.url };
 });
+// Essai gratuit sans carte bancaire (décision du 2026-11-10) : une seule fois par établissement,
+// sur la formule choisie, sans passer par Stripe (règle dans services/subscriptions.ts). Mêmes
+// garde-fous que la souscription : jamais pour un établissement refusé ou suspendu, CGV partie B
+// acceptées (l'essai permet de publier, donc engage les mêmes obligations). L'essai ne valide pas
+// l'établissement : l'équipe, prévenue, examine toujours la demande.
+app.post("/restaurants/me/subscription/free-trial", { preHandler: auth, config: { rateLimit: { max: 10, timeWindow: "10 minutes" } } }, async (request, reply) => {
+  const restaurant = await prisma.restaurant.findUniqueOrThrow({ where: { ownerId: currentId(request) } });
+  const { planId, acceptCgv } = z.object({ planId: z.string(), acceptCgv: z.boolean().optional() }).parse(request.body);
+  if (restaurant.status === "REJECTED" || restaurant.status === "SUSPENDED") return reply.code(409).send({ error: "Votre établissement n’est pas en mesure de démarrer un essai : contactez l’équipe Nūr Meet." });
+  const cgvContext = `subscription:${restaurant.id}`;
+  if (!acceptCgv && !(await hasAcceptedCurrent(restaurant.ownerId, LegalDocument.CGV, cgvContext))) return reply.code(422).send({ error: "Vous devez accepter les conditions générales de vente avant de démarrer l’essai.", cgvRequired: true });
+  const plan = await prisma.plan.findUniqueOrThrow({ where: { id: planId } });
+  const subscription = await startFreeTrial(restaurant.id, plan);
+  if (acceptCgv) await recordAcceptance(request, restaurant.ownerId, LegalDocument.CGV, cgvContext);
+  const until = subscription.currentPeriodEnd.toLocaleDateString("fr-FR");
+  await notify(restaurant.ownerId, "Essai gratuit démarré", `Formule ${subscription.plan.name} offerte jusqu’au ${until}, sans carte bancaire. Rien ne sera prélevé à la fin de l’essai.`, "/restaurant?tab=subscription");
+  const admins = await prisma.user.findMany({ where: { role: UserRole.ADMIN } });
+  await Promise.all(admins.map(a => notify(a.id, "Essai gratuit restaurateur démarré", `${restaurant.name} essaie la formule ${subscription.plan.name} jusqu’au ${until}${restaurant.status === "PENDING" ? " (demande encore à examiner)" : ""}.`, "/admin/restaurants")));
+  await audit(currentId(request), "FREE_TRIAL_STARTED", "RestaurantSubscription", subscription.id, { planId, until: subscription.currentPeriodEnd.toISOString() });
+  return reply.code(201).send(subscription);
+});
 // Corrections web 2026-09-24 (§1.4) : changement de formule d'un abonnement déjà souscrit — immédiat
 // avec prorata vers une formule supérieure, à l'échéance vers une formule inférieure (règle dans
 // services/subscriptions.ts). La réponse reflète toujours l'état relu chez Stripe.
@@ -313,6 +337,8 @@ app.post("/restaurants/me/subscription/sync", { preHandler: auth, config: { rate
 // Formules actives lisibles sans compte : la page publique /restaurateurs affiche les vrais prix avant
 // toute inscription (champs commerciaux uniquement, jamais les identifiants de prix Stripe).
 app.get("/plans", async () => prisma.plan.findMany({ where: { active: true }, orderBy: { monthlyPriceCents: "asc" }, select: { id: true, name: true, monthlyPriceCents: true, annualPriceCents: true, monthlyEventQuota: true, highlightTier: true } }));
+// Durée de l'essai gratuit sans carte, lisible sans compte pour l'annoncer sur /restaurateurs (0 = pas d'essai).
+app.get("/plans/free-trial", async () => ({ months: getSetting("RESTAURANT_FREE_TRIAL_MONTHS") }));
 app.get("/admin/plans", { preHandler: roles(UserRole.ADMIN) }, async () => prisma.plan.findMany({ orderBy: { createdAt: "asc" } }));
 app.post("/admin/plans", { preHandler: roles(UserRole.ADMIN) }, async (request, reply) => {
   const input = z.object({ name: z.string().min(2).max(80), monthlyPriceCents: z.number().int().min(0), annualPriceCents: z.number().int().min(0).nullable().optional(), monthlyEventQuota: z.number().int().min(1).nullable(), highlightTier: z.enum(["simple", "priority"]).nullable().optional(), active: z.boolean().default(true) }).parse(request.body);
